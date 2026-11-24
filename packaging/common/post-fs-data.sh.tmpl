@@ -1,0 +1,83 @@
+#!/system/bin/sh
+
+MODDIR=${0%/*}
+GUARD_HOME=/data/adb/sandbox_guard
+MAIN_BASE=/data/adb/sandbox_proxy
+export PATH={{ROOT_PATH_PREFIX}}:/data/adb/ksu/bin:/data/adb/ap/bin:/data/adb/magisk/bin:/system/bin:/system/xbin:$PATH
+
+[ ! -e "$MODDIR/disable" ] && [ ! -e "$MODDIR/remove" ] || exit 0
+umask 077
+
+mkdir -p "$GUARD_HOME" "$GUARD_HOME/staging"
+chown 0:0 "$GUARD_HOME" "$GUARD_HOME/staging"
+chmod 0700 "$GUARD_HOME" "$GUARD_HOME/staging"
+
+# Bootloop kill-switch for SystemServer/Phone Zygisk stealth hook:
+# Incremented pre-Zygote and reset to 0 by service.sh after sys.boot_completed=1.
+BOOT_TRIES_FILE="$GUARD_HOME/stealth_boot_tries"
+tries=0
+if [ -f "$BOOT_TRIES_FILE" ]; then
+    read -r tries < "$BOOT_TRIES_FILE" 2>/dev/null || tries=0
+fi
+case "$tries" in ''|*[!0-9]*) tries=0 ;; esac
+if [ "$tries" -ge 2 ]; then
+    : > "$MODDIR/zygisk_disabled"
+    chmod 0644 "$MODDIR/zygisk_disabled" 2>/dev/null || true
+    if [ -f "$GUARD_HOME/stealth.json" ]; then
+        tmp_stealth="$GUARD_HOME/stealth.json.killswitch.$$"
+        if sed 's/"enabled"[[:space:]]*:[[:space:]]*true/"enabled": false/g' "$GUARD_HOME/stealth.json" > "$tmp_stealth" 2>/dev/null && [ -s "$tmp_stealth" ]; then
+            chown 0:0 "$tmp_stealth" 2>/dev/null || true
+            chmod 0600 "$tmp_stealth" 2>/dev/null || true
+            mv -f "$tmp_stealth" "$GUARD_HOME/stealth.json" 2>/dev/null || rm -f "$tmp_stealth"
+        else
+            rm -f "$tmp_stealth"
+        fi
+    fi
+    rm -f /dev/sandbox_cfg/stealth.json
+else
+    echo "$((tries + 1))" > "$BOOT_TRIES_FILE"
+    chmod 0600 "$BOOT_TRIES_FILE" 2>/dev/null || true
+fi
+
+# Hide unlocked bootloader properties natively (skipped if stealth kill-switch triggered).
+if [ ! -e "$MODDIR/zygisk_disabled" ]; then
+    RESETPROP=""
+    for cand in {{RESETPROP_CANDIDATES}} "$(command -v resetprop 2>/dev/null || true)"; do
+        if [ -n "$cand" ] && [ -x "$cand" ]; then
+            RESETPROP=$cand
+            break
+        fi
+    done
+    if [ -n "$RESETPROP" ] && [ -x "$RESETPROP" ]; then
+        "$RESETPROP" -n ro.boot.verifiedbootstate green 2>/dev/null || true
+        "$RESETPROP" -n ro.boot.flash.locked 1 2>/dev/null || true
+        "$RESETPROP" -n ro.boot.vbmeta.device_state locked 2>/dev/null || true
+        "$RESETPROP" -n ro.boot.warranty_bit 0 2>/dev/null || true
+    fi
+fi
+
+# Purge stale external proxy sandbox ack from prior boot before Zygote starts.
+rm -f "$MAIN_BASE/sandbox_ack.v1.json"
+
+# Pre-create anti-squat UDS and config directories before Zygote.
+mkdir -p /dev/socket/sandbox_ctrl /dev/socket/sandbox_priv /dev/sandbox_cfg
+chown 0:0 /dev/socket/sandbox_ctrl /dev/socket/sandbox_priv /dev/sandbox_cfg
+chmod 0711 /dev/socket/sandbox_ctrl
+chmod 0700 /dev/socket/sandbox_priv
+chmod 0711 /dev/sandbox_cfg
+chcon u:object_r:sandbox_ctrl_sock_dir:s0 /dev/socket/sandbox_ctrl 2>/dev/null || true
+chcon u:object_r:sandbox_priv_dir:s0 /dev/socket/sandbox_priv 2>/dev/null || true
+chcon u:object_r:sandbox_cfg_dir:s0 /dev/sandbox_cfg 2>/dev/null || true
+rm -f /dev/socket/sandbox_ctrl/ctrl.sock /dev/socket/sandbox_priv/guard.sock /dev/sandbox_cfg/stealth.json
+
+if [ -f "$GUARD_HOME/sandbox_broker" ]; then
+    chown 0:0 "$GUARD_HOME/sandbox_broker"
+    chmod 0700 "$GUARD_HOME/sandbox_broker"
+    chcon u:object_r:sandbox_broker_exec:s0 "$GUARD_HOME/sandbox_broker" 2>/dev/null || true
+fi
+
+if [ -f "$GUARD_HOME/sandbox_guard" ]; then
+    chown 0:0 "$GUARD_HOME/sandbox_guard"
+    chmod 0700 "$GUARD_HOME/sandbox_guard"
+    "$GUARD_HOME/sandbox_guard" ctl boot > "$GUARD_HOME/boot.status" 2>&1 || true
+fi

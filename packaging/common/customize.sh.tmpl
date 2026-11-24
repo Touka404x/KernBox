@@ -1,0 +1,88 @@
+#!/system/bin/sh
+
+SKIPUNZIP=0
+
+GUARD_HOME=/data/adb/sandbox_guard
+VARIANT_OEM="{{OEM}}"
+VARIANT_KERNEL="{{KERNEL}}"
+VARIANT_ROOT="{{ROOT}}"
+VARIANT_VER="{{VERSION}}"
+
+if [ "$ARCH" != "arm64" ]; then
+    abort "! Only arm64-v8a is supported (got ARCH=$ARCH)"
+fi
+
+ui_print "- Installing Android Sandbox Guard v${VARIANT_VER} (${VARIANT_OEM}/${VARIANT_KERNEL}/${VARIANT_ROOT})"
+
+KVER=$(uname -r 2>/dev/null || echo "")
+if [ "$VARIANT_KERNEL" = "k510" ] && [ -n "$KVER" ]; then
+    kmaj=${KVER%%.*}
+    krest=${KVER#*.}
+    kmin=${krest%%.*}
+    case "$kmaj:$kmin" in
+        [0-4]:*|5:[0-9])
+            ui_print "! Warning: kernel $KVER appears older than 5.10; k419 variant is recommended if openat2/cgroup.freeze is unavailable"
+            ;;
+    esac
+fi
+
+mkdir -p "$GUARD_HOME" "$GUARD_HOME/staging"
+chown 0:0 "$GUARD_HOME" "$GUARD_HOME/staging"
+chmod 0700 "$GUARD_HOME" "$GUARD_HOME/staging"
+
+install_exec_atomic() {
+    src=$1
+    dst=$2
+    se=$3
+    [ -f "$src" ] || abort "! Missing binary asset: $src"
+    tmp="${dst}.new.$$"
+    cp "$src" "$tmp" || abort "! Failed to copy $src"
+    chown 0:0 "$tmp"
+    chmod 0700 "$tmp"
+    [ -n "$se" ] && chcon "$se" "$tmp" 2>/dev/null || true
+    mv -f "$tmp" "$dst" || abort "! Failed to install $dst"
+}
+
+install_exec_atomic "$MODPATH/bin/sandbox_guard" "$GUARD_HOME/sandbox_guard" ""
+install_exec_atomic "$MODPATH/bin/sandbox_broker" "$GUARD_HOME/sandbox_broker" "u:object_r:sandbox_broker_exec:s0"
+
+seed_default_json() {
+    src=$1
+    dst=$2
+    [ -f "$src" ] || return 0
+    if [ ! -f "$dst" ]; then
+        tmp="${dst}.new.$$"
+        cp "$src" "$tmp" || abort "! Failed to copy $src"
+        chown 0:0 "$tmp"
+        chmod 0600 "$tmp"
+        mv -f "$tmp" "$dst" || abort "! Failed to install $dst"
+        ui_print "- Seeded default $dst"
+    else
+        ui_print "- Preserved existing $dst"
+    fi
+}
+
+seed_default_json "$MODPATH/defaults/stealth.json" "$GUARD_HOME/stealth.json"
+seed_default_json "$MODPATH/defaults/perf.json" "$GUARD_HOME/perf.json"
+
+if [ -f "$MODPATH/variant.json" ]; then
+    cp "$MODPATH/variant.json" "$GUARD_HOME/variant.json" 2>/dev/null || true
+    chown 0:0 "$GUARD_HOME/variant.json" 2>/dev/null || true
+    chmod 0644 "$GUARD_HOME/variant.json" 2>/dev/null || true
+fi
+
+rm -f "$MODPATH/zygisk_disabled"
+echo 0 > "$GUARD_HOME/stealth_boot_tries"
+chmod 0600 "$GUARD_HOME/stealth_boot_tries"
+
+set_perm_recursive "$MODPATH" 0 0 0755 0644
+set_perm "$MODPATH/post-fs-data.sh" 0 0 0755
+set_perm "$MODPATH/service.sh" 0 0 0755
+[ -f "$MODPATH/zygisk/arm64-v8a.so" ] && set_perm "$MODPATH/zygisk/arm64-v8a.so" 0 0 0644
+
+if [ "$VARIANT_ROOT" = "magisk" ]; then
+    ui_print "- Tip: Ensure Zygisk is enabled in Magisk Settings before rebooting."
+else
+    ui_print "- Tip: Ensure ZygiskNext or ReZygisk is active alongside $VARIANT_ROOT for SystemServer/Phone stealth."
+fi
+ui_print "- Ready. Reboot to activate (${VARIANT_OEM}/${VARIANT_KERNEL}/${VARIANT_ROOT}, bootloop kill-switch armed)."

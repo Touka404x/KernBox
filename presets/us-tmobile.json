@@ -1,0 +1,18 @@
+{
+  "name": "us-tmobile",
+  "timezone": "America/Los_Angeles",
+  "locale": "en-US",
+  "sim_operator": "310260",
+  "sim_operator_name": "T-Mobile",
+  "sim_country_iso": "us",
+  "network_operator": "310260",
+  "network_operator_name": "T-Mobile",
+  "network_country_iso": "us",
+  "spoof_carrier": true,
+  "spoof_timezone": true,
+  "spoof_locale": true,
+  "spoof_device_region": true,
+  "spoof_bluetooth": true,
+  "device_region": "US",
+  "boot_hwc": "US"
+}

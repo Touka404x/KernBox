@@ -1,0 +1,57 @@
+type sandbox_ctrl_sock_dir file_type
+type sandbox_ctrl_sock file_type
+typeattribute sandbox_ctrl_sock mlstrustedobject
+type sandbox_priv_dir file_type
+type sandbox_priv_file file_type
+type sandbox_priv_sock file_type
+type sandbox_cfg_dir file_type
+typeattribute sandbox_cfg_dir mlstrustedobject
+type sandbox_cfg_file file_type
+typeattribute sandbox_cfg_file mlstrustedobject
+type sandbox_broker domain
+typeattribute sandbox_broker mlstrustedsubject
+type sandbox_broker_exec file_type
+typeattribute sandbox_broker_exec exec_type
+allow magisk sandbox_broker_exec file { read getattr map execute open }
+allow magisk sandbox_broker process transition
+allow sandbox_broker sandbox_broker_exec file { read getattr map execute open entrypoint }
+type_transition magisk sandbox_broker_exec process sandbox_broker
+allow sandbox_broker magisk fd use
+allow sandbox_broker sandbox_broker fd use
+allow sandbox_broker sandbox_broker fifo_file { read write getattr ioctl }
+allow sandbox_broker sandbox_broker dir { search getattr read open }
+allow sandbox_broker sandbox_broker file { read write open getattr }
+allow sandbox_broker sandbox_broker lnk_file { read getattr }
+allow sandbox_broker sandbox_broker process { fork sigchld getattr getsched setsched signal sigkill }
+allow sandbox_broker sandbox_broker unix_stream_socket { create bind listen accept connect read write getattr setattr getopt setopt shutdown }
+allow sandbox_broker device dir { search getattr }
+allow sandbox_broker socket_device dir { search getattr }
+allow sandbox_broker proc dir { search getattr }
+allow sandbox_broker proc lnk_file { read getattr }
+allow sandbox_broker proc_net dir { search getattr }
+allow sandbox_broker proc_net file { read open getattr }
+allow sandbox_broker proc_overcommit_memory file { read open getattr }
+allow sandbox_broker sysfs dir { search getattr }
+allow sandbox_broker sysfs file { read open getattr }
+allow sandbox_broker sysfs_devices_system_cpu dir { search getattr }
+allow sandbox_broker sysfs_devices_system_cpu file { read open getattr }
+allow sandbox_broker sysfs_transparent_hugepage dir { search getattr }
+allow sandbox_broker sysfs_transparent_hugepage file { read open getattr }
+allow sandbox_broker null_device chr_file { read write open getattr }
+allow sandbox_broker zero_device chr_file { read write open getattr }
+allow sandbox_broker random_device chr_file { read open getattr }
+allow untrusted_app_all sandbox_ctrl_sock_dir dir { search getattr }
+allow untrusted_app_all sandbox_ctrl_sock sock_file { write getattr }
+allow untrusted_app_all sandbox_broker unix_stream_socket { connectto read write getattr getopt setopt shutdown }
+allow untrusted_app_all sandbox_cfg_dir dir { search getattr }
+allow untrusted_app_all sandbox_cfg_file file { read open getattr }
+allow sandbox_broker sandbox_ctrl_sock_dir dir { search add_name remove_name write getattr }
+allow sandbox_broker sandbox_ctrl_sock sock_file { create setattr unlink getattr }
+allow sandbox_broker sandbox_priv_dir dir { search getattr }
+allow sandbox_broker sandbox_priv_file file { read open getattr }
+allow sandbox_broker sandbox_priv_sock sock_file { write getattr }
+allow sandbox_broker magisk unix_stream_socket { connectto read write getattr getopt setopt shutdown }
+type_transition sandbox_broker sandbox_ctrl_sock_dir sock_file sandbox_ctrl_sock
+type_transition magisk sandbox_priv_dir file sandbox_priv_file
+type_transition magisk sandbox_priv_dir sock_file sandbox_priv_sock
+type_transition magisk sandbox_cfg_dir file sandbox_cfg_file

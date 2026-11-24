@@ -1,0 +1,18 @@
+{
+  "name": "de-telekom",
+  "timezone": "Europe/Berlin",
+  "locale": "de-DE",
+  "sim_operator": "26201",
+  "sim_operator_name": "Telekom.de",
+  "sim_country_iso": "de",
+  "network_operator": "26201",
+  "network_operator_name": "Telekom.de",
+  "network_country_iso": "de",
+  "spoof_carrier": true,
+  "spoof_timezone": true,
+  "spoof_locale": true,
+  "spoof_device_region": true,
+  "spoof_bluetooth": true,
+  "device_region": "DE",
+  "boot_hwc": "DE"
+}

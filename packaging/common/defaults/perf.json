@@ -1,0 +1,14 @@
+{
+  "pause_mode": "deep",
+  "auto_pause_idle_minutes": 15,
+  "hot_freeze_minutes": 30,
+  "auto_prune_bloat_on_start": true,
+  "kernel_reject_quic_udp443": true,
+  "flush_sandbox_conns_on_route_change": true,
+  "preserve_user_locales": true,
+  "skip_appops_for_frozen": true,
+  "sync_target_only": true,
+  "launch_boost_ms": 1500,
+  "oom_score_adj": -900,
+  "sandbox_inbound_name": "sandbox-tproxy"
+}

@@ -1,0 +1,18 @@
+{
+  "name": "jp-docomo",
+  "timezone": "Asia/Tokyo",
+  "locale": "ja-JP",
+  "sim_operator": "44010",
+  "sim_operator_name": "NTT DOCOMO",
+  "sim_country_iso": "jp",
+  "network_operator": "44010",
+  "network_operator_name": "NTT DOCOMO",
+  "network_country_iso": "jp",
+  "spoof_carrier": true,
+  "spoof_timezone": true,
+  "spoof_locale": true,
+  "spoof_device_region": true,
+  "spoof_bluetooth": true,
+  "device_region": "JP",
+  "boot_hwc": "JP"
+}

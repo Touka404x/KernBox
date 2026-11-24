@@ -1,0 +1,18 @@
+{
+  "name": "neutral",
+  "timezone": "UTC",
+  "locale": "en-US",
+  "sim_operator": "",
+  "sim_operator_name": "",
+  "sim_country_iso": "",
+  "network_operator": "",
+  "network_operator_name": "",
+  "network_country_iso": "",
+  "spoof_carrier": false,
+  "spoof_timezone": false,
+  "spoof_locale": false,
+  "spoof_device_region": false,
+  "spoof_bluetooth": false,
+  "device_region": "",
+  "boot_hwc": ""
+}

@@ -1,0 +1,350 @@
+#!/system/bin/sh
+
+MODDIR=${0%/*}
+[ "$MODDIR" = "$0" ] && MODDIR=.
+GUARD_HOME=/data/adb/sandbox_guard
+GUARD_BIN="$GUARD_HOME/sandbox_guard"
+BROKER_BIN="$GUARD_HOME/sandbox_broker"
+export PATH={{ROOT_PATH_PREFIX}}:/data/adb/ksu/bin:/data/adb/ap/bin:/data/adb/magisk/bin:/system/bin:/system/xbin:$PATH
+
+BB=""
+for cand in {{BUSYBOX_CANDIDATES}}; do
+    if [ -x "$cand" ]; then
+        BB=$cand
+        break
+    fi
+done
+if [ -z "$BB" ]; then
+    BB=$(command -v busybox 2>/dev/null || true)
+    [ -n "$BB" ] && [ ! -x "$BB" ] && BB=""
+fi
+
+# Android /system/bin/sh (mksh) sets FD_CLOEXEC on exec fd>=3, breaking `exec 9>...; flock 9`.
+# Re-exec under BusyBox sh (ash) whenever running under mksh.
+if [ -n "${KSH_VERSION:-}" ] && [ -z "${_SBW_SH_SWITCHED:-}" ] && [ -n "$BB" ] && [ -x "$BB" ]; then
+    _SBW_SH_SWITCHED=1 exec "$BB" sh "$0" "$@"
+fi
+unset _SBW_SH_SWITCHED
+
+kill_pid_file() {
+    local pfile=$1
+    local expected=$2
+    [ -f "$pfile" ] || return 0
+    read -r cpid < "$pfile" 2>/dev/null || { rm -f "$pfile"; return 0; }
+    case "$cpid" in ''|*[!0-9]*) rm -f "$pfile"; return 0 ;; esac
+    local exe
+    exe=$(readlink "/proc/$cpid/exe" 2>/dev/null || true)
+    if [ "$exe" = "$expected" ] || [ "$exe" = "$expected (deleted)" ]; then
+        kill "$cpid" 2>/dev/null || true
+        local n=0
+        while [ "$n" -lt 25 ] && [ -d "/proc/$cpid" ]; do
+            sleep 0.2
+            n=$((n + 1))
+        done
+        [ -d "/proc/$cpid" ] && kill -9 "$cpid" 2>/dev/null || true
+    fi
+    rm -f "$pfile"
+}
+
+stop_daemon() {
+    if [ -f "$GUARD_HOME/service.pid" ]; then
+        local spid cmd n
+        read -r spid < "$GUARD_HOME/service.pid" 2>/dev/null || spid=""
+        case "$spid" in
+            ''|*[!0-9]*) ;;
+            *)
+                if [ -d "/proc/$spid" ] && [ "$spid" != "$$" ]; then
+                    cmd=$(tr '\0' ' ' < "/proc/$spid/cmdline" 2>/dev/null || true)
+                    case "$cmd" in
+                        *service.sh*)
+                            kill -TERM "$spid" 2>/dev/null || true
+                            n=0
+                            while [ "$n" -lt 25 ] && [ -d "/proc/$spid" ]; do
+                                sleep 0.2
+                                n=$((n + 1))
+                            done
+                            if [ -d "/proc/$spid" ]; then
+                                kill -9 "$spid" 2>/dev/null || true
+                                sleep 0.1
+                            fi
+                            ;;
+                    esac
+                fi
+                ;;
+        esac
+    fi
+    kill_pid_file "$GUARD_HOME/broker-svc.pid" "$BROKER_BIN"
+    kill_pid_file "$GUARD_HOME/guard-svc.pid" "$GUARD_BIN"
+    kill_pid_file "$GUARD_HOME/guard.pid" "$GUARD_BIN"
+    rm -f /dev/socket/sandbox_ctrl/ctrl.sock /dev/socket/sandbox_priv/guard.sock "$GUARD_HOME/service.pid"
+}
+
+if [ "${1:-}" = "stop" ]; then
+    stop_daemon
+    exit 0
+fi
+
+[ ! -e "$MODDIR/disable" ] && [ ! -e "$MODDIR/remove" ] || exit 0
+umask 077
+
+BROKER_SELINUX_OK=1
+
+prepare_env() {
+    mkdir -p "$GUARD_HOME" "$GUARD_HOME/staging"
+    chown 0:0 "$GUARD_HOME" "$GUARD_HOME/staging"
+    chmod 0700 "$GUARD_HOME" "$GUARD_HOME/staging"
+
+    mkdir -p /dev/socket/sandbox_ctrl /dev/socket/sandbox_priv /dev/sandbox_cfg
+    chown 0:0 /dev/socket/sandbox_ctrl /dev/socket/sandbox_priv /dev/sandbox_cfg
+    chmod 0711 /dev/socket/sandbox_ctrl
+    chmod 0700 /dev/socket/sandbox_priv
+    chmod 0711 /dev/sandbox_cfg
+    chcon u:object_r:sandbox_ctrl_sock_dir:s0 /dev/socket/sandbox_ctrl 2>/dev/null || true
+    chcon u:object_r:sandbox_priv_dir:s0 /dev/socket/sandbox_priv 2>/dev/null || true
+    chcon u:object_r:sandbox_cfg_dir:s0 /dev/sandbox_cfg 2>/dev/null || true
+    rm -f /dev/sandbox_cfg/stealth.json
+
+    [ -f "$GUARD_BIN" ] || {
+        echo "missing guard binary in $GUARD_HOME" > "$GUARD_HOME/service.status"
+        return 1
+    }
+    chown 0:0 "$GUARD_BIN"
+    chmod 0700 "$GUARD_BIN"
+
+    if [ -f "$BROKER_BIN" ]; then
+        chown 0:0 "$BROKER_BIN"
+        chmod 0700 "$BROKER_BIN"
+        if ! chcon u:object_r:sandbox_broker_exec:s0 "$BROKER_BIN" 2>/dev/null; then
+            BROKER_SELINUX_OK=0
+            echo "warn: chcon sandbox_broker_exec failed; starting sandbox_guard in degraded mode" > "$GUARD_HOME/service.status"
+        fi
+    else
+        BROKER_SELINUX_OK=0
+    fi
+    return 0
+}
+
+apply_kernel_perf_tuning() {
+    local kpath val
+    for kv in \
+        "/proc/sys/net/ipv4/tcp_slow_start_after_idle:0" \
+        "/proc/sys/net/ipv4/tcp_fastopen:3" \
+        "/proc/sys/net/ipv4/tcp_mtu_probing:1" \
+        "/proc/sys/net/ipv4/tcp_notsent_lowat:16384"; do
+        kpath=${kv%:*}
+        val=${kv#*:}
+        [ -w "$kpath" ] && echo "$val" > "$kpath" 2>/dev/null || true
+    done
+    if [ -r /proc/sys/net/ipv4/tcp_available_congestion_control ] &&
+       grep -qw bbr /proc/sys/net/ipv4/tcp_available_congestion_control 2>/dev/null; then
+        [ -w /proc/sys/net/core/default_qdisc ] && echo fq > /proc/sys/net/core/default_qdisc 2>/dev/null || true
+        [ -w /proc/sys/net/ipv4/tcp_congestion_control ] && echo bbr > /proc/sys/net/ipv4/tcp_congestion_control 2>/dev/null || true
+    fi
+}
+
+protect_oom_pidfile() {
+    local pfile=$1
+    local expected=$2
+    [ -f "$pfile" ] || return 0
+    read -r cpid < "$pfile" 2>/dev/null || return 0
+    case "$cpid" in ''|*[!0-9]*) return 0 ;; esac
+    if [ -n "$expected" ]; then
+        local exe
+        exe=$(readlink "/proc/$cpid/exe" 2>/dev/null || true)
+        [ "$exe" = "$expected" ] || [ "$exe" = "$expected (deleted)" ] || return 0
+    fi
+    [ -w "/proc/$cpid/oom_score_adj" ] && echo -900 > "/proc/$cpid/oom_score_adj" 2>/dev/null || true
+}
+
+if [ "${1:-}" = "restart" ] || [ "${1:-}" = "--restart" ]; then
+    stop_daemon
+fi
+
+if [ "${1:-}" != "--daemon" ]; then
+    prepare_env || exit 1
+    "$GUARD_BIN" ctl boot > "$GUARD_HOME/service.status" 2>&1 || true
+
+    if [ -n "$BB" ] && [ -x "$BB" ]; then
+        ASH_STANDALONE=1 nohup "$BB" setsid "$BB" sh "$MODDIR/service.sh" --daemon </dev/null >/dev/null 2>&1 &
+    else
+        nohup /system/bin/sh "$MODDIR/service.sh" --daemon </dev/null >/dev/null 2>&1 &
+    fi
+
+    # Wait briefly (<=3s) so sockets and broker domain are active before returning.
+    w=0
+    while [ "$w" -lt 30 ]; do
+        if [ -S /dev/socket/sandbox_priv/guard.sock ] && [ -S /dev/socket/sandbox_ctrl/ctrl.sock ]; then
+            break
+        fi
+        sleep 0.1
+        w=$((w + 1))
+    done
+    exit 0
+fi
+
+prepare_env || exit 1
+apply_kernel_perf_tuning
+
+SVC_LOG="$GUARD_HOME/service-sup.log"
+
+# Single-supervisor lock so concurrent invokes cannot duplicate child loops.
+# Must run under BusyBox sh (enforced via mksh re-exec guard above) so FD 9 lacks FD_CLOEXEC.
+if [ -n "$BB" ] && [ -x "$BB" ]; then
+    exec 9>"$GUARD_HOME/service.lock"
+    flock_err=$("$BB" flock -n 9 2>&1)
+    flock_rc=$?
+    if [ "$flock_rc" -ne 0 ]; then
+        holder_pid=$(cat "$GUARD_HOME/service.pid" 2>/dev/null || true)
+        printf '%s service.sh --daemon flock -n 9 failed (rc=%s bb=%s ksh=%s holder_pid=%s): %s\n' \
+            "$(date '+%m-%d %H:%M:%S' 2>/dev/null || echo '00-00 00:00:00')" \
+            "$flock_rc" "$BB" "${KSH_VERSION:-none}" "${holder_pid:-none}" "${flock_err:-already locked}" >> "$SVC_LOG"
+        exit 0
+    fi
+elif [ -f "$GUARD_HOME/service.pid" ]; then
+    read -r old_sup < "$GUARD_HOME/service.pid" 2>/dev/null || old_sup=""
+    case "$old_sup" in
+        ''|*[!0-9]*) ;;
+        *) [ -d "/proc/$old_sup" ] && exit 0 ;;
+    esac
+fi
+echo "$$" > "$GUARD_HOME/service.pid"
+
+# Reset bootloop counter once Android confirms sys.boot_completed=1, and protect core daemons from LMK.
+(
+    bn=0
+    boot_cleared=0
+    while [ "$bn" -lt 120 ] && [ ! -e "$MODDIR/disable" ] && [ ! -e "$MODDIR/remove" ]; do
+        protect_oom_pidfile "$GUARD_HOME/guard.pid" "$GUARD_BIN"
+        protect_oom_pidfile "$GUARD_HOME/broker-svc.pid" "$BROKER_BIN"
+        protect_oom_pidfile "/data/adb/sandbox_proxy/core.pid" "/data/adb/sandbox_proxy/mihomo"
+        if [ "$boot_cleared" = 0 ] && [ "$(getprop sys.boot_completed 2>/dev/null || true)" = "1" ]; then
+            echo 0 > "$GUARD_HOME/stealth_boot_tries"
+            chmod 0600 "$GUARD_HOME/stealth_boot_tries" 2>/dev/null || true
+            apply_kernel_perf_tuning
+            boot_cleared=1
+        fi
+        if [ "$boot_cleared" = 1 ] && [ -f "$GUARD_HOME/guard.pid" ] && [ -f "$GUARD_HOME/broker-svc.pid" ] && [ -f "/data/adb/sandbox_proxy/core.pid" ]; then
+            break
+        fi
+        sleep 2
+        bn=$((bn + 1))
+    done
+) </dev/null >/dev/null 2>&1 9>&- &
+
+# Clean any orphaned child processes/pidfiles left behind by a prior SIGKILL.
+kill_pid_file "$GUARD_HOME/broker-svc.pid" "$BROKER_BIN"
+kill_pid_file "$GUARD_HOME/guard-svc.pid" "$GUARD_BIN"
+kill_pid_file "$GUARD_HOME/guard.pid" "$GUARD_BIN"
+
+trap '' HUP
+STOPPING=0
+GUARD_SUP_PID=""
+BROKER_SUP_PID=""
+
+log_sup() {
+    if [ -f "$SVC_LOG" ]; then
+        local sz
+        sz=$(wc -c < "$SVC_LOG" 2>/dev/null || echo 0)
+        [ "$sz" -gt 131072 ] && mv -f "$SVC_LOG" "$SVC_LOG.1"
+    fi
+    printf '%s %s\n' "$(date '+%m-%d %H:%M:%S' 2>/dev/null || echo '00-00 00:00:00')" "$1" >> "$SVC_LOG"
+}
+
+cleanup() {
+    STOPPING=1
+    [ -n "$BROKER_SUP_PID" ] && kill "$BROKER_SUP_PID" 2>/dev/null || true
+    [ -n "$GUARD_SUP_PID" ] && kill "$GUARD_SUP_PID" 2>/dev/null || true
+    kill_pid_file "$GUARD_HOME/broker-svc.pid" "$BROKER_BIN"
+    kill_pid_file "$GUARD_HOME/guard-svc.pid" "$GUARD_BIN"
+    kill_pid_file "$GUARD_HOME/guard.pid" "$GUARD_BIN"
+    wait "$BROKER_SUP_PID" 2>/dev/null || true
+    wait "$GUARD_SUP_PID" 2>/dev/null || true
+    rm -f /dev/socket/sandbox_ctrl/ctrl.sock /dev/socket/sandbox_priv/guard.sock "$GUARD_HOME/service.pid"
+    exit 0
+}
+
+trap cleanup TERM INT
+
+supervise_proc() {
+    trap 'STOPPING=1; exit 0' TERM INT
+    local name=$1
+    local bin=$2
+    local arg=$3
+    local pidfile=$4
+    local wait_sock=$5
+
+    local rapid_fails=0
+    local max_rapid=10
+    local healthy_sec=60
+    local backoff=1
+
+    while [ "$STOPPING" = 0 ] && [ ! -e "$MODDIR/disable" ] && [ ! -e "$MODDIR/remove" ]; do
+        if [ -n "$wait_sock" ]; then
+            local w=0
+            while [ "$w" -lt 25 ] && [ ! -S "$wait_sock" ] && [ "$STOPPING" = 0 ]; do
+                sleep 0.2
+                w=$((w + 1))
+            done
+        fi
+        [ "$STOPPING" = 0 ] && [ ! -e "$MODDIR/disable" ] && [ ! -e "$MODDIR/remove" ] || break
+
+        local start_ts
+        start_ts=$(date +%s 2>/dev/null || echo 0)
+        if [ "$name" = "broker" ]; then
+            chcon u:object_r:sandbox_broker_exec:s0 "$bin" 2>/dev/null || true
+            # Never inherit adb_data_file stdout/stderr or lock fd 9 into u:r:sandbox_broker:s0.
+            GOMAXPROCS=1 GOGC=25 GOMEMLIMIT=3MiB "$bin" </dev/null >/dev/null 2>&1 9>&- &
+        else
+            if [ -f "$GUARD_HOME/guard-svc.log" ]; then
+                local g_sz
+                g_sz=$(wc -c < "$GUARD_HOME/guard-svc.log" 2>/dev/null || echo 0)
+                [ "$g_sz" -gt 131072 ] && mv -f "$GUARD_HOME/guard-svc.log" "$GUARD_HOME/guard-svc.log.1"
+            fi
+            GOMAXPROCS=2 GOGC=25 GOMEMLIMIT=6MiB "$bin" "$arg" >> "$GUARD_HOME/guard-svc.log" 2>&1 9>&- &
+        fi
+        local child=$!
+        echo "$child" > "$pidfile"
+        [ -w "/proc/$child/oom_score_adj" ] && echo -900 > "/proc/$child/oom_score_adj" 2>/dev/null || true
+        wait "$child"
+        local rc=$?
+        rm -f "$pidfile"
+
+        [ "$STOPPING" = 0 ] && [ ! -e "$MODDIR/disable" ] && [ ! -e "$MODDIR/remove" ] || {
+            kill -TERM "$$" 2>/dev/null || true
+            break
+        }
+
+        local end_ts elapsed
+        end_ts=$(date +%s 2>/dev/null || echo 0)
+        elapsed=$((end_ts - start_ts))
+        if [ "$elapsed" -ge "$healthy_sec" ]; then
+            rapid_fails=0
+            backoff=1
+        else
+            rapid_fails=$((rapid_fails + 1))
+        fi
+
+        if [ "$rapid_fails" -ge "$max_rapid" ]; then
+            log_sup "$name exceeded max rapid restarts ($max_rapid); stopping loop"
+            break
+        fi
+
+        log_sup "$name exited rc=$rc after ${elapsed}s; respawning in ${backoff}s"
+        sleep "$backoff"
+        backoff=$((backoff * 2))
+        [ "$backoff" -gt 30 ] && backoff=30
+    done
+}
+
+supervise_proc "guard" "$GUARD_BIN" "supervise" "$GUARD_HOME/guard-svc.pid" "" &
+GUARD_SUP_PID=$!
+
+if [ "$BROKER_SELINUX_OK" = 1 ]; then
+    supervise_proc "broker" "$BROKER_BIN" "" "$GUARD_HOME/broker-svc.pid" "/dev/socket/sandbox_priv/guard.sock" &
+    BROKER_SUP_PID=$!
+    wait "$GUARD_SUP_PID" "$BROKER_SUP_PID"
+else
+    log_sup "sandbox_broker supervision skipped (BROKER_SELINUX_OK=$BROKER_SELINUX_OK)"
+    wait "$GUARD_SUP_PID"
+fi
+cleanup
