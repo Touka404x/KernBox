@@ -1,0 +1,242 @@
+package android
+
+import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"sandbox_guard/internal/contracts"
+	"sandbox_guard/internal/oem"
+)
+
+type sandboxRecRunner struct {
+	mu    sync.Mutex
+	calls []string
+	out   map[string]string
+	err   map[string]error
+}
+
+func (r *sandboxRecRunner) Run(_ context.Context, _ time.Duration, _ string, name string, args ...string) (string, error) {
+	line := name + " " + strings.Join(args, " ")
+	r.mu.Lock()
+	r.calls = append(r.calls, line)
+	r.mu.Unlock()
+	if r.err != nil {
+		if e, ok := r.err[line]; ok {
+			return r.out[line], e
+		}
+	}
+	if r.out != nil {
+		if o, ok := r.out[line]; ok {
+			return o, nil
+		}
+	}
+	return "", nil
+}
+
+func TestStopSandboxAppsExcludesBridgePackage(t *testing.T) {
+	r := &sandboxRecRunner{
+		out: map[string]string{
+			"cmd package list packages -3 --user 10": "package:" + contracts.DefaultWorkPackage + "\npackage:com.google.android.apps.bard\npackage:com.example.jp\n",
+		},
+	}
+	stopped, err := StopSandboxApps(context.Background(), r, 10, contracts.DefaultWorkPackage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stopped < 5 {
+		t.Fatalf("expected >=5 stopped packages, got %d", stopped)
+	}
+	joined := strings.Join(r.calls, "\n")
+	if strings.Contains(joined, "am force-stop --user 10 "+contracts.DefaultWorkPackage) {
+		t.Fatalf("must exclude bridge package from force-stop, got:\n%s", joined)
+	}
+	if !strings.Contains(joined, "am force-stop --user 10 com.google.android.apps.bard") ||
+		!strings.Contains(joined, "am force-stop --user 10 com.example.jp") ||
+		!strings.Contains(joined, "am force-stop --user 10 com.android.vending") {
+		t.Fatalf("expected force-stop for Google & user apps, got:\n%s", joined)
+	}
+}
+
+func TestSyncSandboxAppPoliciesSetsLocaleAndAppOps(t *testing.T) {
+	r := &sandboxRecRunner{
+		out: map[string]string{
+			"cmd package list packages -3 --user 10": "package:" + contracts.DefaultWorkPackage + "\npackage:com.custom.jp\npackage:com.android.chrome\n",
+		},
+	}
+	res, err := SyncSandboxAppPoliciesWithOpts(context.Background(), r, 10, PolicySyncOptions{
+		CallerPackage:       contracts.DefaultWorkPackage,
+		DefaultLocale:       "ja-JP",
+		BluetoothDeviceName: "Pixel-Test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.LocaleApps == 0 || res.LocationApps == 0 || len(res.Errors) != 0 {
+		t.Fatalf("unexpected sync result: %+v", res)
+	}
+	joined := strings.Join(r.calls, "\n")
+	if strings.Contains(joined, "sh -c") {
+		t.Fatalf("must not invoke sh -c:\n%s", joined)
+	}
+	if !strings.Contains(joined, "cmd locale set-app-locales com.custom.jp --user 10 --locales ja-JP") ||
+		!strings.Contains(joined, "cmd locale set-app-locales com.google.android.apps.bard --user 10 --locales ja-JP") ||
+		!strings.Contains(joined, "cmd locale set-app-locales com.google.android.gms --user 10 --locales ja-JP") ||
+		!strings.Contains(joined, "cmd role add-role-holder --user 10 android.app.role.BROWSER com.android.chrome") ||
+		!strings.Contains(joined, "settings put --user 10 secure bluetooth_name Pixel-Test") ||
+		!strings.Contains(joined, "appops set --user 10 --uid com.google.android.gms FINE_LOCATION ignore") {
+		t.Fatalf("missing expected locale/role/bt/appops calls:\n%s", joined)
+	}
+	if extra := oem.Current().ExtraLocationDenyPackages; len(extra) > 0 {
+		if !strings.Contains(joined, "appops set --user 10 --uid "+extra[0]+" COARSE_LOCATION ignore") {
+			t.Fatalf("missing OEM extra location deny call for %s:\n%s", extra[0], joined)
+		}
+	}
+	if strings.Contains(joined, "set-app-locales "+contracts.DefaultWorkPackage) {
+		t.Fatalf("unexpected locale call on work bridge:\n%s", joined)
+	}
+}
+
+func TestSyncSandboxAppPoliciesAndroid12MissingLocaleService(t *testing.T) {
+	r := &sandboxRecRunner{
+		out: map[string]string{
+			"cmd package list packages -3 --user 10": "package:com.custom.app\n",
+		},
+		err: map[string]error{
+			"cmd locale set-app-locales com.android.vending --user 10 --locales ja-JP": errors.New("Can't find service: locale"),
+		},
+	}
+	res, err := SyncSandboxAppPoliciesWithOpts(context.Background(), r, 10, PolicySyncOptions{DefaultLocale: "ja-JP"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.LocaleUnsupported || res.LocationApps == 0 || len(res.Errors) != 0 {
+		t.Fatalf("expected clean graceful skip on Android 12 without cmd locale, got %+v", res)
+	}
+}
+
+func TestSyncSandboxAppPoliciesPreservesUserLocalesAndOverrides(t *testing.T) {
+	r := &sandboxRecRunner{
+		out: map[string]string{
+			"cmd package list packages -3 --user 10":                          "package:com.google.android.apps.bard\npackage:com.demo.cleared\npackage:com.demo.new\n",
+			"cmd locale get-app-locales com.google.android.apps.bard --user 10": "Locales for com.google.android.apps.bard for user 10 are [zh-CN]\n",
+			"cmd locale get-app-locales com.demo.new --user 10":                 "Locales for com.demo.new for user 10 are []\n",
+		},
+	}
+
+	res, err := SyncSandboxAppPoliciesWithOpts(context.Background(), r, 10, PolicySyncOptions{
+		DefaultLocale:       "ja-JP",
+		PreserveUserLocales: true,
+		LocaleOverrides: map[string]string{
+			"com.demo.cleared": "",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.LocalePreserved < 2 || res.LocaleApps < 1 {
+		t.Fatalf("expected bard + cleared preserved and com.demo.new set, got %+v", res)
+	}
+	joined := strings.Join(r.calls, "\n")
+	if strings.Contains(joined, "cmd locale set-app-locales com.google.android.apps.bard") {
+		t.Fatalf("must NEVER overwrite non-empty zh-CN Gemini locale:\n%s", joined)
+	}
+	if strings.Contains(joined, "cmd locale set-app-locales com.demo.cleared") {
+		t.Fatalf("explicit empty override must suppress set-app-locales:\n%s", joined)
+	}
+	if !strings.Contains(joined, "cmd locale set-app-locales com.demo.new --user 10 --locales ja-JP") {
+		t.Fatalf("expected unset com.demo.new to receive ja-JP:\n%s", joined)
+	}
+
+	// Error on get-app-locales when PreserveUserLocales=true must fail safe (do NOT overwrite).
+	rErr := &sandboxRecRunner{
+		out: map[string]string{
+			"cmd package list packages -3 --user 10": "package:com.google.android.apps.bard\n",
+		},
+		err: map[string]error{
+			"cmd locale get-app-locales com.google.android.apps.bard --user 10": os.ErrDeadlineExceeded,
+		},
+	}
+	resErr, _ := SyncSandboxAppPoliciesWithOpts(context.Background(), rErr, 10, PolicySyncOptions{
+		DefaultLocale:       "ja-JP",
+		PreserveUserLocales: true,
+	})
+	if strings.Contains(strings.Join(rErr.calls, "\n"), "cmd locale set-app-locales com.google.android.apps.bard") {
+		t.Fatalf("must NOT overwrite Gemini locale when get-app-locales errors:\n%s", strings.Join(rErr.calls, "\n"))
+	}
+	if len(resErr.Errors) == 0 {
+		t.Fatal("expected get-app-locales failure recorded in res.Errors")
+	}
+
+	if _, err := SyncSandboxAppPoliciesWithOpts(context.Background(), r, 10, PolicySyncOptions{DefaultLocale: "ja-JP;rm -rf /"}); err == nil {
+		t.Fatal("must reject invalid locale tag containing shell chars")
+	}
+}
+
+func TestSetSandboxAppLocaleValidation(t *testing.T) {
+	r := &sandboxRecRunner{}
+	if err := SetSandboxAppLocale(context.Background(), r, 10, "com.google.android.apps.bard", "zh-CN"); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetSandboxAppLocale(context.Background(), r, 10, "com.google.android.apps.bard", "clear"); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetSandboxAppLocale(context.Background(), r, 0, "com.google.android.apps.bard", "zh-CN"); err == nil {
+		t.Fatal("must reject user 0")
+	}
+	for _, ex := range oem.Current().ExcludedCloneUsers {
+		if err := SetSandboxAppLocale(context.Background(), r, ex, "com.google.android.apps.bard", "zh-CN"); err == nil {
+			t.Fatalf("must reject excluded clone user %d", ex)
+		}
+	}
+	if err := SetSandboxAppLocale(context.Background(), r, 10, "com.google.android.apps.bard", "bad;id"); err == nil {
+		t.Fatal("must reject invalid locale")
+	}
+	joined := strings.Join(r.calls, "\n")
+	if !strings.Contains(joined, "cmd locale set-app-locales com.google.android.apps.bard --user 10 --locales zh-CN") ||
+		!strings.Contains(joined, "cmd locale set-app-locales com.google.android.apps.bard --user 10 --locales ") {
+		t.Fatalf("unexpected locale calls:\n%s", joined)
+	}
+}
+
+func TestInstallSandboxAPKsStagesSplitAndCommits(t *testing.T) {
+	dir := t.TempDir()
+	baseApk := filepath.Join(dir, "base.apk")
+	splitApk := filepath.Join(dir, "split.apk")
+	if err := os.WriteFile(baseApk, []byte("APK-BASE-1234"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(splitApk, []byte("APK-SPLIT"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	r := &sandboxRecRunner{
+		out: map[string]string{
+			"pm install-create --user 10 -r": "Success: created install session [4242]\n",
+			"pm install-commit 4242":         "Success\n",
+		},
+	}
+	res, err := InstallSandboxAPKs(context.Background(), r, 10, []string{baseApk, splitApk}, []string{dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.SessionID != "4242" || len(res.Files) != 2 {
+		t.Fatalf("unexpected install result: %+v", res)
+	}
+	joined := strings.Join(r.calls, "\n")
+	if !strings.Contains(joined, "pm install-write -S 13 4242 split_0.apk "+baseApk) ||
+		!strings.Contains(joined, "pm install-write -S 9 4242 split_1.apk "+splitApk) ||
+		!strings.Contains(joined, "pm install-commit 4242") {
+		t.Fatalf("missing install steps:\n%s", joined)
+	}
+
+	// Reject paths outside allowed staging dir
+	if _, err := InstallSandboxAPKs(context.Background(), r, 10, []string{filepath.Join(t.TempDir(), "other.apk")}, []string{dir}); err == nil {
+		t.Fatal("accepted apk outside allowed staging directory")
+	}
+}
