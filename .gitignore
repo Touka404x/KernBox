@@ -1,0 +1,40 @@
+# Build & distribution outputs
+dist/
+build/
+guard/out/
+stealth/build/
+stealth/jni/stealth_agent_dex.h
+verify/build/
+verify/__pycache__/
+**/__pycache__/
+
+# Binaries, packages, keys, and backups
+*.apk
+*.idsig
+*.zip
+*.tar.gz
+*.so
+*.o
+*.a
+*.p12
+*.keystore
+*.jks
+*.bak
+*.backup.*
+*-arm64
+*.local.json
+local.properties
+signing.properties
+
+# Legacy / local-only workspace directories preserved outside oss-main tracking
+.aoci/
+aoci*.txt
+build-history/
+lean-staging/
+native-out/
+root/
+client/
+deploy/
+profile-bootstrap/
+mihomo-*.zip
+verify/backup-v1/

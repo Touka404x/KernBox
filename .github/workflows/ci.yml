@@ -1,0 +1,74 @@
+name: CI Verification & Multi-Variant Checks
+
+on:
+  push:
+    branches: [oss-main, main]
+  pull_request:
+    branches: [oss-main, main]
+
+jobs:
+  hygiene-and-python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Privacy & CRLF Gatekeeper
+        run: python tools/verify_privacy_leak.py
+      - name: Python Variant Selector & Packaging Unit Tests
+        run: python -m unittest discover -s tools -p "test_*.py" -v
+
+  go-multi-variant:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        tags:
+          - oem_hyperos
+          - oem_aosp
+          - oem_oplus
+          - oem_oneui
+          - oem_generic
+          - "oem_generic,kernel_compat,transport_vpn"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: guard/go.mod
+          cache-dependency-path: guard/go.sum
+      - name: Go vet (host & linux/arm64)
+        working-directory: guard
+        run: |
+          go vet -tags "${{ matrix.tags }}" ./...
+          GOOS=linux GOARCH=arm64 go vet -tags "${{ matrix.tags }}" ./...
+          GOOS=linux GOARCH=arm64 go build -tags "${{ matrix.tags }}" -o /tmp/guard ./cmd/guard
+          GOOS=linux GOARCH=arm64 go build -tags "${{ matrix.tags }}" -o /tmp/broker ./cmd/broker
+      - name: Go test (-race)
+        working-directory: guard
+        run: go test -race -count=1 -timeout 120s -tags "${{ matrix.tags }}" ./...
+
+  stealth-host-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: android-actions/setup-android@v3
+      - name: Install Android 35 SDK platform
+        run: sdkmanager "platforms;android-35"
+      - name: C++ 5-OEM stealth logic tests
+        run: |
+          for oem in OEM_HYPEROS OEM_OPLUS OEM_ONEUI OEM_AOSP OEM_GENERIC; do
+            g++ -std=c++17 -O2 -Wall -Wextra -Werror "-D$oem" stealth/tests/stealth_logic_test.cpp -o /tmp/stealth_test
+            /tmp/stealth_test
+          done
+      - name: Java StealthHookHostTest
+        run: |
+          ANDROID_JAR="$ANDROID_HOME/platforms/android-35/android.jar"
+          mkdir -p /tmp/stealth_classes
+          javac --release 11 -encoding UTF-8 -Xlint:all -Werror -cp "$ANDROID_JAR" -d /tmp/stealth_classes \
+            stealth/java/com/sandbox/stealth/*.java stealth/tests/StealthHookHostTest.java
+          java -cp "/tmp/stealth_classes:$ANDROID_JAR" com.sandbox.stealth.StealthHookHostTest
