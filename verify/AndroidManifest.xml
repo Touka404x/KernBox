@@ -1,0 +1,25 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.sandbox.verify"
+    android:versionCode="3"
+    android:versionName="3.0">
+    <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <queries>
+        <package android:name="com.sandbox.controller" />
+    </queries>
+
+    <application
+        android:label="Sandbox Network Verify"
+        android:allowBackup="false">
+        <service
+            android:name="com.sandbox.verify.IsolatedProbeService"
+            android:exported="false"
+            android:isolatedProcess="true" />
+    </application>
+
+    <instrumentation
+        android:name="com.sandbox.verify.NetworkProbe"
+        android:targetPackage="com.sandbox.verify" />
+</manifest>
