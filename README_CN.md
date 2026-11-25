@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/kernbox-icon.png" width="128" height="128" alt="KernBox" />
+</p>
+
 # KernBox
 
 **面向 Root 安卓设备的内核级零漏流隔离沙盒（专为性能拆分 30 个精简专版 · 支持手机 + 电脑 AI Agent 一键联动安装）**

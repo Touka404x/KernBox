@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/kernbox-icon.png" width="128" height="128" alt="KernBox" />
+</p>
+
 # KernBox
 
 **Kernel-level isolated Android Work Profile sandbox with 30 lean device-specialized builds and AI-Agent co-installation.**
