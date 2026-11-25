@@ -3,11 +3,13 @@ package com.sandbox.controller;
 import android.net.LocalSocket;
 import android.net.LocalSocketAddress;
 
-import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStreamReader;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -16,7 +18,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 public final class BrokerClient {
 
     private static final int DEFAULT_TIMEOUT_MS = 8000;
-    private static final int PROBE_TIMEOUT_MS = 22000;
+    private static final int PROBE_TIMEOUT_MS = 34000;
+    private static final int MAX_RESPONSE_BYTES = 65536;
     private static final AtomicInteger SEQ = new AtomicInteger(1);
 
     private String nextId() {
@@ -43,6 +46,16 @@ public final class BrokerClient {
         return exchange(id, BrokerProtocol.buildRunProbe(id), PROBE_TIMEOUT_MS);
     }
 
+    public BrokerProtocol.RpcResponse reloadConfig(String quicUdp443Mode, String logLevel) {
+        String id = nextId();
+        return exchange(id, BrokerProtocol.buildReloadConfig(id, quicUdp443Mode, logLevel), DEFAULT_TIMEOUT_MS);
+    }
+
+    public BrokerProtocol.RpcResponse syncHideApps() {
+        String id = nextId();
+        return exchange(id, BrokerProtocol.buildSyncHideApps(id), DEFAULT_TIMEOUT_MS);
+    }
+
     public BrokerProtocol.RpcResponse importExistingApp(String pkg) {
         String id = nextId();
         return exchange(id, BrokerProtocol.buildImportExisting(id, pkg), PROBE_TIMEOUT_MS);
@@ -51,6 +64,11 @@ public final class BrokerClient {
     public BrokerProtocol.RpcResponse installApk(String apkPath) {
         String id = nextId();
         return exchange(id, BrokerProtocol.buildInstallApk(id, apkPath), PROBE_TIMEOUT_MS);
+    }
+
+    public BrokerProtocol.RpcResponse installApks(List<String> apkPaths) {
+        String id = nextId();
+        return exchange(id, BrokerProtocol.buildInstallApks(id, apkPaths), PROBE_TIMEOUT_MS);
     }
 
     public BrokerProtocol.RpcResponse launchApp(String pkg) {
@@ -81,22 +99,48 @@ public final class BrokerClient {
             out.write((jsonLine + "\n").getBytes(StandardCharsets.UTF_8));
             out.flush();
 
-            BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8)
-            );
-            String line = reader.readLine();
+            String line = readBoundedLine(socket.getInputStream());
             if (line == null || line.trim().isEmpty()) {
-                return BrokerProtocol.RpcResponse.error(id, "broker closed connection", true);
+                return BrokerProtocol.RpcResponse.error(
+                        id,
+                        "broker closed connection (pin cert SHA-256 in policy.json)",
+                        BrokerProtocol.OfflineReason.CERT_UNPINNED);
             }
             return BrokerProtocol.parseResponse(line);
         } catch (IOException ex) {
-            return BrokerProtocol.RpcResponse.error(
-                    id, ex.getMessage() != null ? ex.getMessage() : "socket unreachable", true);
+            String msg = ex.getMessage() != null ? ex.getMessage() : "socket unreachable";
+            String lower = msg.toLowerCase(Locale.ROOT);
+            BrokerProtocol.OfflineReason reason = (lower.contains("permission") || lower.contains("eacces"))
+                    ? BrokerProtocol.OfflineReason.SELINUX_DENIED
+                    : BrokerProtocol.OfflineReason.DAEMON_DOWN;
+            return BrokerProtocol.RpcResponse.error(id, msg, reason);
         } finally {
             try {
                 socket.close();
             } catch (IOException ignored) {
             }
         }
+    }
+
+    private static String readBoundedLine(InputStream in) throws IOException {
+        ByteArrayOutputStream buf = new ByteArrayOutputStream(512);
+        byte[] chunk = new byte[1024];
+        while (true) {
+            int n = in.read(chunk);
+            if (n < 0) {
+                break;
+            }
+            for (int i = 0; i < n; i++) {
+                byte b = chunk[i];
+                if (b == '\n') {
+                    return new String(buf.toByteArray(), StandardCharsets.UTF_8);
+                }
+                if (buf.size() >= MAX_RESPONSE_BYTES) {
+                    throw new IOException("RPC response exceeds 64 KiB limit");
+                }
+                buf.write(b);
+            }
+        }
+        return buf.size() == 0 ? null : new String(buf.toByteArray(), StandardCharsets.UTF_8);
     }
 }

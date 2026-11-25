@@ -73,6 +73,9 @@ public final class AddAppSheet extends FrameLayout {
     private final LinearLayout devicePane;
     private final LinearLayout apkPane;
     private final EditText searchInput;
+    private final TextView filterNotAddedChip;
+    private final ImageView reloadAppsBtn;
+    private final ScrollView appsScroll;
     private final LinearLayout appsListContainer;
     private final TextView emptyMsgView;
     private final EditText apkPathInput;
@@ -80,8 +83,15 @@ public final class AddAppSheet extends FrameLayout {
 
     private final List<AppItem> allDeviceApps = new ArrayList<AppItem>();
     private final Set<String> importedPackages = new HashSet<String>();
+    private final Runnable debouncedFilterTask = new Runnable() {
+        @Override
+        public void run() {
+            renderFilteredApps();
+        }
+    };
     private boolean open = false;
     private boolean loadingApps = false;
+    private boolean onlyNotAdded = false;
 
     public AddAppSheet(
             Context context,
@@ -146,6 +156,7 @@ public final class AddAppSheet extends FrameLayout {
         closeBtn.setText("×");
         closeBtn.setTextSize(20f);
         closeBtn.setGravity(Gravity.CENTER);
+        closeBtn.setContentDescription(strings.a11yClose());
         closeBtn.setTextColor(ThemePalette.inkSecondary(context));
         closeBtn.setBackground(ThemePalette.circleRippleDrawable(
                 context, ThemePalette.surfaceSubtle(context), ThemePalette.surfacePressed(context), Color.TRANSPARENT));
@@ -157,7 +168,7 @@ public final class AddAppSheet extends FrameLayout {
         });
         Motion.attachPressScale(closeBtn);
         headerRow.addView(closeBtn, new LinearLayout.LayoutParams(
-                ThemePalette.dp(context, 32f), ThemePalette.dp(context, 32f)));
+                ThemePalette.dp(context, 44f), ThemePalette.dp(context, 44f)));
         sheetContainer.addView(headerRow);
 
         LinearLayout tabStrip = new LinearLayout(context);
@@ -168,8 +179,8 @@ public final class AddAppSheet extends FrameLayout {
                 context, ThemePalette.surfaceSubtle(context), ThemePalette.borderHairline(context), 14f));
         LinearLayout.LayoutParams tabStripLp = new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT);
-        tabStripLp.topMargin = ThemePalette.dp(context, 14f);
-        tabStripLp.bottomMargin = ThemePalette.dp(context, 12f);
+        tabStripLp.topMargin = ThemePalette.dp(context, 12f);
+        tabStripLp.bottomMargin = ThemePalette.dp(context, 10f);
 
         tabDeviceBtn = buildTabButton(context, strings.tabDeviceApps());
         tabApkBtn = buildTabButton(context, strings.tabInstallApk());
@@ -192,6 +203,13 @@ public final class AddAppSheet extends FrameLayout {
         devicePane = new LinearLayout(context);
         devicePane.setOrientation(LinearLayout.VERTICAL);
 
+        LinearLayout searchRow = new LinearLayout(context);
+        searchRow.setOrientation(LinearLayout.HORIZONTAL);
+        searchRow.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams searchLp = new LinearLayout.LayoutParams(
+                LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT);
+        searchLp.bottomMargin = ThemePalette.dp(context, 10f);
+
         searchInput = new EditText(context);
         searchInput.setHint(strings.searchHint());
         searchInput.setHintTextColor(ThemePalette.inkMuted(context));
@@ -206,21 +224,66 @@ public final class AddAppSheet extends FrameLayout {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
             @Override public void afterTextChanged(Editable s) {
+                AddAppSheet.this.mainHandler.removeCallbacks(debouncedFilterTask);
+                AddAppSheet.this.mainHandler.postDelayed(debouncedFilterTask, 120L);
+            }
+        });
+        LinearLayout.LayoutParams inputBoxLp = new LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f);
+        inputBoxLp.setMarginEnd(ThemePalette.dp(context, 8f));
+        searchRow.addView(searchInput, inputBoxLp);
+
+        filterNotAddedChip = new TextView(context);
+        filterNotAddedChip.setText(strings.filterNotAddedOnly());
+        filterNotAddedChip.setTextSize(11.5f);
+        filterNotAddedChip.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+        filterNotAddedChip.setGravity(Gravity.CENTER);
+        filterNotAddedChip.setPadding(ThemePalette.dp(context, 10f), ThemePalette.dp(context, 9f),
+                ThemePalette.dp(context, 10f), ThemePalette.dp(context, 9f));
+        Motion.attachPressScale(filterNotAddedChip);
+        filterNotAddedChip.setOnClickListener(new OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                onlyNotAdded = !onlyNotAdded;
+                applyFilterChipStyle(getContext());
                 renderFilteredApps();
             }
         });
-        LinearLayout.LayoutParams searchLp = new LinearLayout.LayoutParams(
-                LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT);
-        searchLp.bottomMargin = ThemePalette.dp(context, 10f);
-        devicePane.addView(searchInput, searchLp);
+        applyFilterChipStyle(context);
+        LinearLayout.LayoutParams chipLp = new LinearLayout.LayoutParams(
+                LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT);
+        chipLp.setMarginEnd(ThemePalette.dp(context, 6f));
+        searchRow.addView(filterNotAddedChip, chipLp);
 
-        ScrollView scroll = new ScrollView(context);
-        scroll.setVerticalScrollBarEnabled(false);
+        reloadAppsBtn = new ImageView(context);
+        reloadAppsBtn.setImageResource(android.R.drawable.ic_popup_sync);
+        reloadAppsBtn.setColorFilter(ThemePalette.inkSecondary(context));
+        reloadAppsBtn.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        reloadAppsBtn.setContentDescription(strings.a11yReloadApps());
+        reloadAppsBtn.setPadding(ThemePalette.dp(context, 10f), ThemePalette.dp(context, 10f),
+                ThemePalette.dp(context, 10f), ThemePalette.dp(context, 10f));
+        reloadAppsBtn.setBackground(ThemePalette.circleRippleDrawable(
+                context, ThemePalette.surfaceCard(context), ThemePalette.surfacePressed(context), ThemePalette.borderHairline(context)));
+        Motion.attachPressScale(reloadAppsBtn);
+        reloadAppsBtn.setOnClickListener(new OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (!loadingApps) {
+                    Motion.spinOnce(reloadAppsBtn);
+                    loadDeviceAppsAsync();
+                }
+            }
+        });
+        searchRow.addView(reloadAppsBtn, new LinearLayout.LayoutParams(
+                ThemePalette.dp(context, 42f), ThemePalette.dp(context, 42f)));
+        devicePane.addView(searchRow, searchLp);
+
+        appsScroll = new ScrollView(context);
+        appsScroll.setVerticalScrollBarEnabled(false);
         appsListContainer = new LinearLayout(context);
         appsListContainer.setOrientation(LinearLayout.VERTICAL);
-        scroll.addView(appsListContainer, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
-        int listMaxHeight = Math.round(context.getResources().getDisplayMetrics().heightPixels * 0.44f);
-        devicePane.addView(scroll, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, listMaxHeight));
+        appsScroll.addView(appsListContainer, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
+        int listMaxHeight = computeListMaxHeight(context);
+        devicePane.addView(appsScroll, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, listMaxHeight));
 
         emptyMsgView = new TextView(context);
         emptyMsgView.setTextColor(ThemePalette.inkMuted(context));
@@ -250,10 +313,14 @@ public final class AddAppSheet extends FrameLayout {
         apkPathInput.setHint(strings.apkPathHint());
         apkPathInput.setHintTextColor(ThemePalette.inkMuted(context));
         apkPathInput.setTextColor(ThemePalette.inkPrimary(context));
-        apkPathInput.setTextSize(13.5f);
+        apkPathInput.setTextSize(13f);
         apkPathInput.setTypeface(Typeface.MONOSPACE);
-        apkPathInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
-        apkPathInput.setSingleLine(true);
+        apkPathInput.setInputType(InputType.TYPE_CLASS_TEXT
+                | InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        apkPathInput.setMinLines(2);
+        apkPathInput.setMaxLines(4);
+        apkPathInput.setGravity(Gravity.TOP | Gravity.START);
         apkPathInput.setBackground(ThemePalette.cardDrawable(
                 context, ThemePalette.surfaceCard(context), ThemePalette.borderHairline(context), 12f));
         apkPathInput.setPadding(sPad, ThemePalette.dp(context, 11f), sPad, ThemePalette.dp(context, 11f));
@@ -308,11 +375,42 @@ public final class AddAppSheet extends FrameLayout {
         apkPane.setVisibility(deviceTab ? View.GONE : View.VISIBLE);
     }
 
+    private static int computeListMaxHeight(Context ctx) {
+        return Math.max(ThemePalette.dp(ctx, 160f),
+                Math.round(ctx.getResources().getDisplayMetrics().heightPixels * 0.40f));
+    }
+
+    private void applyFilterChipStyle(Context ctx) {
+        filterNotAddedChip.setTextColor(onlyNotAdded ? ThemePalette.accentCopper(ctx) : ThemePalette.inkSecondary(ctx));
+        filterNotAddedChip.setBackground(ThemePalette.pillRippleDrawable(
+                ctx,
+                onlyNotAdded ? ThemePalette.accentCopperSoft(ctx) : ThemePalette.surfaceCard(ctx),
+                ThemePalette.surfacePressed(ctx),
+                ThemePalette.borderHairline(ctx),
+                12f));
+    }
+
+    public void setBottomInset(int bottomPx) {
+        int hPad = ThemePalette.dp(getContext(), 20f);
+        sheetContainer.setPadding(hPad, ThemePalette.dp(getContext(), 12f), hPad,
+                ThemePalette.dp(getContext(), 22f) + Math.max(0, bottomPx));
+        refreshMaxHeight();
+    }
+
+    public void refreshMaxHeight() {
+        LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) appsScroll.getLayoutParams();
+        if (lp != null) {
+            lp.height = computeListMaxHeight(getContext());
+            appsScroll.setLayoutParams(lp);
+        }
+    }
+
     public boolean isOpen() {
         return open;
     }
 
     public void show(List<String> alreadyImported) {
+        refreshMaxHeight();
         importedPackages.clear();
         if (alreadyImported != null) {
             importedPackages.addAll(alreadyImported);
@@ -433,6 +531,9 @@ public final class AddAppSheet extends FrameLayout {
         Context ctx = getContext();
         int shown = 0;
         for (final AppItem item : allDeviceApps) {
+            if (onlyNotAdded && item.imported) {
+                continue;
+            }
             if (!q.isEmpty()
                     && !item.label.toLowerCase(Locale.ROOT).contains(q)
                     && !item.pkg.toLowerCase(Locale.ROOT).contains(q)) {
@@ -467,7 +568,7 @@ public final class AddAppSheet extends FrameLayout {
         iconView.setImageDrawable(item.icon);
         LinearLayout.LayoutParams iconLp = new LinearLayout.LayoutParams(
                 ThemePalette.dp(ctx, 38f), ThemePalette.dp(ctx, 38f));
-        iconLp.rightMargin = ThemePalette.dp(ctx, 12f);
+        iconLp.setMarginEnd(ThemePalette.dp(ctx, 12f));
         row.addView(iconView, iconLp);
 
         LinearLayout textCol = new LinearLayout(ctx);
@@ -549,8 +650,9 @@ public final class AddAppSheet extends FrameLayout {
     }
 
     private void handleApkInstall() {
-        final String path = apkPathInput.getText().toString().trim();
-        if (!BrokerProtocol.isAllowedApkPath(path)) {
+        final String raw = apkPathInput.getText().toString().trim();
+        final List<String> paths = BrokerProtocol.parseApkPathList(raw);
+        if (paths.isEmpty()) {
             Motion.animatePulse(apkPathInput);
             callback.onToast(strings.invalidApkPath(), true);
             return;
@@ -560,7 +662,7 @@ public final class AddAppSheet extends FrameLayout {
         executor.execute(new Runnable() {
             @Override
             public void run() {
-                final BrokerProtocol.RpcResponse resp = broker.installApk(path);
+                final BrokerProtocol.RpcResponse resp = broker.installApks(paths);
                 mainHandler.post(new Runnable() {
                     @Override
                     public void run() {
@@ -568,7 +670,7 @@ public final class AddAppSheet extends FrameLayout {
                         installApkBtn.setText(strings.btnInstallApk());
                         if (resp.ok) {
                             apkPathInput.setText("");
-                            callback.onApkInstalled(path);
+                            callback.onApkInstalled(paths.get(0));
                             dismiss();
                         } else {
                             callback.onToast(strings.failPrefix() + resp.error, true);

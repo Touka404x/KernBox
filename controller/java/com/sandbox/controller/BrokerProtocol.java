@@ -23,6 +23,18 @@ public final class BrokerProtocol {
     public static final String OP_LAUNCH_APP = "LAUNCH_APP";
     public static final String OP_STOP_APP = "STOP_APP";
     public static final String OP_REMOVE_APP = "REMOVE_APP";
+    public static final String OP_RELOAD_CONFIG = "RELOAD_CONFIG";
+    public static final String OP_SYNC_HIDE_APPS = "SYNC_HIDE_APPS";
+
+    private static final int MAX_APK_PATH_LEN = 512;
+    private static final int MAX_SPLIT_APKS = 32;
+
+    public enum OfflineReason {
+        NONE,
+        DAEMON_DOWN,
+        CERT_UNPINNED,
+        SELINUX_DENIED
+    }
 
     private BrokerProtocol() {}
 
@@ -42,6 +54,26 @@ public final class BrokerProtocol {
         return buildSimpleRequest(id, OP_RUN_PROBE);
     }
 
+    public static String buildSyncHideApps(String id) {
+        return buildSimpleRequest(id, OP_SYNC_HIDE_APPS);
+    }
+
+    public static String buildReloadConfig(String id, String quicUdp443Mode, String logLevel) {
+        StringBuilder cfg = new StringBuilder();
+        if (quicUdp443Mode != null && !quicUdp443Mode.trim().isEmpty()) {
+            cfg.append("\"quic_udp443_mode\":").append(quote(quicUdp443Mode.trim()));
+        }
+        if (logLevel != null && !logLevel.trim().isEmpty()) {
+            if (cfg.length() > 0) {
+                cfg.append(',');
+            }
+            cfg.append("\"log_level\":").append(quote(logLevel.trim()));
+        }
+        return "{\"id\":" + quote(nonEmpty(id, "req"))
+                + ",\"op\":" + quote(OP_RELOAD_CONFIG)
+                + ",\"config\":{" + cfg.toString() + "}}";
+    }
+
     public static String buildImportExisting(String id, String pkg) {
         return buildPkgRequest(id, OP_IMPORT_EXISTING, pkg);
     }
@@ -59,9 +91,42 @@ public final class BrokerProtocol {
     }
 
     public static String buildInstallApk(String id, String apkPath) {
+        return buildInstallApks(id, Collections.singletonList(nonNull(apkPath)));
+    }
+
+    public static String buildInstallApks(String id, List<String> apkPaths) {
+        StringBuilder arr = new StringBuilder("[");
+        if (apkPaths != null) {
+            for (int i = 0; i < apkPaths.size(); i++) {
+                if (i > 0) {
+                    arr.append(',');
+                }
+                arr.append(quote(nonNull(apkPaths.get(i))));
+            }
+        }
+        arr.append(']');
         return "{\"id\":" + quote(nonEmpty(id, "req"))
                 + ",\"op\":" + quote(OP_INSTALL_APK)
-                + ",\"apk_paths\":[" + quote(nonNull(apkPath)) + "]}";
+                + ",\"apk_paths\":" + arr.toString() + "}";
+    }
+
+    public static List<String> parseApkPathList(String rawText) {
+        if (rawText == null) {
+            return Collections.emptyList();
+        }
+        String[] parts = rawText.split("[\\r\\n,]+");
+        List<String> out = new ArrayList<String>();
+        for (String part : parts) {
+            String p = part.trim();
+            if (p.isEmpty()) {
+                continue;
+            }
+            if (!isAllowedApkPath(p) || out.size() >= MAX_SPLIT_APKS) {
+                return Collections.emptyList();
+            }
+            out.add(p);
+        }
+        return out;
     }
 
     private static String buildSimpleRequest(String id, String op) {
@@ -79,7 +144,7 @@ public final class BrokerProtocol {
             return false;
         }
         String p = rawPath.trim();
-        if (p.isEmpty() || !p.endsWith(".apk") || p.contains("..")) {
+        if (p.isEmpty() || p.length() > MAX_APK_PATH_LEN || !p.endsWith(".apk") || p.contains("..")) {
             return false;
         }
         boolean inTmp = p.startsWith("/data/local/tmp/");
@@ -102,7 +167,7 @@ public final class BrokerProtocol {
             return RpcResponse.error("", "empty response", true);
         }
         try {
-            Object parsed = new JsonParser(rawJson).parseValue();
+            Object parsed = new JsonParser(rawJson).parseRoot();
             if (!(parsed instanceof Map)) {
                 return RpcResponse.error("", "response is not a JSON object", false);
             }
@@ -116,7 +181,7 @@ public final class BrokerProtocol {
                     ? (Map<String, Object>) root.get("data")
                     : Collections.<String, Object>emptyMap();
             StatusSnapshot snapshot = parseSnapshot(data);
-            return new RpcResponse(id, ok, false, err, snapshot);
+            return new RpcResponse(id, ok, false, OfflineReason.NONE, err, snapshot);
         } catch (IllegalArgumentException ex) {
             return RpcResponse.error("", "malformed JSON: " + ex.getMessage(), false);
         }
@@ -143,10 +208,28 @@ public final class BrokerProtocol {
         boolean privateDnsWarning = asBoolean(data.get("private_dns_warning"), false);
         boolean probeApkInstalled = asBoolean(data.get("probe_apk_installed"), false);
         boolean instrumentOk = asBoolean(data.get("instrument_ok"), false);
+        boolean hasProbeData = data.containsKey("probe_apk_installed") || data.containsKey("instrument_ok");
         int userId = asInt(data.get("user_id"), 10);
         int runningProcs = asInt(data.get("u10_running_procs"), 0);
         int hibernatedCount = asInt(data.get("hibernated_count"), 0);
         int stuckWorkSockets = asInt(data.get("stuck_work_sockets"), 0);
+        int tproxyPort = asInt(data.get("tproxy_port"), 1537);
+        int stealthBootTries = asInt(data.get("stealth_boot_tries"), 0);
+        String privateDnsMode = asString(data.get("private_dns_mode"), "");
+        int scorecardPassed = 0;
+        int scorecardFailed = 0;
+        int scorecardWarn = 0;
+        int scorecardTotal = 0;
+        if (data.get("probe_result") instanceof Map) {
+            Map<String, Object> pr = (Map<String, Object>) data.get("probe_result");
+            if (pr.get("real_device_scorecard") instanceof Map) {
+                Map<String, Object> sc = (Map<String, Object>) pr.get("real_device_scorecard");
+                scorecardPassed = asInt(sc.get("passed"), 0);
+                scorecardFailed = asInt(sc.get("failed"), 0);
+                scorecardWarn = asInt(sc.get("warn"), 0);
+                scorecardTotal = asInt(sc.get("total"), scorecardPassed + scorecardFailed + scorecardWarn);
+            }
+        }
         String lastError = asString(data.get("last_error"), "");
         String exitIp = "";
         boolean vpnRunning = openGate;
@@ -183,11 +266,19 @@ public final class BrokerProtocol {
                 privateDnsWarning,
                 probeApkInstalled,
                 instrumentOk,
+                hasProbeData,
                 vpnRunning,
                 userId,
                 runningProcs,
                 hibernatedCount,
                 stuckWorkSockets,
+                tproxyPort,
+                stealthBootTries,
+                privateDnsMode,
+                scorecardPassed,
+                scorecardFailed,
+                scorecardWarn,
+                scorecardTotal,
                 exitIp,
                 lastError,
                 Collections.unmodifiableList(apps)
@@ -258,19 +349,30 @@ public final class BrokerProtocol {
         public final String id;
         public final boolean ok;
         public final boolean offline;
+        public final OfflineReason offlineReason;
         public final String error;
         public final StatusSnapshot snapshot;
 
         public RpcResponse(String id, boolean ok, boolean offline, String error, StatusSnapshot snapshot) {
+            this(id, ok, offline, offline ? OfflineReason.DAEMON_DOWN : OfflineReason.NONE, error, snapshot);
+        }
+
+        public RpcResponse(String id, boolean ok, boolean offline, OfflineReason offlineReason, String error, StatusSnapshot snapshot) {
             this.id = id;
             this.ok = ok;
             this.offline = offline;
+            this.offlineReason = offlineReason == null ? OfflineReason.NONE : offlineReason;
             this.error = error == null ? "" : error;
             this.snapshot = snapshot == null ? StatusSnapshot.empty() : snapshot;
         }
 
         public static RpcResponse error(String id, String error, boolean offline) {
-            return new RpcResponse(id, false, offline, error, StatusSnapshot.empty());
+            return new RpcResponse(id, false, offline, offline ? OfflineReason.DAEMON_DOWN : OfflineReason.NONE, error, StatusSnapshot.empty());
+        }
+
+        public static RpcResponse error(String id, String error, OfflineReason reason) {
+            boolean off = reason != null && reason != OfflineReason.NONE;
+            return new RpcResponse(id, false, off, reason, error, StatusSnapshot.empty());
         }
     }
 
@@ -291,11 +393,19 @@ public final class BrokerProtocol {
         public final boolean privateDnsWarning;
         public final boolean probeApkInstalled;
         public final boolean instrumentOk;
+        public final boolean hasProbeData;
         public final boolean vpnRunning;
         public final int userId;
         public final int runningProcs;
         public final int hibernatedCount;
         public final int stuckWorkSockets;
+        public final int tproxyPort;
+        public final int stealthBootTries;
+        public final String privateDnsMode;
+        public final int scorecardPassed;
+        public final int scorecardFailed;
+        public final int scorecardWarn;
+        public final int scorecardTotal;
         public final String exitIp;
         public final String lastError;
         public final List<String> sandboxApps;
@@ -317,11 +427,19 @@ public final class BrokerProtocol {
                 boolean privateDnsWarning,
                 boolean probeApkInstalled,
                 boolean instrumentOk,
+                boolean hasProbeData,
                 boolean vpnRunning,
                 int userId,
                 int runningProcs,
                 int hibernatedCount,
                 int stuckWorkSockets,
+                int tproxyPort,
+                int stealthBootTries,
+                String privateDnsMode,
+                int scorecardPassed,
+                int scorecardFailed,
+                int scorecardWarn,
+                int scorecardTotal,
                 String exitIp,
                 String lastError,
                 List<String> sandboxApps) {
@@ -341,31 +459,92 @@ public final class BrokerProtocol {
             this.privateDnsWarning = privateDnsWarning;
             this.probeApkInstalled = probeApkInstalled;
             this.instrumentOk = instrumentOk;
+            this.hasProbeData = hasProbeData;
             this.vpnRunning = vpnRunning;
             this.userId = userId;
             this.runningProcs = runningProcs;
             this.hibernatedCount = hibernatedCount;
             this.stuckWorkSockets = stuckWorkSockets;
+            this.tproxyPort = tproxyPort;
+            this.stealthBootTries = stealthBootTries;
+            this.privateDnsMode = privateDnsMode;
+            this.scorecardPassed = scorecardPassed;
+            this.scorecardFailed = scorecardFailed;
+            this.scorecardWarn = scorecardWarn;
+            this.scorecardTotal = scorecardTotal;
             this.exitIp = exitIp;
             this.lastError = lastError;
             this.sandboxApps = sandboxApps;
         }
 
+        public StatusSnapshot withPreservedProbeFrom(StatusSnapshot prev) {
+            if (this.hasProbeData || prev == null || !prev.hasProbeData) {
+                return this;
+            }
+            return new StatusSnapshot(
+                    version, variant, state, mode, activePreset, paused, policyLoaded, sbwOpen, sbwRawArmed,
+                    frozen, hotFrozen, tproxyReady, zygiskDisabled, privateDnsWarning,
+                    prev.probeApkInstalled, prev.instrumentOk, true, vpnRunning,
+                    userId, runningProcs, hibernatedCount, stuckWorkSockets,
+                    tproxyPort, stealthBootTries, privateDnsMode,
+                    prev.scorecardPassed, prev.scorecardFailed, prev.scorecardWarn, prev.scorecardTotal,
+                    exitIp, lastError, sandboxApps
+            );
+        }
+
+        public String toRedactedDiagnosticJson() {
+            return "{\n"
+                    + "  \"version\": " + quote(nonNull(version)) + ",\n"
+                    + "  \"variant\": " + quote(nonNull(variant)) + ",\n"
+                    + "  \"state\": " + quote(nonNull(state)) + ",\n"
+                    + "  \"mode\": " + quote(nonNull(mode)) + ",\n"
+                    + "  \"active_preset\": " + quote(nonNull(activePreset)) + ",\n"
+                    + "  \"paused\": " + paused + ",\n"
+                    + "  \"policy_loaded\": " + policyLoaded + ",\n"
+                    + "  \"sbw_open\": " + sbwOpen + ",\n"
+                    + "  \"sbw_raw_armed\": " + sbwRawArmed + ",\n"
+                    + "  \"tproxy_ready\": " + tproxyReady + ",\n"
+                    + "  \"tproxy_port\": " + tproxyPort + ",\n"
+                    + "  \"zygisk_disabled\": " + zygiskDisabled + ",\n"
+                    + "  \"stealth_boot_tries\": " + stealthBootTries + ",\n"
+                    + "  \"private_dns_mode\": " + quote(nonNull(privateDnsMode)) + ",\n"
+                    + "  \"private_dns_warning\": " + privateDnsWarning + ",\n"
+                    + "  \"stuck_work_sockets\": " + stuckWorkSockets + ",\n"
+                    + "  \"sandbox_apps_count\": " + sandboxApps.size() + ",\n"
+                    + "  \"has_probe_data\": " + hasProbeData + ",\n"
+                    + "  \"probe_apk_installed\": " + probeApkInstalled + ",\n"
+                    + "  \"instrument_ok\": " + instrumentOk + ",\n"
+                    + "  \"scorecard\": {\"passed\": " + scorecardPassed + ", \"warn\": " + scorecardWarn + ", \"failed\": " + scorecardFailed + ", \"total\": " + scorecardTotal + "},\n"
+                    + "  \"last_error\": " + quote(nonNull(lastError)) + "\n"
+                    + "}";
+        }
+
         public static StatusSnapshot empty() {
             return new StatusSnapshot(
                     "", "", "OFFLINE", "", "neutral",
-                    true, false, false, false, false, false, false, false, false, false, false, false,
-                    10, 0, 0, 0, "", "", Collections.<String>emptyList()
+                    true, false, false, false, false, false, false, false, false, false, false, false, false,
+                    10, 0, 0, 0, 1537, 0, "", 0, 0, 0, 0, "", "", Collections.<String>emptyList()
             );
         }
     }
 
     private static final class JsonParser {
+        private static final int MAX_DEPTH = 32;
         private final String src;
         private int pos;
+        private int depth;
 
         JsonParser(String src) {
             this.src = src;
+        }
+
+        Object parseRoot() {
+            Object val = parseValue();
+            skipWs();
+            if (pos != src.length()) {
+                throw new IllegalArgumentException("trailing content at " + pos);
+            }
+            return val;
         }
 
         Object parseValue() {
@@ -399,54 +578,68 @@ public final class BrokerProtocol {
         }
 
         private Map<String, Object> parseObject() {
-            Map<String, Object> map = new LinkedHashMap<String, Object>();
-            pos++;
-            skipWs();
-            if (peek('}')) {
-                pos++;
-                return map;
+            if (++depth > MAX_DEPTH) {
+                throw new IllegalArgumentException("nesting too deep");
             }
-            while (true) {
+            try {
+                Map<String, Object> map = new LinkedHashMap<String, Object>();
+                pos++;
                 skipWs();
-                if (!peek('"')) {
-                    throw new IllegalArgumentException("expected object key at " + pos);
-                }
-                String key = parseString();
-                skipWs();
-                expectChar(':');
-                Object val = parseValue();
-                map.put(key, val);
-                skipWs();
-                if (peek(',')) {
-                    pos++;
-                } else if (peek('}')) {
+                if (peek('}')) {
                     pos++;
                     return map;
-                } else {
-                    throw new IllegalArgumentException("expected ',' or '}' at " + pos);
                 }
+                while (true) {
+                    skipWs();
+                    if (!peek('"')) {
+                        throw new IllegalArgumentException("expected object key at " + pos);
+                    }
+                    String key = parseString();
+                    skipWs();
+                    expectChar(':');
+                    Object val = parseValue();
+                    map.put(key, val);
+                    skipWs();
+                    if (peek(',')) {
+                        pos++;
+                    } else if (peek('}')) {
+                        pos++;
+                        return map;
+                    } else {
+                        throw new IllegalArgumentException("expected ',' or '}' at " + pos);
+                    }
+                }
+            } finally {
+                depth--;
             }
         }
 
         private List<Object> parseArray() {
-            List<Object> list = new ArrayList<Object>();
-            pos++;
-            skipWs();
-            if (peek(']')) {
-                pos++;
-                return list;
+            if (++depth > MAX_DEPTH) {
+                throw new IllegalArgumentException("nesting too deep");
             }
-            while (true) {
-                list.add(parseValue());
+            try {
+                List<Object> list = new ArrayList<Object>();
+                pos++;
                 skipWs();
-                if (peek(',')) {
-                    pos++;
-                } else if (peek(']')) {
+                if (peek(']')) {
                     pos++;
                     return list;
-                } else {
-                    throw new IllegalArgumentException("expected ',' or ']' at " + pos);
                 }
+                while (true) {
+                    list.add(parseValue());
+                    skipWs();
+                    if (peek(',')) {
+                        pos++;
+                    } else if (peek(']')) {
+                        pos++;
+                        return list;
+                    } else {
+                        throw new IllegalArgumentException("expected ',' or ']' at " + pos);
+                    }
+                }
+            } finally {
+                depth--;
             }
         }
 

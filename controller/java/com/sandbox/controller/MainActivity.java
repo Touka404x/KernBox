@@ -5,17 +5,25 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.pm.ApplicationInfo;
+import android.content.pm.LauncherActivityInfo;
+import android.content.pm.LauncherApps;
 import android.content.pm.PackageManager;
+import android.content.res.Configuration;
 import android.graphics.Color;
+import android.graphics.Insets;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.UserHandle;
+import android.os.UserManager;
 import android.text.TextUtils;
+import android.view.DisplayCutout;
 import android.view.Gravity;
 import android.view.View;
+import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.widget.FrameLayout;
 import android.widget.GridLayout;
@@ -26,8 +34,12 @@ import android.widget.TextView;
 import android.window.OnBackInvokedCallback;
 import android.window.OnBackInvokedDispatcher;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -41,9 +53,13 @@ public final class MainActivity extends Activity {
 
     private final Strings strings = new Strings();
     private final BrokerClient broker = new BrokerClient();
-    private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    private final ExecutorService rpcExecutor = Executors.newFixedThreadPool(2);
+    private final ExecutorService iconExecutor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private final Map<String, AppTileInfo> tileCache = new ConcurrentHashMap<String, AppTileInfo>();
 
+    private ScrollView mainScroll;
+    private LinearLayout scrollContent;
     private BreathingHaloView haloView;
     private TextView modePill;
     private TextView statusTitleView;
@@ -68,6 +84,8 @@ public final class MainActivity extends Activity {
     private Object backCallbackToken;
 
     private BrokerProtocol.StatusSnapshot currentSnapshot = BrokerProtocol.StatusSnapshot.empty();
+    private BrokerProtocol.OfflineReason lastOfflineReason = BrokerProtocol.OfflineReason.DAEMON_DOWN;
+    private List<String> renderedApps = Collections.emptyList();
     private String certSha256 = "";
     private boolean connected = false;
     private boolean busy = false;
@@ -128,8 +146,50 @@ public final class MainActivity extends Activity {
     protected void onDestroy() {
         unregisterPredictiveBack();
         mainHandler.removeCallbacksAndMessages(null);
-        executor.shutdownNow();
+        rpcExecutor.shutdownNow();
+        iconExecutor.shutdownNow();
         super.onDestroy();
+    }
+
+    @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        configureSystemBars();
+        if (appsGrid != null) {
+            int cols = computeGridColumns();
+            if (appsGrid.getColumnCount() != cols) {
+                appsGrid.setColumnCount(cols);
+                renderedApps = Collections.emptyList();
+                renderSandboxApps(currentSnapshot.sandboxApps);
+            }
+        }
+        if (addAppSheet != null) {
+            addAppSheet.refreshMaxHeight();
+        }
+        if (diagnosticsSheet != null) {
+            diagnosticsSheet.refreshScrollHeight();
+        }
+    }
+
+    private int computeGridColumns() {
+        float density = getResources().getDisplayMetrics().density;
+        int widthDp = Math.round(getResources().getDisplayMetrics().widthPixels / Math.max(1f, density));
+        return Math.max(3, Math.min(6, widthDp / 88));
+    }
+
+    private void updateMainAccessibility() {
+        boolean anyOpen = (addAppSheet != null && addAppSheet.isOpen())
+                || (appActionSheet != null && appActionSheet.isOpen())
+                || (diagnosticsSheet != null && diagnosticsSheet.isOpen());
+        int mode = anyOpen
+                ? View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+                : View.IMPORTANT_FOR_ACCESSIBILITY_YES;
+        if (mainScroll != null) {
+            mainScroll.setImportantForAccessibility(mode);
+        }
+        if (fabButton != null) {
+            fabButton.setImportantForAccessibility(mode);
+        }
     }
 
     private void registerPredictiveBack() {
@@ -172,39 +232,53 @@ public final class MainActivity extends Activity {
         return false;
     }
 
+    @SuppressWarnings("deprecation")
     private void configureSystemBars() {
+        boolean dark = ThemePalette.isDark(this);
         if (Build.VERSION.SDK_INT >= 30) {
+            getWindow().setDecorFitsSystemWindows(false);
             WindowInsetsController ctrl = getWindow().getInsetsController();
             if (ctrl != null) {
-                boolean dark = ThemePalette.isDark(this);
                 int mask = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
                         | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
                 ctrl.setSystemBarsAppearance(dark ? 0 : mask, mask);
             }
+        } else {
+            int flags = View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN;
+            if (!dark) {
+                flags |= View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+                if (Build.VERSION.SDK_INT >= 27) {
+                    flags |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+                }
+            }
+            getWindow().getDecorView().setSystemUiVisibility(flags);
+            getWindow().setStatusBarColor(Color.TRANSPARENT);
+            getWindow().setNavigationBarColor(Color.TRANSPARENT);
         }
     }
 
     private View buildRootLayout() {
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(ThemePalette.bgPaper(this));
-        root.setFitsSystemWindows(true);
 
-        ScrollView scroll = new ScrollView(this);
-        scroll.setVerticalScrollBarEnabled(false);
+        mainScroll = new ScrollView(this);
+        mainScroll.setVerticalScrollBarEnabled(false);
 
-        LinearLayout content = new LinearLayout(this);
-        content.setOrientation(LinearLayout.VERTICAL);
+        scrollContent = new LinearLayout(this);
+        scrollContent.setOrientation(LinearLayout.VERTICAL);
         int hPad = ThemePalette.dp(this, 20f);
-        content.setPadding(hPad, ThemePalette.dp(this, 16f), hPad, ThemePalette.dp(this, 100f));
+        scrollContent.setPadding(hPad, ThemePalette.dp(this, 16f), hPad, ThemePalette.dp(this, 100f));
 
-        content.addView(buildHeaderRow());
-        content.addView(buildHeroStatusCard());
-        content.addView(buildAppsHeaderRow());
-        content.addView(buildAppsGridSection());
+        scrollContent.addView(buildHeaderRow());
+        scrollContent.addView(buildHeroStatusCard());
+        scrollContent.addView(buildAppsHeaderRow());
+        scrollContent.addView(buildAppsGridSection());
 
-        scroll.addView(content, new FrameLayout.LayoutParams(
+        mainScroll.addView(scrollContent, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT));
-        root.addView(scroll, new FrameLayout.LayoutParams(
+        root.addView(mainScroll, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
         fabButton = new FrameLayout(this);
@@ -224,11 +298,11 @@ public final class MainActivity extends Activity {
         });
         int fabSize = ThemePalette.dp(this, 58f);
         FrameLayout.LayoutParams fabLp = new FrameLayout.LayoutParams(fabSize, fabSize, Gravity.BOTTOM | Gravity.END);
-        fabLp.rightMargin = ThemePalette.dp(this, 22f);
+        fabLp.setMarginEnd(ThemePalette.dp(this, 22f));
         fabLp.bottomMargin = ThemePalette.dp(this, 24f);
         root.addView(fabButton, fabLp);
 
-        addAppSheet = new AddAppSheet(this, strings, broker, executor, mainHandler, new AddAppSheet.HostCallback() {
+        addAppSheet = new AddAppSheet(this, strings, broker, rpcExecutor, mainHandler, new AddAppSheet.HostCallback() {
             @Override
             public void onAppImported(String pkg, String label) {
                 showToast(strings.importedFmt(label), false);
@@ -249,17 +323,18 @@ public final class MainActivity extends Activity {
             @Override
             public void onDismissed() {
                 Motion.animateFabToggle(fabButton, false);
+                updateMainAccessibility();
             }
         });
         root.addView(addAppSheet, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
-        appActionSheet = new AppActionSheet(this, strings, broker, executor, mainHandler, new AppActionSheet.Callback() {
+        appActionSheet = new AppActionSheet(this, strings, broker, rpcExecutor, mainHandler, new AppActionSheet.Callback() {
             @Override
             public void onActionSuccess(BrokerProtocol.StatusSnapshot snapshot, String toastMessage) {
                 if (snapshot != null && snapshot.policyLoaded) {
                     connected = true;
-                    currentSnapshot = snapshot;
+                    currentSnapshot = snapshot.withPreservedProbeFrom(currentSnapshot);
                     renderSnapshot();
                 } else {
                     refreshStatus(false);
@@ -276,16 +351,21 @@ public final class MainActivity extends Activity {
             public void onCopyToast(String message) {
                 showToast(message, false);
             }
+
+            @Override
+            public void onSheetDismissed() {
+                updateMainAccessibility();
+            }
         });
         root.addView(appActionSheet, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
-        diagnosticsSheet = new DiagnosticsSheet(this, strings, broker, executor, mainHandler, new DiagnosticsSheet.Callback() {
+        diagnosticsSheet = new DiagnosticsSheet(this, strings, broker, rpcExecutor, mainHandler, new DiagnosticsSheet.Callback() {
             @Override
             public void onSnapshotRefreshed(BrokerProtocol.StatusSnapshot snapshot) {
                 if (snapshot != null && snapshot.policyLoaded) {
                     connected = true;
-                    currentSnapshot = snapshot;
+                    currentSnapshot = snapshot.withPreservedProbeFrom(currentSnapshot);
                     renderSnapshot();
                 }
             }
@@ -294,15 +374,21 @@ public final class MainActivity extends Activity {
             public void onToast(String message, boolean error) {
                 showToast(message, error);
             }
+
+            @Override
+            public void onSheetDismissed() {
+                updateMainAccessibility();
+            }
         });
         root.addView(diagnosticsSheet, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
         toastCapsule = new TextView(this);
         toastCapsule.setVisibility(View.GONE);
-        toastCapsule.setTextColor(Color.WHITE);
+        toastCapsule.setTextColor(ThemePalette.toastInk(this));
         toastCapsule.setTextSize(13f);
         toastCapsule.setGravity(Gravity.CENTER);
+        toastCapsule.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         toastCapsule.setPadding(ThemePalette.dp(this, 16f), ThemePalette.dp(this, 10f),
                 ThemePalette.dp(this, 16f), ThemePalette.dp(this, 10f));
         toastCapsule.setElevation(ThemePalette.dp(this, 10f));
@@ -312,7 +398,68 @@ public final class MainActivity extends Activity {
         toastLp.bottomMargin = ThemePalette.dp(this, 96f);
         root.addView(toastCapsule, toastLp);
 
+        attachWindowInsets(root);
         return root;
+    }
+
+    @SuppressWarnings("deprecation")
+    private void attachWindowInsets(FrameLayout root) {
+        root.setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener() {
+            @Override
+            public WindowInsets onApplyWindowInsets(View v, WindowInsets insets) {
+                int left;
+                int top;
+                int right;
+                int bottom;
+                int imeBottom = 0;
+                if (Build.VERSION.SDK_INT >= 30) {
+                    Insets bars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+                    Insets ime = insets.getInsets(WindowInsets.Type.ime());
+                    left = bars.left;
+                    top = bars.top;
+                    right = bars.right;
+                    bottom = bars.bottom;
+                    imeBottom = ime.bottom;
+                } else {
+                    left = insets.getSystemWindowInsetLeft();
+                    top = insets.getSystemWindowInsetTop();
+                    right = insets.getSystemWindowInsetRight();
+                    bottom = insets.getSystemWindowInsetBottom();
+                    if (Build.VERSION.SDK_INT >= 28) {
+                        DisplayCutout cutout = insets.getDisplayCutout();
+                        if (cutout != null) {
+                            left = Math.max(left, cutout.getSafeInsetLeft());
+                            top = Math.max(top, cutout.getSafeInsetTop());
+                            right = Math.max(right, cutout.getSafeInsetRight());
+                            bottom = Math.max(bottom, cutout.getSafeInsetBottom());
+                        }
+                    }
+                }
+
+                int baseH = ThemePalette.dp(MainActivity.this, 20f);
+                int baseTop = ThemePalette.dp(MainActivity.this, 16f);
+                int baseBot = ThemePalette.dp(MainActivity.this, 100f);
+                scrollContent.setPadding(baseH + left, baseTop + top, baseH + right, baseBot + bottom);
+
+                boolean rtl = getResources().getConfiguration().getLayoutDirection() == View.LAYOUT_DIRECTION_RTL;
+                int endInset = rtl ? left : right;
+
+                FrameLayout.LayoutParams fLp = (FrameLayout.LayoutParams) fabButton.getLayoutParams();
+                fLp.setMarginEnd(ThemePalette.dp(MainActivity.this, 22f) + endInset);
+                fLp.bottomMargin = ThemePalette.dp(MainActivity.this, 24f) + bottom;
+                fabButton.setLayoutParams(fLp);
+
+                FrameLayout.LayoutParams tLp = (FrameLayout.LayoutParams) toastCapsule.getLayoutParams();
+                tLp.bottomMargin = ThemePalette.dp(MainActivity.this, 96f) + bottom;
+                toastCapsule.setLayoutParams(tLp);
+
+                addAppSheet.setBottomInset(Math.max(bottom, imeBottom));
+                appActionSheet.setBottomInset(bottom);
+                diagnosticsSheet.setBottomInset(bottom);
+                return insets;
+            }
+        });
+        root.requestApplyInsets();
     }
 
     private View buildHeaderRow() {
@@ -326,9 +473,10 @@ public final class MainActivity extends Activity {
 
         ImageView logo = new ImageView(this);
         logo.setImageResource(R.mipmap.ic_launcher);
+        logo.setContentDescription(strings.a11yLogo());
         LinearLayout.LayoutParams logoLp = new LinearLayout.LayoutParams(
                 ThemePalette.dp(this, 36f), ThemePalette.dp(this, 36f));
-        logoLp.rightMargin = ThemePalette.dp(this, 10f);
+        logoLp.setMarginEnd(ThemePalette.dp(this, 10f));
         row.addView(logo, logoLp);
 
         TextView wordmark = new TextView(this);
@@ -350,7 +498,7 @@ public final class MainActivity extends Activity {
                 ThemePalette.dp(this, 11f), ThemePalette.dp(this, 5f));
         LinearLayout.LayoutParams pillLp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        pillLp.rightMargin = ThemePalette.dp(this, 8f);
+        pillLp.setMarginEnd(ThemePalette.dp(this, 8f));
         row.addView(modePill, pillLp);
 
         diagIconBtn = new ImageView(this);
@@ -358,8 +506,8 @@ public final class MainActivity extends Activity {
         diagIconBtn.setColorFilter(ThemePalette.inkSecondary(this));
         diagIconBtn.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
         diagIconBtn.setContentDescription(strings.diagTitle());
-        diagIconBtn.setPadding(ThemePalette.dp(this, 8f), ThemePalette.dp(this, 8f),
-                ThemePalette.dp(this, 8f), ThemePalette.dp(this, 8f));
+        diagIconBtn.setPadding(ThemePalette.dp(this, 10f), ThemePalette.dp(this, 10f),
+                ThemePalette.dp(this, 10f), ThemePalette.dp(this, 10f));
         diagIconBtn.setBackground(ThemePalette.circleRippleDrawable(
                 this, ThemePalette.surfaceCard(this), ThemePalette.surfacePressed(this), ThemePalette.borderHairline(this)));
         Motion.attachPressScale(diagIconBtn);
@@ -367,19 +515,21 @@ public final class MainActivity extends Activity {
             @Override
             public void onClick(View v) {
                 diagnosticsSheet.show(currentSnapshot, connected);
+                updateMainAccessibility();
             }
         });
         LinearLayout.LayoutParams diagLp = new LinearLayout.LayoutParams(
-                ThemePalette.dp(this, 36f), ThemePalette.dp(this, 36f));
-        diagLp.rightMargin = ThemePalette.dp(this, 8f);
+                ThemePalette.dp(this, 42f), ThemePalette.dp(this, 42f));
+        diagLp.setMarginEnd(ThemePalette.dp(this, 8f));
         row.addView(diagIconBtn, diagLp);
 
         refreshIconBtn = new ImageView(this);
         refreshIconBtn.setImageResource(android.R.drawable.ic_popup_sync);
         refreshIconBtn.setColorFilter(ThemePalette.inkSecondary(this));
         refreshIconBtn.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
-        refreshIconBtn.setPadding(ThemePalette.dp(this, 8f), ThemePalette.dp(this, 8f),
-                ThemePalette.dp(this, 8f), ThemePalette.dp(this, 8f));
+        refreshIconBtn.setContentDescription(strings.a11yRefresh());
+        refreshIconBtn.setPadding(ThemePalette.dp(this, 10f), ThemePalette.dp(this, 10f),
+                ThemePalette.dp(this, 10f), ThemePalette.dp(this, 10f));
         refreshIconBtn.setBackground(ThemePalette.circleRippleDrawable(
                 this, ThemePalette.surfaceCard(this), ThemePalette.surfacePressed(this), ThemePalette.borderHairline(this)));
         Motion.attachPressScale(refreshIconBtn);
@@ -391,7 +541,7 @@ public final class MainActivity extends Activity {
             }
         });
         row.addView(refreshIconBtn, new LinearLayout.LayoutParams(
-                ThemePalette.dp(this, 36f), ThemePalette.dp(this, 36f)));
+                ThemePalette.dp(this, 42f), ThemePalette.dp(this, 42f)));
         return row;
     }
 
@@ -415,7 +565,7 @@ public final class MainActivity extends Activity {
         haloView = new BreathingHaloView(this);
         LinearLayout.LayoutParams haloLp = new LinearLayout.LayoutParams(
                 ThemePalette.dp(this, 52f), ThemePalette.dp(this, 52f));
-        haloLp.rightMargin = ThemePalette.dp(this, 14f);
+        haloLp.setMarginEnd(ThemePalette.dp(this, 14f));
         topRow.addView(haloView, haloLp);
 
         LinearLayout infoCol = new LinearLayout(this);
@@ -485,6 +635,37 @@ public final class MainActivity extends Activity {
             }
         });
         offlineCertBox.addView(copyCertBtn);
+
+        TextView copyPolicyBtn = new TextView(this);
+        copyPolicyBtn.setText(strings.btnCopyPolicySnippet());
+        copyPolicyBtn.setTextColor(ThemePalette.inkPrimary(this));
+        copyPolicyBtn.setTextSize(11.5f);
+        copyPolicyBtn.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+        copyPolicyBtn.setBackground(ThemePalette.pillRippleDrawable(
+                this, ThemePalette.surfaceCard(this), ThemePalette.surfacePressed(this), ThemePalette.borderHairline(this), 14f));
+        copyPolicyBtn.setPadding(ThemePalette.dp(this, 10f), ThemePalette.dp(this, 6f),
+                ThemePalette.dp(this, 10f), ThemePalette.dp(this, 6f));
+        LinearLayout.LayoutParams polBtnLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        polBtnLp.setMarginStart(ThemePalette.dp(this, 6f));
+        Motion.attachPressScale(copyPolicyBtn);
+        copyPolicyBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (!certSha256.isEmpty()) {
+                    String snippet = "{\n"
+                            + "  \"caller_package\": \"com.sandbox.controller\",\n"
+                            + "  \"caller_cert_sha256\": \"" + certSha256 + "\"\n"
+                            + "}";
+                    ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                    if (cm != null) {
+                        cm.setPrimaryClip(ClipData.newPlainText("kernbox-policy-snippet", snippet));
+                    }
+                    showToast(strings.copiedPolicySnippetToast(), false);
+                }
+            }
+        });
+        offlineCertBox.addView(copyPolicyBtn, polBtnLp);
         card.addView(offlineCertBox, certBoxLp);
 
         primaryToggleBtn = new TextView(this);
@@ -578,7 +759,7 @@ public final class MainActivity extends Activity {
         wrapper.setOrientation(LinearLayout.VERTICAL);
 
         appsGrid = new GridLayout(this);
-        appsGrid.setColumnCount(4);
+        appsGrid.setColumnCount(computeGridColumns());
         appsGrid.setAlignmentMode(GridLayout.ALIGN_BOUNDS);
         wrapper.addView(appsGrid, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
@@ -626,6 +807,7 @@ public final class MainActivity extends Activity {
             Motion.animateFabToggle(fabButton, true);
             addAppSheet.show(currentSnapshot.sandboxApps);
         }
+        updateMainAccessibility();
     }
 
     private void onPrimaryToggleClicked() {
@@ -639,7 +821,7 @@ public final class MainActivity extends Activity {
         final boolean targetPause = !currentSnapshot.paused;
         busy = true;
         renderSnapshot();
-        executor.execute(new Runnable() {
+        rpcExecutor.execute(new Runnable() {
             @Override
             public void run() {
                 final BrokerProtocol.RpcResponse resp = targetPause
@@ -662,7 +844,7 @@ public final class MainActivity extends Activity {
         }
         busy = true;
         renderSnapshot();
-        executor.execute(new Runnable() {
+        rpcExecutor.execute(new Runnable() {
             @Override
             public void run() {
                 final BrokerProtocol.RpcResponse resp = broker.getStatus();
@@ -680,18 +862,21 @@ public final class MainActivity extends Activity {
     private void applyRpcResponse(BrokerProtocol.RpcResponse resp, boolean notifyError) {
         if (resp.offline) {
             connected = false;
+            lastOfflineReason = resp.offlineReason;
             currentSnapshot = BrokerProtocol.StatusSnapshot.empty();
             if (notifyError && !resp.error.isEmpty()) {
                 showToast(resp.error, true);
             }
         } else if (!resp.ok) {
             connected = true;
+            lastOfflineReason = BrokerProtocol.OfflineReason.NONE;
             if (!resp.error.isEmpty()) {
                 showToast(strings.failPrefix() + resp.error, true);
             }
         } else {
             connected = true;
-            currentSnapshot = resp.snapshot;
+            lastOfflineReason = BrokerProtocol.OfflineReason.NONE;
+            currentSnapshot = resp.snapshot.withPreservedProbeFrom(currentSnapshot);
         }
         renderSnapshot();
     }
@@ -716,7 +901,13 @@ public final class MainActivity extends Activity {
             modePill.setBackground(ThemePalette.cardDrawable(
                     this, ThemePalette.surfaceSubtle(this), ThemePalette.borderHairline(this), 16f));
             statusTitleView.setText(strings.statusOfflineTitle());
-            statusSubtitleView.setText(strings.offlineHint());
+            if (lastOfflineReason == BrokerProtocol.OfflineReason.CERT_UNPINNED) {
+                statusSubtitleView.setText(strings.offlineCertUnpinnedHint());
+            } else if (lastOfflineReason == BrokerProtocol.OfflineReason.SELINUX_DENIED) {
+                statusSubtitleView.setText(strings.offlineSelinuxHint());
+            } else {
+                statusSubtitleView.setText(strings.offlineHint());
+            }
             offlineCertBox.setVisibility(certSha256.isEmpty() ? View.GONE : View.VISIBLE);
             primaryToggleBtn.setText(strings.btnRetry());
             primaryToggleBtn.setTextColor(ThemePalette.inkPrimary(this));
@@ -771,20 +962,30 @@ public final class MainActivity extends Activity {
     }
 
     private void renderSandboxApps(List<String> apps) {
-        appsGrid.removeAllViews();
         appsCountPill.setText(String.valueOf(apps.size()));
         if (apps.isEmpty()) {
+            renderedApps = Collections.emptyList();
+            appsGrid.removeAllViews();
             appsGrid.setVisibility(View.GONE);
             emptyStateCard.setVisibility(View.VISIBLE);
             return;
         }
+        if (apps.equals(renderedApps) && appsGrid.getChildCount() == apps.size()) {
+            return;
+        }
+        renderedApps = new ArrayList<String>(apps);
+        appsGrid.removeAllViews();
         appsGrid.setVisibility(View.VISIBLE);
         emptyStateCard.setVisibility(View.GONE);
 
-        PackageManager pm = getPackageManager();
+        final List<String> missingIcons = new ArrayList<String>();
         for (int i = 0; i < apps.size(); i++) {
             final String pkg = apps.get(i);
-            final AppTileInfo info = resolveTileInfo(pm, pkg);
+            AppTileInfo info = tileCache.get(pkg);
+            if (info == null) {
+                info = new AppTileInfo(pkg, shortPkgLabel(pkg), null);
+                missingIcons.add(pkg);
+            }
             View tile = buildAppTile(info, i);
             GridLayout.LayoutParams glp = new GridLayout.LayoutParams();
             glp.width = 0;
@@ -793,6 +994,76 @@ public final class MainActivity extends Activity {
             glp.setMargins(margin, margin, margin, ThemePalette.dp(this, 8f));
             appsGrid.addView(tile, glp);
         }
+        if (!missingIcons.isEmpty()) {
+            loadTileInfoAsync(missingIcons);
+        }
+    }
+
+    private void loadTileInfoAsync(final List<String> pkgs) {
+        final Context appCtx = getApplicationContext();
+        iconExecutor.execute(new Runnable() {
+            @Override
+            public void run() {
+                PackageManager pm = appCtx.getPackageManager();
+                LauncherApps la = (LauncherApps) appCtx.getSystemService(Context.LAUNCHER_APPS_SERVICE);
+                UserManager um = (UserManager) appCtx.getSystemService(Context.USER_SERVICE);
+                List<UserHandle> profiles = um != null ? um.getUserProfiles() : Collections.<UserHandle>emptyList();
+                final List<AppTileInfo> resolved = new ArrayList<AppTileInfo>(pkgs.size());
+                for (String pkg : pkgs) {
+                    resolved.add(resolveTileInfoWorker(pm, la, profiles, pkg));
+                }
+                mainHandler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        for (AppTileInfo item : resolved) {
+                            tileCache.put(item.pkg, item);
+                        }
+                        if (renderedApps.isEmpty()) {
+                            return;
+                        }
+                        for (int i = 0; i < appsGrid.getChildCount(); i++) {
+                            View child = appsGrid.getChildAt(i);
+                            if (child.getTag() instanceof AppTileHolder) {
+                                AppTileHolder h = (AppTileHolder) child.getTag();
+                                AppTileInfo updated = tileCache.get(h.pkg);
+                                if (updated != null) {
+                                    h.bind(updated);
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+        });
+    }
+
+    private AppTileInfo resolveTileInfoWorker(
+            PackageManager pm, LauncherApps la, List<UserHandle> profiles, String pkg) {
+        try {
+            @SuppressWarnings("deprecation")
+            ApplicationInfo ai = pm.getApplicationInfo(pkg, 0);
+            CharSequence cs = pm.getApplicationLabel(ai);
+            String label = cs != null ? cs.toString().trim() : shortPkgLabel(pkg);
+            Drawable icon = pm.getApplicationIcon(ai);
+            return new AppTileInfo(pkg, label.isEmpty() ? shortPkgLabel(pkg) : label, icon);
+        } catch (PackageManager.NameNotFoundException ignored) {
+        }
+        if (la != null && profiles != null) {
+            for (UserHandle uh : profiles) {
+                try {
+                    List<LauncherActivityInfo> acts = la.getActivityList(pkg, uh);
+                    if (acts != null && !acts.isEmpty()) {
+                        LauncherActivityInfo act = acts.get(0);
+                        CharSequence lbl = act.getLabel();
+                        String label = lbl != null ? lbl.toString().trim() : shortPkgLabel(pkg);
+                        Drawable icon = act.getIcon(0);
+                        return new AppTileInfo(pkg, label.isEmpty() ? shortPkgLabel(pkg) : label, icon);
+                    }
+                } catch (SecurityException ignored) {
+                }
+            }
+        }
+        return new AppTileInfo(pkg, shortPkgLabel(pkg), null);
     }
 
     private static final class AppTileInfo {
@@ -807,16 +1078,34 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private AppTileInfo resolveTileInfo(PackageManager pm, String pkg) {
-        try {
-            @SuppressWarnings("deprecation")
-            ApplicationInfo ai = pm.getApplicationInfo(pkg, 0);
-            CharSequence cs = pm.getApplicationLabel(ai);
-            String label = cs != null ? cs.toString().trim() : shortPkgLabel(pkg);
-            Drawable icon = pm.getApplicationIcon(ai);
-            return new AppTileInfo(pkg, label, icon);
-        } catch (PackageManager.NameNotFoundException ex) {
-            return new AppTileInfo(pkg, shortPkgLabel(pkg), null);
+    private static final class AppTileHolder {
+        final String pkg;
+        final ImageView iconView;
+        final TextView monoView;
+        final TextView labelView;
+        AppTileInfo boundInfo;
+
+        AppTileHolder(String pkg, ImageView iconView, TextView monoView, TextView labelView, AppTileInfo initial) {
+            this.pkg = pkg;
+            this.iconView = iconView;
+            this.monoView = monoView;
+            this.labelView = labelView;
+            this.boundInfo = initial;
+        }
+
+        void bind(AppTileInfo info) {
+            this.boundInfo = info;
+            labelView.setText(info.label);
+            if (info.icon != null) {
+                iconView.setVisibility(View.VISIBLE);
+                monoView.setVisibility(View.GONE);
+                iconView.setImageDrawable(info.icon);
+            } else {
+                iconView.setVisibility(View.GONE);
+                monoView.setVisibility(View.VISIBLE);
+                String first = info.label.isEmpty() ? "?" : info.label.substring(0, 1).toUpperCase(Locale.ROOT);
+                monoView.setText(first);
+            }
         }
     }
 
@@ -834,31 +1123,25 @@ public final class MainActivity extends Activity {
         tile.setPadding(ThemePalette.dp(this, 6f), ThemePalette.dp(this, 12f),
                 ThemePalette.dp(this, 6f), ThemePalette.dp(this, 10f));
 
-        if (info.icon != null) {
-            ImageView iv = new ImageView(this);
-            iv.setImageDrawable(info.icon);
-            LinearLayout.LayoutParams ivLp = new LinearLayout.LayoutParams(
-                    ThemePalette.dp(this, 40f), ThemePalette.dp(this, 40f));
-            ivLp.bottomMargin = ThemePalette.dp(this, 6f);
-            tile.addView(iv, ivLp);
-        } else {
-            TextView mono = new TextView(this);
-            String first = info.label.isEmpty() ? "?" : info.label.substring(0, 1).toUpperCase(Locale.ROOT);
-            mono.setText(first);
-            mono.setTextColor(ThemePalette.accentCopper(this));
-            mono.setTextSize(16f);
-            mono.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
-            mono.setGravity(Gravity.CENTER);
-            mono.setBackground(ThemePalette.circleRippleDrawable(
-                    this, ThemePalette.accentCopperSoft(this), ThemePalette.surfacePressed(this), ThemePalette.borderHairline(this)));
-            LinearLayout.LayoutParams mLp = new LinearLayout.LayoutParams(
-                    ThemePalette.dp(this, 40f), ThemePalette.dp(this, 40f));
-            mLp.bottomMargin = ThemePalette.dp(this, 6f);
-            tile.addView(mono, mLp);
-        }
+        int iconPx = ThemePalette.dp(this, 40f);
+        FrameLayout iconSlot = new FrameLayout(this);
+        LinearLayout.LayoutParams slotLp = new LinearLayout.LayoutParams(iconPx, iconPx);
+        slotLp.bottomMargin = ThemePalette.dp(this, 6f);
+
+        ImageView iv = new ImageView(this);
+        iconSlot.addView(iv, new FrameLayout.LayoutParams(iconPx, iconPx));
+
+        TextView mono = new TextView(this);
+        mono.setTextColor(ThemePalette.accentCopper(this));
+        mono.setTextSize(16f);
+        mono.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+        mono.setGravity(Gravity.CENTER);
+        mono.setBackground(ThemePalette.circleRippleDrawable(
+                this, ThemePalette.accentCopperSoft(this), ThemePalette.surfacePressed(this), ThemePalette.borderHairline(this)));
+        iconSlot.addView(mono, new FrameLayout.LayoutParams(iconPx, iconPx));
+        tile.addView(iconSlot, slotLp);
 
         TextView labelTv = new TextView(this);
-        labelTv.setText(info.label);
         labelTv.setTextColor(ThemePalette.inkPrimary(this));
         labelTv.setTextSize(11.5f);
         labelTv.setMaxLines(1);
@@ -866,18 +1149,24 @@ public final class MainActivity extends Activity {
         labelTv.setGravity(Gravity.CENTER);
         tile.addView(labelTv);
 
+        final AppTileHolder holder = new AppTileHolder(info.pkg, iv, mono, labelTv, info);
+        holder.bind(info);
+        tile.setTag(holder);
+
         Motion.attachPressScale(tile);
         Motion.animateEntrance(tile, index, ThemePalette.dp(this, 10f));
         tile.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                launchSandboxApp(info);
+                launchSandboxApp(holder.boundInfo);
             }
         });
         tile.setOnLongClickListener(new View.OnLongClickListener() {
             @Override
             public boolean onLongClick(View v) {
-                appActionSheet.show(info.pkg, info.label, info.icon);
+                AppTileInfo cur = holder.boundInfo;
+                appActionSheet.show(cur.pkg, cur.label, cur.icon);
+                updateMainAccessibility();
                 return true;
             }
         });
@@ -886,7 +1175,7 @@ public final class MainActivity extends Activity {
 
     private void launchSandboxApp(final AppTileInfo info) {
         showToast(strings.launchingFmt(info.label), false);
-        executor.execute(new Runnable() {
+        rpcExecutor.execute(new Runnable() {
             @Override
             public void run() {
                 final BrokerProtocol.RpcResponse resp = broker.launchApp(info.pkg);
@@ -907,9 +1196,10 @@ public final class MainActivity extends Activity {
     private void showToast(String message, boolean isError) {
         mainHandler.removeCallbacks(hideToastTask);
         toastCapsule.setText(message);
+        toastCapsule.setTextColor(isError ? Color.WHITE : ThemePalette.toastInk(this));
         toastCapsule.setBackground(ThemePalette.cardDrawable(
                 this,
-                isError ? ThemePalette.accentError(this) : ThemePalette.INK_PRIMARY,
+                isError ? ThemePalette.accentError(this) : ThemePalette.toastSurface(this),
                 ThemePalette.isDark(this) ? ThemePalette.borderHairline(this) : Color.TRANSPARENT,
                 20f));
         toastCapsule.setVisibility(View.VISIBLE);

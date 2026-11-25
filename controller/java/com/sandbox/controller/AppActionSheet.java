@@ -32,6 +32,7 @@ public final class AppActionSheet extends FrameLayout {
         void onActionSuccess(BrokerProtocol.StatusSnapshot snapshot, String toastMessage);
         void onActionError(String errorMessage);
         void onCopyToast(String message);
+        void onSheetDismissed();
     }
 
     private final Strings strings;
@@ -125,7 +126,7 @@ public final class AppActionSheet extends FrameLayout {
                 ctx, ThemePalette.accentCopperSoft(ctx), ThemePalette.surfacePressed(ctx), ThemePalette.borderHairline(ctx)));
         iconBox.addView(appMonoView, new FrameLayout.LayoutParams(iconPx, iconPx));
         LinearLayout.LayoutParams boxLp = new LinearLayout.LayoutParams(iconPx, iconPx);
-        boxLp.rightMargin = ThemePalette.dp(ctx, 12f);
+        boxLp.setMarginEnd(ThemePalette.dp(ctx, 12f));
         idRow.addView(iconBox, boxLp);
 
         LinearLayout metaCol = new LinearLayout(ctx);
@@ -223,6 +224,12 @@ public final class AppActionSheet extends FrameLayout {
         return tv;
     }
 
+    public void setBottomInset(int bottomPx) {
+        int hPad = ThemePalette.dp(getContext(), 20f);
+        sheetContainer.setPadding(hPad, ThemePalette.dp(getContext(), 12f), hPad,
+                ThemePalette.dp(getContext(), 24f) + Math.max(0, bottomPx));
+    }
+
     public boolean isOpen() {
         return open;
     }
@@ -285,6 +292,7 @@ public final class AppActionSheet extends FrameLayout {
                         sheetContainer.animate().setListener(null);
                         if (!open) {
                             setVisibility(View.GONE);
+                            callback.onSheetDismissed();
                         }
                     }
                 })

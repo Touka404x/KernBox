@@ -25,7 +25,7 @@ public final class ThemePalette {
 
     public static final int INK_PRIMARY = 0xFF1C2026;
     public static final int INK_SECONDARY = 0xFF6B6F76;
-    public static final int INK_MUTED = 0xFF96938A;
+    public static final int INK_MUTED = 0xFF6E6B63;
 
     public static final int ACCENT_COPPER = 0xFFB8704F;
     public static final int ACCENT_COPPER_PRESSED = 0xFF9E5D3F;
@@ -47,7 +47,7 @@ public final class ThemePalette {
 
     private static final int DARK_INK_PRIMARY = 0xFFF2EEE6;
     private static final int DARK_INK_SECONDARY = 0xFFB0ACA3;
-    private static final int DARK_INK_MUTED = 0xFF7D7B74;
+    private static final int DARK_INK_MUTED = 0xFF9E9A91;
 
     private static final int DARK_ACCENT_COPPER = 0xFFC97F5D;
     private static final int DARK_ACCENT_COPPER_PRESSED = 0xFFAF6A4A;
@@ -85,6 +85,8 @@ public final class ThemePalette {
     public static int accentStone(Context ctx) { return isDark(ctx) ? DARK_ACCENT_STONE : ACCENT_STONE; }
     public static int accentError(Context ctx) { return isDark(ctx) ? DARK_ACCENT_ERROR : ACCENT_ERROR; }
     public static int accentErrorSoft(Context ctx) { return isDark(ctx) ? DARK_ACCENT_ERROR_SOFT : ACCENT_ERROR_SOFT; }
+    public static int toastSurface(Context ctx) { return isDark(ctx) ? DARK_INK_PRIMARY : INK_PRIMARY; }
+    public static int toastInk(Context ctx) { return isDark(ctx) ? DARK_BG_PAPER : Color.WHITE; }
 
     public static int dp(Context ctx, float value) {
         return Math.round(TypedValue.applyDimension(
