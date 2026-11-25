@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/kernbox-icon.png" width="104" height="104" alt="KernBox" />
+  <img src="assets/kernbox-icon.png" width="96" height="96" alt="KernBox" />
 </p>
 
 <h1 align="center">KernBox</h1>
@@ -11,10 +11,10 @@
 
 <p align="center">
   <a href="https://github.com/Touka404x/KernBox/actions/workflows/ci.yml"><img src="https://github.com/Touka404x/KernBox/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
-  <a href="https://github.com/Touka404x/KernBox/releases/latest"><img src="https://img.shields.io/github/v/release/Touka404x/KernBox?color=B8704F&label=Release" alt="Release" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-2F7A58.svg" alt="License" /></a>
-  <img src="https://img.shields.io/badge/Android-12%2B%20ARM64-3DDC84.svg" alt="Android 12+ ARM64" />
-  <img src="https://img.shields.io/badge/Builds-30%20Lean%20Variants-1C2026.svg" alt="30 Lean Variants" />
+  <a href="https://github.com/Touka404x/KernBox/releases/latest"><img src="https://img.shields.io/github/v/release/Touka404x/KernBox?color=B8704F&label=Release&style=flat-square" alt="Release" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-2F7A58.svg?style=flat-square" alt="License" /></a>
+  <img src="https://img.shields.io/badge/Android-12%2B_ARM64-2F7A58.svg?style=flat-square" alt="Android 12+ ARM64" />
+  <img src="https://img.shields.io/badge/Builds-30_Lean_Variants-1C2026.svg?style=flat-square" alt="30 Lean Variants" />
 </p>
 
 <p align="center">
@@ -27,13 +27,11 @@
   <a href="agent-prompts/INSTALL_CN.md">AI 安装剧本</a>
 </p>
 
----
-
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/kernbox-showcase-zh-dark.png" />
     <source media="(prefers-color-scheme: light)" srcset="assets/kernbox-showcase-zh-light.png" />
-    <img src="assets/kernbox-showcase-zh-dark.png" width="100%" alt="KernBox 极简控制端明暗双主题与实时隔离自检展示" />
+    <img src="assets/kernbox-showcase-zh-dark.png" width="100%" alt="KernBox 内核级 Work Profile 隔离架构与极简控制端明暗双主题主视觉" />
   </picture>
 </p>
 
