@@ -20,7 +20,7 @@
 <p align="center">
   <strong>简体中文</strong> ·
   <a href="README_EN.md">English</a> ·
-  <a href="https://github.com/Touka404x/KernBox/releases/latest">下载 v1.0.0</a> ·
+  <a href="https://github.com/Touka404x/KernBox/releases/latest">下载发布包</a> ·
   <a href="ARCHITECTURE.md">架构原理</a> ·
   <a href="docs/TPROXY_INTEGRATION.md">TProxy 对接</a> ·
   <a href="docs/FAQ.md">常见问题</a> ·
@@ -48,7 +48,7 @@
 | **1. 瞬断漏流与 IPv6 泄漏** | 开机未连代理、锁屏杀后台、切换节点或升级代理核的瞬间，工作区 App 直接走真实宽带/IPv6 直连暴露。 | **Fail-Closed 原子防火墙 + 升级围栏**：通过 `iptables-restore --noflush` 维护 `SBW_RAW_OUTPUT` / `SBW_TPROXY_*`，默认主路径 **零 `TRANSPORT_VPN` 特征**，未收到代理核确认前确定性阻断。 |
 | **2. 工作空间与区域环境矛盾** | 目标 App（含 `isolatedProcess` 进程）可读取 Work Profile 管理状态、本地回环 VPN 特征，或发现「代理出口在日本但系统语言/时区/运营商仍是本地」。 | **双层 Zygisk PLT + Binder 动态代理**：拦截 Work Profile/Connectivity/Wifi/Bluetooth/Location 等接口与 Native 属性，配套 6 套可热切换的 [`presets/`](presets/) 区域预设，并保持真实硬件属性前后一致。 |
 | **3. 全家桶后台唤醒狂掉电** | 工作空间里常驻的 GMS 与海外应用在息屏后频繁唤醒，导致主力机发热掉电。 | **微秒级 cgroup v2 热冻结 & 内存回收**：暂停时原生写入 `cgroup.freeze`（`k419` 回退 cgroup v1）并按需触发 `process_madvise(MADV_PAGEOUT)`，用完即冻、打开即恢复。 |
-| **4. 通用模块臃肿、容易卡开机** | 单个模块硬塞所有 OEM 适配和老内核兼容代码，包体庞大、SELinux 规则过宽、刷错即变砖。 | **30 个编译期特化精简版 + AI Agent 选包**：按 `5 OEM × 2 内核 × 3 Root` 编译裁剪（单包 ~4.1 MB），自动 **两连开机失败关闭隐身熔断**，配套零依赖 [`KernBox.apk`](controller/) 控制端。 |
+| **4. 通用模块臃肿、容易卡开机** | 单个模块硬塞所有 OEM 适配和老内核兼容代码，包体庞大、SELinux 规则过宽、刷错即变砖。 | **30 个编译期特化精简版 + AI Agent 选包**：按 `5 OEM × 2 内核 × 3 Root` 编译裁剪（单包 ~4.1 MB），自动 **两连开机失败关闭隐身熔断**，配套浅/深色自适应 [`KernBox.apk`](controller/)（支持离线指纹复制、长按强停/卸载、App 内实时自检）。 |
 
 > [!NOTE]
 > **能力边界声明（不吹牛、讲真话）**  
@@ -118,7 +118,7 @@ flowchart LR
 配置好 `go`（匹配 [`guard/go.mod`](guard/go.mod)）、`JAVA_HOME`（JDK 21）、`ANDROID_SDK_ROOT`（`android-35` + `build-tools;35.0.0`）、`ANDROID_NDK_HOME` 与 Python 3.10+ 后执行：
 
 ```bash
-python ./tools/build_matrix.py --version 1.0.0
+python ./tools/build_matrix.py --version 1.1.0
 ```
 
 全部产出写入 `./dist/`（已 gitignore）：30 个 `KernBox-*-arm64.zip`、`KernBox.apk`、`KernBoxVerify.apk`、`SHA256SUMS.txt` 与 `variants-manifest.json`。所有源码均强制通过 [`tools/verify_privacy_leak.py`](tools/verify_privacy_leak.py) 门禁校验，不含任何遥测、硬件序列号、私有 IP 或预置密钥，基于 [Apache License 2.0](LICENSE) 开源。

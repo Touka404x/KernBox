@@ -20,7 +20,7 @@
 <p align="center">
   <a href="README.md">简体中文</a> ·
   <strong>English</strong> ·
-  <a href="https://github.com/Touka404x/KernBox/releases/latest">Download v1.0.0</a> ·
+  <a href="https://github.com/Touka404x/KernBox/releases/latest">Download Latest</a> ·
   <a href="ARCHITECTURE.md">Architecture</a> ·
   <a href="docs/TPROXY_INTEGRATION.md">TProxy Guide</a> ·
   <a href="docs/FAQ.md">FAQ</a> ·
@@ -48,7 +48,7 @@ Keeping privacy-sensitive or region-locked ecosystems (isolated Google services,
 | **1. Transient & IPv6 Leaks** | Apps leak direct IPv4/IPv6 traffic during boot, screen-off kills, proxy switches, or proxy-core upgrades. | **Fail-Closed Netfilter & Upgrade Fence**: Atomic `iptables-restore --noflush` rules across `SBW_RAW_OUTPUT` / `SBW_TPROXY_*`, zero `TRANSPORT_VPN` footprint on the default TProxy path. |
 | **2. Work Profile & Locale Mismatches** | Sandboxed apps (and `isolatedProcess`) inspect Work Profile APIs, `VpnTransport`, or notice locale/timezone/carrier contradictions. | **Two-Layer Zygisk PLT + Binder Proxy**: In-memory DEX proxy + zero-alloc native hooks + 6 hot-switchable [`presets/`](presets/) keeping true hardware identity consistent. |
 | **3. Heavy Idle Battery Drain** | Isolated GMS and background services keep waking the CPU even when unused. | **Microsecond Hot-Freeze & Reclaim**: Native cgroup v2 `cgroup.freeze` (`k510`) + `process_madvise(MADV_PAGEOUT)`, falling back cleanly to cgroup v1 on `k419`. |
-| **4. Bloated Modules & Bootloops** | Universal zip bundles carry dead OEM workarounds, wide SELinux rules, and brittle installs. | **30 Lean Variants + AI Co-Install**: Compile-time specialization (`5 OEMs × 2 Kernel Tiers × 3 Root Managers`, ~4.1 MB), automatic 2-strike bootloop kill-switch, and pure-SDK [`KernBox.apk`](controller/). |
+| **4. Bloated Modules & Bootloops** | Universal zip bundles carry dead OEM workarounds, wide SELinux rules, and brittle installs. | **30 Lean Variants + AI Co-Install**: Compile-time specialization (`5 OEMs × 2 Kernel Tiers × 3 Root Managers`, ~4.1 MB), automatic 2-strike bootloop kill-switch, and Light/Dark adaptive [`KernBox.apk`](controller/) (offline cert copy, long-press Stop/Remove, in-app `RUN_PROBE` diagnostics). |
 
 > [!NOTE]
 > **Honest Threat-Model Boundary**  
@@ -106,7 +106,7 @@ Every release ships `5 OEMs × 2 Kernel Tiers × 3 Root Managers per tier = 30 A
 With `go` (matching [`guard/go.mod`](guard/go.mod)), `JAVA_HOME` (JDK 21), `ANDROID_SDK_ROOT` (`platforms;android-35`, `build-tools;35.0.0`), `ANDROID_NDK_HOME`, and Python 3.10+:
 
 ```bash
-python ./tools/build_matrix.py --version 1.0.0
+python ./tools/build_matrix.py --version 1.1.0
 ```
 
 Outputs are written to `./dist/` (gitignored). All repository commits pass [`tools/verify_privacy_leak.py`](tools/verify_privacy_leak.py) with zero telemetry, hardware serials, private IPs, or prebuilt keystores, released under [Apache License 2.0](LICENSE).
