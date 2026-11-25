@@ -125,6 +125,7 @@ type Daemon struct {
 	packagesListPath   string
 	proxyCtlScript     string
 	apkStagingDirs     []string
+	appliedLockPath    string
 
 	mu                 sync.Mutex
 	policy             contracts.Policy
@@ -204,7 +205,6 @@ func NewDaemon() (*Daemon, error) {
 		state:            StateBlockedBoot,
 		workCfgDir:         contracts.WorkCfgDir,
 		desiredStatePath:   contracts.DesiredStatePath,
-		exemptionPath:      contracts.ExemptionPath,
 		upgradeFencePath:   contracts.UpgradeFencePath,
 		stealthConfigPath:    contracts.StealthConfigPath,
 		stealthRuntimePath:   contracts.StealthRuntimePath,
@@ -390,11 +390,16 @@ func (d *Daemon) cancelMaintenance() {
 }
 
 func (d *Daemon) loadPersistedState() {
+	exPath := contracts.ExemptionPath
 	if p, err := ReadPolicy(); err == nil {
 		d.policy = p
 		d.policyLoaded = true
+		d.applyPolicyNetfilterLock(p)
+		exPath = d.resolvedExemptionPath(p)
+	} else {
+		exPath = d.resolvedExemptionPath()
 	}
-	if ex, err := ReadExemption(contracts.ExemptionPath); err == nil {
+	if ex, err := ReadExemption(exPath); err == nil {
 		d.lastGen = ex.Generation
 		if ex.BootID == d.bootID {
 			d.currentExemption = &ex
@@ -574,11 +579,35 @@ func (d *Daemon) readCurrentAck(policy ...contracts.Policy) *contracts.SandboxAc
 	return ack
 }
 
-func (d *Daemon) writeExemption(ex contracts.ExemptionV1) error {
-	p := d.exemptionPath
-	if p == "" {
-		p = contracts.ExemptionPath
+func (d *Daemon) resolvedExemptionPath(policy ...contracts.Policy) string {
+	if d.exemptionPath != "" {
+		return d.exemptionPath
 	}
+	if len(policy) > 0 {
+		return policy[0].EffectiveExemptionPath()
+	}
+	d.mu.Lock()
+	loaded, pol := d.policyLoaded, d.policy
+	d.mu.Unlock()
+	if loaded {
+		return pol.EffectiveExemptionPath()
+	}
+	return contracts.ExemptionPath
+}
+
+func (d *Daemon) applyPolicyNetfilterLock(p contracts.Policy) {
+	if d.nf == nil {
+		return
+	}
+	if d.nf.LockPath == "" || d.nf.LockPath == contracts.SharedLockPath || d.nf.LockPath == d.appliedLockPath {
+		target := p.EffectiveNetfilterLockPath()
+		d.nf.LockPath = target
+		d.appliedLockPath = target
+	}
+}
+
+func (d *Daemon) writeExemption(ex contracts.ExemptionV1) error {
+	p := d.resolvedExemptionPath()
 	b, err := json.Marshal(ex)
 	if err != nil {
 		return err
@@ -2656,6 +2685,7 @@ func (d *Daemon) HandleCtl(ctx context.Context, cmd string, args []string) (stri
 		d.policyLoaded = true
 		d.cachedID = nil
 		d.mu.Unlock()
+		d.applyPolicyNetfilterLock(p)
 		if d.watchers != nil && d.sandboxAckPath == "" {
 			d.watchers.EnsureProxyBaseWatch(filepath.Dir(p.EffectiveProxyAckPath()))
 		}
@@ -3270,10 +3300,12 @@ func RunCtl(args []string) error {
 			fmt.Println("unpinned")
 			return nil
 		}
+		nf.LockPath = p.EffectiveNetfilterLockPath()
 		_ = removeIfExist(p.EffectiveProxyAckPath())
+		exPath := p.EffectiveExemptionPath()
 		var gen uint64 = 1
 		prevClientUID := 0
-		if prev, err := ReadExemption(contracts.ExemptionPath); err == nil {
+		if prev, err := ReadExemption(exPath); err == nil {
 			if prev.Generation >= 1 {
 				gen = prev.Generation + 1
 			}
@@ -3283,7 +3315,7 @@ func RunCtl(args []string) error {
 		}
 		ex := BuildBlockedExemption(p, bootID, prevClientUID, gen)
 		if b, err := json.Marshal(ex); err == nil {
-			_ = sysio.WriteAtomic(contracts.ExemptionPath, append(b, '\n'), sysio.WriteAtomicOptions{Perm: 0600, UID: 0, GID: 0})
+			_ = sysio.WriteAtomic(exPath, append(b, '\n'), sysio.WriteAtomicOptions{Perm: 0600, UID: 0, GID: 0})
 		}
 		_ = SyncPerfConfig(contracts.PerfConfigPath)
 		bootD := &Daemon{}
@@ -3326,6 +3358,7 @@ func RunCtl(args []string) error {
 		_ = sysio.WriteAtomic(contracts.UpgradeFencePath, append(b, '\n'), sysio.WriteAtomicOptions{Perm: 0600, UID: 0, GID: 0})
 		_ = removeIfExist(contracts.SandboxAckPath)
 		if p, err := ReadPolicy(); err == nil {
+			nf.LockPath = p.EffectiveNetfilterLockPath()
 			_ = removeIfExist(p.EffectiveProxyAckPath())
 			spec := closedGateSpec(p, true)
 			if err := nf.ApplyOrVerify(ctx, spec, false); err != nil {
@@ -3346,6 +3379,7 @@ func RunCtl(args []string) error {
 		}
 		_ = removeIfExist(contracts.UpgradeFencePath)
 		if p, err := ReadPolicy(); err == nil {
+			nf.LockPath = p.EffectiveNetfilterLockPath()
 			extCap, _ := nf.DetectProxyCapture(ctx, p.ProxySkipPrefix)
 			_ = nf.ApplyOrVerify(ctx, closedGateSpec(p, extCap), false)
 		}
@@ -3375,6 +3409,8 @@ func RunCtl(args []string) error {
 		proxyInboundFlag := fs.String("proxy-inbound", "", "optional external proxy inbound name")
 		proxyProcessFlag := fs.String("proxy-process", "", "optional external proxy core process name")
 		proxySkipFlag := fs.String("proxy-skip-prefix", "", "optional external proxy iptables chain prefix")
+		proxyExemptionFlag := fs.String("proxy-exemption", "", "optional external proxy exemption.v1.json path")
+		proxyLockFlag := fs.String("proxy-lock", "", "optional external proxy netfilter flock path")
 		if err := fs.Parse(rest); err != nil {
 			return err
 		}
@@ -3414,27 +3450,29 @@ func RunCtl(args []string) error {
 			}
 		}
 		policy := contracts.Policy{
-			UserID:           userID,
-			Serial:           serial,
-			CallerPackage:    pkg,
-			CallerCertSHA256: certSHA,
-			AdminComponent:   strings.TrimSpace(*adminFlag),
-			ServiceComponent: strings.TrimSpace(*serviceFlag),
-			PortalDNS4:       strings.TrimSpace(*portalDNSFlag),
-			EndpointV4:       strings.TrimSpace(*endpointFlag),
-			EndpointPort:     *endpointPortFlag,
-			IPv6Enabled:      false,
-			Mode:             *modeFlag,
-			TProxyPort:       *tpPortFlag,
-			TProxyMark:       uint32(*tpMarkFlag),
-			ProxyBaseDir:     strings.TrimSpace(*proxyDirFlag),
-			ProxyCtlScript:   strings.TrimSpace(*proxyCtlFlag),
-			ProxyConfigPath:  strings.TrimSpace(*proxyConfigFlag),
-			ProxyAckPath:     strings.TrimSpace(*proxyAckFlag),
-			ProxyCorePIDPath: strings.TrimSpace(*proxyPidFlag),
-			ProxyInboundName: strings.TrimSpace(*proxyInboundFlag),
-			ProxyCoreProcess: strings.TrimSpace(*proxyProcessFlag),
-			ProxySkipPrefix:  strings.TrimSpace(*proxySkipFlag),
+			UserID:                 userID,
+			Serial:                 serial,
+			CallerPackage:          pkg,
+			CallerCertSHA256:       certSHA,
+			AdminComponent:         strings.TrimSpace(*adminFlag),
+			ServiceComponent:       strings.TrimSpace(*serviceFlag),
+			PortalDNS4:             strings.TrimSpace(*portalDNSFlag),
+			EndpointV4:             strings.TrimSpace(*endpointFlag),
+			EndpointPort:           *endpointPortFlag,
+			IPv6Enabled:            false,
+			Mode:                   *modeFlag,
+			TProxyPort:             *tpPortFlag,
+			TProxyMark:             uint32(*tpMarkFlag),
+			ProxyBaseDir:           strings.TrimSpace(*proxyDirFlag),
+			ProxyCtlScript:         strings.TrimSpace(*proxyCtlFlag),
+			ProxyConfigPath:        strings.TrimSpace(*proxyConfigFlag),
+			ProxyAckPath:           strings.TrimSpace(*proxyAckFlag),
+			ProxyCorePIDPath:       strings.TrimSpace(*proxyPidFlag),
+			ProxyInboundName:       strings.TrimSpace(*proxyInboundFlag),
+			ProxyCoreProcess:       strings.TrimSpace(*proxyProcessFlag),
+			ProxySkipPrefix:        strings.TrimSpace(*proxySkipFlag),
+			ProxyExemptionPath:     strings.TrimSpace(*proxyExemptionFlag),
+			ProxyNetfilterLockPath: strings.TrimSpace(*proxyLockFlag),
 		}
 		if prev, perr := ReadPolicy(); perr == nil {
 			if policy.Mode == "" {
@@ -3469,6 +3507,12 @@ func RunCtl(args []string) error {
 			}
 			if policy.ProxySkipPrefix == "" {
 				policy.ProxySkipPrefix = prev.ProxySkipPrefix
+			}
+			if policy.ProxyExemptionPath == "" {
+				policy.ProxyExemptionPath = prev.ProxyExemptionPath
+			}
+			if policy.ProxyNetfilterLockPath == "" {
+				policy.ProxyNetfilterLockPath = prev.ProxyNetfilterLockPath
 			}
 		}
 		if policy.Mode == "" {
@@ -3869,14 +3913,16 @@ func RunCtl(args []string) error {
 		if err != nil {
 			return err
 		}
+		nf.LockPath = p.EffectiveNetfilterLockPath()
+		exPath := p.EffectiveExemptionPath()
 		bootID, _ := sysio.ReadBootID()
 		var gen uint64 = 1
-		if prev, err := ReadExemption(contracts.ExemptionPath); err == nil && prev.Generation >= 1 {
+		if prev, err := ReadExemption(exPath); err == nil && prev.Generation >= 1 {
 			gen = prev.Generation + 1
 		}
 		ex := BuildBlockedExemption(p, bootID, 0, gen)
 		if b, err := json.Marshal(ex); err == nil {
-			_ = sysio.WriteAtomic(contracts.ExemptionPath, append(b, '\n'), sysio.WriteAtomicOptions{Perm: 0600, UID: 0, GID: 0})
+			_ = sysio.WriteAtomic(exPath, append(b, '\n'), sysio.WriteAtomicOptions{Perm: 0600, UID: 0, GID: 0})
 		}
 		extCap, _ := nf.DetectProxyCapture(ctx, p.ProxySkipPrefix)
 		if err := nf.ApplyOrVerify(ctx, closedGateSpec(p, extCap), false); err != nil {

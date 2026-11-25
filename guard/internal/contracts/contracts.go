@@ -145,14 +145,16 @@ type Policy struct {
 	TProxyMark       uint32 `json:"tproxy_mark,omitempty"`
 
 	// Optional proxy-core integration knobs (decoupled from any hardcoded upstream layout).
-	ProxyBaseDir     string `json:"proxy_base_dir,omitempty"`
-	ProxyCtlScript   string `json:"proxy_ctl_script,omitempty"`
-	ProxyConfigPath  string `json:"proxy_config_path,omitempty"`
-	ProxyAckPath     string `json:"proxy_ack_path,omitempty"`
-	ProxyCorePIDPath string `json:"proxy_core_pid_path,omitempty"`
-	ProxyInboundName string `json:"proxy_inbound_name,omitempty"`
-	ProxyCoreProcess string `json:"proxy_core_process,omitempty"`
-	ProxySkipPrefix  string `json:"proxy_skip_prefix,omitempty"`
+	ProxyBaseDir           string `json:"proxy_base_dir,omitempty"`
+	ProxyCtlScript         string `json:"proxy_ctl_script,omitempty"`
+	ProxyConfigPath        string `json:"proxy_config_path,omitempty"`
+	ProxyAckPath           string `json:"proxy_ack_path,omitempty"`
+	ProxyCorePIDPath       string `json:"proxy_core_pid_path,omitempty"`
+	ProxyInboundName       string `json:"proxy_inbound_name,omitempty"`
+	ProxyCoreProcess       string `json:"proxy_core_process,omitempty"`
+	ProxySkipPrefix        string `json:"proxy_skip_prefix,omitempty"`
+	ProxyExemptionPath     string `json:"proxy_exemption_path,omitempty"`
+	ProxyNetfilterLockPath string `json:"proxy_netfilter_lock_path,omitempty"`
 }
 
 func ValidateTProxyParams(port int, mark uint32) error {
@@ -228,6 +230,20 @@ func (p Policy) EffectiveProxyInboundName() string {
 		return p.ProxyInboundName
 	}
 	return DefaultSandboxInName
+}
+
+func (p Policy) EffectiveExemptionPath() string {
+	if p.ProxyExemptionPath != "" {
+		return p.ProxyExemptionPath
+	}
+	return ExemptionPath
+}
+
+func (p Policy) EffectiveNetfilterLockPath() string {
+	if p.ProxyNetfilterLockPath != "" {
+		return p.ProxyNetfilterLockPath
+	}
+	return SharedLockPath
 }
 
 func ValidAbsoluteSafePath(p string) bool {
@@ -320,7 +336,7 @@ func (p *Policy) NormalizeAndValidate() error {
 	default:
 		return fmt.Errorf("unsupported mode %q", p.Mode)
 	}
-	for _, pathOpt := range []string{p.ProxyBaseDir, p.ProxyCtlScript, p.ProxyConfigPath, p.ProxyAckPath, p.ProxyCorePIDPath} {
+	for _, pathOpt := range []string{p.ProxyBaseDir, p.ProxyCtlScript, p.ProxyConfigPath, p.ProxyAckPath, p.ProxyCorePIDPath, p.ProxyExemptionPath, p.ProxyNetfilterLockPath} {
 		if pathOpt != "" && !ValidAbsoluteSafePath(pathOpt) {
 			return fmt.Errorf("unsafe proxy path %q", pathOpt)
 		}

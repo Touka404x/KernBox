@@ -96,3 +96,31 @@ func TestApplyPresetFileRejectsUnknownFieldsAndSyncPoliciesHonorsSpoofLocale(t *
 		}
 	}
 }
+
+func TestCustomExemptionLockAndAckCustomPIDKey(t *testing.T) {
+	pol := contracts.Policy{
+		ProxyExemptionPath:     "/data/adb/custom_guard/exemption.v1.json",
+		ProxyNetfilterLockPath: "/data/adb/.custom_netfilter.lock",
+	}
+	if got := pol.EffectiveExemptionPath(); got != "/data/adb/custom_guard/exemption.v1.json" {
+		t.Fatalf("EffectiveExemptionPath=%q", got)
+	}
+	if got := pol.EffectiveNetfilterLockPath(); got != "/data/adb/.custom_netfilter.lock" {
+		t.Fatalf("EffectiveNetfilterLockPath=%q", got)
+	}
+	d := &Daemon{}
+	if got := d.resolvedExemptionPath(pol); got != "/data/adb/custom_guard/exemption.v1.json" {
+		t.Fatalf("resolvedExemptionPath=%q", got)
+	}
+
+	ack, err := ParseSandboxAck([]byte(`{"contract_version":1,"applied_generation":42,"boot_id":"boot-1","proxy_pid":9876}`), "boot-1")
+	if err != nil {
+		t.Fatalf("expected custom *_pid ack accepted, got err=%v", err)
+	}
+	if ack.WriterPID() != 9876 || ack.AppliedGeneration != 42 {
+		t.Fatalf("unexpected ack parsed: %+v", ack)
+	}
+	if _, err := ParseSandboxAck([]byte(`{"contract_version":1,"applied_generation":42,"boot_id":"boot-1","core_pid":10,"bogus":"x"}`), "boot-1"); err == nil {
+		t.Fatal("expected unknown non-*_pid key rejected")
+	}
+}

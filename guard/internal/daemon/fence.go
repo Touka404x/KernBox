@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"sandbox_guard/internal/contracts"
 	"sandbox_guard/internal/netfilter"
@@ -344,14 +345,56 @@ func evaluateNormal(in EvalInput) EvalDecision {
 }
 
 func ParseSandboxAck(data []byte, expectedBootID string) (*contracts.SandboxAckV1, error) {
-	var ack contracts.SandboxAckV1
 	dec := json.NewDecoder(bytes.NewReader(bytes.TrimSpace(data)))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&ack); err != nil {
+	dec.UseNumber()
+	var fields map[string]json.RawMessage
+	if err := dec.Decode(&fields); err != nil {
 		return nil, err
 	}
 	if err := dec.Decode(new(any)); !errors.Is(err, io.EOF) {
 		return nil, errors.New("trailing data in sandbox_ack")
+	}
+	if fields == nil {
+		return nil, errors.New("empty sandbox_ack object")
+	}
+
+	var ack contracts.SandboxAckV1
+	for k, raw := range fields {
+		switch k {
+		case "contract_version":
+			if err := json.Unmarshal(raw, &ack.ContractVersion); err != nil {
+				return nil, err
+			}
+		case "applied_generation":
+			if err := json.Unmarshal(raw, &ack.AppliedGeneration); err != nil {
+				return nil, err
+			}
+		case "boot_id":
+			if err := json.Unmarshal(raw, &ack.BootID); err != nil {
+				return nil, err
+			}
+		case "core_pid":
+			if err := json.Unmarshal(raw, &ack.CorePID); err != nil {
+				return nil, err
+			}
+		case "pid":
+			if err := json.Unmarshal(raw, &ack.PID); err != nil {
+				return nil, err
+			}
+		default:
+			// Allow a proxy core to report its PID under an explicit *_pid key while rejecting unrelated fields.
+			if strings.HasSuffix(k, "_pid") {
+				var customPID int
+				if err := json.Unmarshal(raw, &customPID); err != nil {
+					return nil, fmt.Errorf("invalid %s in sandbox_ack: %w", k, err)
+				}
+				if ack.CorePID == 0 && customPID > 0 {
+					ack.CorePID = customPID
+				}
+				continue
+			}
+			return nil, fmt.Errorf("json: unknown field %q", k)
+		}
 	}
 	if ack.ContractVersion != contracts.ContractVersion || ack.AppliedGeneration == 0 || ack.WriterPID() <= 0 {
 		return nil, errors.New("invalid sandbox_ack fields")

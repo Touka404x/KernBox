@@ -17,18 +17,39 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-function Invoke-Adb {
-    param([string[]]$AdbArgs)
+function Invoke-AdbNative {
+    param([string[]]$AdbArgs, [string]$StdinText = "")
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        if ($StdinText -ne "") {
+            $res = $StdinText | & $Adb @AdbArgs 2>&1
+        } else {
+            $res = & $Adb @AdbArgs 2>&1
+        }
+        $code = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $prev
+    }
+    return [pscustomobject]@{
+        ExitCode = $code
+        Output   = ($res | ForEach-Object { "$_" } | Out-String).Trim()
+    }
+}
+
+function Invoke-AdbShellScript {
+    param([string]$ScriptText)
+    $lf = $ScriptText.Replace("`r`n", "`n").Replace("`r", "")
     $full = @()
     if ($Serial -ne "") {
         $full += @("-s", $Serial)
     }
-    $full += $AdbArgs
-    $res = & $Adb @full 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw "adb $($full -join ' ') failed ($LASTEXITCODE): $($res -join ' ')"
+    $full += @("shell", "sh")
+    $r = Invoke-AdbNative -AdbArgs $full -StdinText $lf
+    if ($r.ExitCode -ne 0) {
+        throw "adb $($full -join ' ') failed ($($r.ExitCode)): $($r.Output)"
     }
-    return ($res | Out-String).Trim()
+    return $r.Output
 }
 
 $adbCmd = Get-Command $Adb -ErrorAction SilentlyContinue
@@ -36,10 +57,11 @@ if (-not $adbCmd -and -not (Test-Path $Adb)) {
     throw "ADB executable '$Adb' not found in PATH."
 }
 
-$devicesRaw = & $Adb devices 2>&1
-if ($LASTEXITCODE -ne 0) {
-    throw "adb devices failed: $($devicesRaw -join ' ')"
+$devRes = Invoke-AdbNative -AdbArgs @("devices")
+if ($devRes.ExitCode -ne 0) {
+    throw "adb devices failed: $($devRes.Output)"
 }
+$devicesRaw = $devRes.Output
 $online = @()
 foreach ($line in ($devicesRaw -split "`r?`n")) {
     if ($line -match '^(\S+)\s+device\b') {
@@ -165,7 +187,7 @@ else
 fi
 '@
 
-$raw = Invoke-Adb @("shell", $shellProbe)
+$raw = Invoke-AdbShellScript $shellProbe
 $kv = @{}
 foreach ($line in ($raw -split "`r?`n")) {
     $idx = $line.IndexOf('=')
