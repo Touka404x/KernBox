@@ -12,7 +12,7 @@ if [ "$ARCH" != "arm64" ]; then
     abort "! Only arm64-v8a is supported (got ARCH=$ARCH)"
 fi
 
-ui_print "- Installing Android Sandbox Guard v${VARIANT_VER} (${VARIANT_OEM}/${VARIANT_KERNEL}/${VARIANT_ROOT})"
+ui_print "- Installing KernBox v${VARIANT_VER} (${VARIANT_OEM}/${VARIANT_KERNEL}/${VARIANT_ROOT})"
 
 KVER=$(uname -r 2>/dev/null || echo "")
 if [ "$VARIANT_KERNEL" = "k510" ] && [ -n "$KVER" ]; then

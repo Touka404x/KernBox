@@ -1,0 +1,104 @@
+name: Release 30-Variant Matrix
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version string without leading 'v' (e.g. 1.0.0)"
+        required: false
+        default: "1.0.0"
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: guard/go.mod
+          cache-dependency-path: guard/go.sum
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 35 & NDK r27d
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018"
+          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
+      - name: Run privacy gate & Python unit tests
+        run: |
+          python tools/verify_privacy_leak.py
+          python -m unittest discover -s tools -p "test_*.py" -v
+
+      - name: Resolve release version
+        id: ver
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            RAW="${GITHUB_REF_NAME#v}"
+          else
+            RAW="${{ inputs.version }}"
+          fi
+          RAW="${RAW:-1.0.0}"
+          echo "version=${RAW}" >> "$GITHUB_OUTPUT"
+
+      - name: Build & verify 30 KernBox variants + KernBoxVerify.apk
+        run: |
+          python tools/build_matrix.py --out dist --version "${{ steps.ver.outputs.version }}"
+          python - <<'PY'
+          import hashlib, json, pathlib, zipfile
+          dist = pathlib.Path("dist")
+          zips = sorted(dist.glob("KernBox-*-arm64.zip"))
+          assert len(zips) == 30, f"expected 30 zips, got {len(zips)}"
+          apk = dist / "KernBoxVerify.apk"
+          assert apk.is_file(), "missing KernBoxVerify.apk"
+          manifest = json.loads((dist / "variants-manifest.json").read_text(encoding="utf-8"))
+          assert manifest["total_variants"] == 30
+          sums = [l.strip() for l in (dist / "SHA256SUMS.txt").read_text(encoding="utf-8").splitlines() if l.strip()]
+          assert len(sums) == 31
+          for line in sums:
+              digest, name = line.split(None, 1)
+              assert hashlib.sha256((dist / name.lstrip("*")).read_bytes()).hexdigest() == digest
+          for z in zips:
+              with zipfile.ZipFile(z) as zf:
+                  assert zf.testzip() is None
+          print("RELEASE_MATRIX_VERIFIED", len(zips), len(sums))
+          PY
+
+      - name: Upload workflow build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernbox-${{ steps.ver.outputs.version }}-matrix
+          path: |
+            dist/KernBox-*-arm64.zip
+            dist/KernBoxVerify.apk
+            dist/SHA256SUMS.txt
+            dist/variants-manifest.json
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            dist/KernBox-*-arm64.zip
+            dist/KernBoxVerify.apk
+            dist/SHA256SUMS.txt
+            dist/variants-manifest.json

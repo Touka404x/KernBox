@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# Read-only anonymized ADB device prober for Android Sandbox Guard variant selection.
+# Read-only anonymized ADB device prober for KernBox variant selection.
 # Collects NO hardware serials, IMEIs, MAC addresses, or IP addresses.
 set -eu
 

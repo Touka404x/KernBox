@@ -2,7 +2,7 @@
 [CmdletBinding()]
 param(
     [string]$Out = "dist",
-    [string]$Version = "3.0.0-oss",
+    [string]$Version = "1.0.0",
     [string[]]$Oems = @("hyperos", "aosp", "oplus", "oneui", "generic"),
     [string]$GoExe = "",
     [string]$JdkHome = "",

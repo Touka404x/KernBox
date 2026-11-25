@@ -127,14 +127,14 @@ def install_command_for_root(root: str, artifact: str) -> str:
     return f"adb push {artifact} {remote}"
 
 
-def select_variant(profile: Dict[str, Any], version: str = "3.0.0-oss", preset: Optional[str] = None) -> Dict[str, Any]:
+def select_variant(profile: Dict[str, Any], version: str = "1.0.0", preset: Optional[str] = None) -> Dict[str, Any]:
     errors: List[str] = []
     warnings: List[str] = []
     reasons: List[str] = []
 
     abi = str(profile.get("cpu_abi") or "").strip().lower()
     if abi != "arm64-v8a":
-        errors.append(f"Unsupported CPU ABI {abi!r}: Android Sandbox Guard only supports arm64-v8a devices.")
+        errors.append(f"Unsupported CPU ABI {abi!r}: KernBox only supports arm64-v8a devices.")
 
     sdk = int(profile.get("android_sdk") or 0)
     if sdk <= 0:
@@ -173,7 +173,7 @@ def select_variant(profile: Dict[str, Any], version: str = "3.0.0-oss", preset: 
     if not work_users:
         warnings.append("No active Work Profile user detected yet; provision User 10 via Shelter / TestDPC / your profile controller before activating guard rules.")
 
-    artifact = f"SandboxGuard-{oem}-{kernel}-{root}-arm64.zip" if (not errors and root) else None
+    artifact = f"KernBox-{oem}-{kernel}-{root}-arm64.zip" if (not errors and root) else None
 
     result: Dict[str, Any] = {
         "ok": len(errors) == 0,
@@ -193,7 +193,7 @@ def select_variant(profile: Dict[str, Any], version: str = "3.0.0-oss", preset: 
             "install": install_command_for_root(root, artifact),
             "reboot": "adb reboot",
             "status_check": 'adb shell su -c "/data/adb/sandbox_guard/sandbox_guard ctl variant-info && /data/adb/sandbox_guard/sandbox_guard ctl status && /data/adb/sandbox_guard/sandbox_guard ctl stealth-status"',
-            "verify_install": f'adb install -r --user {work_user} SandboxVerifyProbe.apk && adb shell am instrument --user {work_user} -w com.sandbox.verify/com.sandbox.verify.NetworkProbe',
+            "verify_install": f'adb install -r --user {work_user} KernBoxVerify.apk && adb shell am instrument --user {work_user} -w com.sandbox.verify/com.sandbox.verify.NetworkProbe',
         }
         if preset:
             preset_name = preset if preset.endswith(".json") else f"{preset}.json"
@@ -206,9 +206,9 @@ def select_variant(profile: Dict[str, Any], version: str = "3.0.0-oss", preset: 
 
 
 def main(argv=None) -> int:
-    p = argparse.ArgumentParser(description="Select optimal Android Sandbox Guard variant from device_profile.json")
+    p = argparse.ArgumentParser(description="Select optimal KernBox variant from device_profile.json")
     p.add_argument("--profile", required=True, help="Path to device_profile.json (or '-' for stdin)")
-    p.add_argument("--version", default="3.0.0-oss", help="Release version tag")
+    p.add_argument("--version", default="1.0.0", help="Release version tag")
     p.add_argument("--preset", help="Optional preset name under presets/ (e.g. jp-docomo, us-tmobile)")
     p.add_argument("--json", action="store_true", help="Emit structured JSON output")
     args = p.parse_args(argv)

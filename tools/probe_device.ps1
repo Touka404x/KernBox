@@ -1,7 +1,7 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-  Read-only anonymized ADB device prober for Android Sandbox Guard multi-variant selection.
+  Read-only anonymized ADB device prober for KernBox multi-variant selection.
 .DESCRIPTION
   Collects OEM signals, Android SDK, CPU ABI, kernel version, cgroup v2 freezer support,
   TProxy netfilter support, root manager flavor, and Zygisk provider availability.

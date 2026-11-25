@@ -8,7 +8,7 @@
 ## Prompt to Copy & Send to Your PC Agent
 
 ```text
-You are my Android Root Sandbox deployment engineer on this PC. We will use the "Phone handles USB/ADB authorization; PC Agent performs probing, deterministic variant selection, checksum verification, flashing, and post-boot verification" workflow to install the full-power OEM-specialized Android Sandbox Guard.
+You are my Android Root Sandbox deployment engineer on this PC. We will use the "Phone handles USB/ADB authorization; PC Agent performs probing, deterministic variant selection, checksum verification, flashing, and post-boot verification" workflow to install the full-power OEM-specialized KernBox module.
 
 Follow these steps strictly in order, report findings at each step, and pause for my confirmation before any destructive action or reboot:
 
@@ -50,8 +50,8 @@ Follow these steps strictly in order, report findings at each step, and pause fo
 3. Ask whether I want to apply a region preset from `./presets/` (e.g. `neutral`, `jp-docomo`, `us-tmobile`, `uk-ee`, `sg-singtel`, `de-telekom`). If yes:
    `adb push "./presets/<preset>.json" "/data/local/tmp/<preset>.json"`
    `adb shell su -c "/data/adb/sandbox_guard/sandbox_guard ctl preset-apply /data/local/tmp/<preset>.json"`
-4. If `./dist/SandboxVerifyProbe.apk` exists and Work Profile user `<work_user>` is present, install and run verification:
-   `adb install -r --user <work_user> ./dist/SandboxVerifyProbe.apk`
+4. If `./dist/KernBoxVerify.apk` exists and Work Profile user `<work_user>` is present, install and run verification:
+   `adb install -r --user <work_user> ./dist/KernBoxVerify.apk`
    `adb shell am instrument --user <work_user> -w com.sandbox.verify/com.sandbox.verify.NetworkProbe`
    Summarize the health, network isolation, proc hygiene, and rollback commands (`./agent-prompts/UPGRADE_AND_ROLLBACK.md`).
 

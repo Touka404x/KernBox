@@ -8,7 +8,7 @@
 ## 复制下面提示词发给你的电脑 Agent
 
 ```text
-你是我在本电脑上的 Android Root 沙盒部署工程师。请采用「手机只负责授权 USB/ADB，电脑 Agent 完成全部探测、精确选包、校验、刷入与验证」的模式，为我当前连接的 Android 手机安装「Android Sandbox Guard」满血版多变体模块。
+你是我在本电脑上的 Android Root 沙盒部署工程师。请采用「手机只负责授权 USB/ADB，电脑 Agent 完成全部探测、精确选包、校验、刷入与验证」的模式，为我当前连接的 Android 手机安装「KernBox」满血版多变体模块。
 
 请严格按以下顺序执行，并在每一步告诉我结论，遇到危险或缺失前置条件必须先停下提醒我确认：
 
@@ -51,8 +51,8 @@
 3. 询问我是否需要应用区域伪装预设（如 `./presets/jp-docomo.json`、`./presets/us-tmobile.json`、`./presets/neutral.json` 等）；如需要，运行：
    `adb push "./presets/<preset>.json" "/data/local/tmp/<preset>.json"`
    `adb shell su -c "/data/adb/sandbox_guard/sandbox_guard ctl preset-apply /data/local/tmp/<preset>.json"`
-4. 如 `./dist/SandboxVerifyProbe.apk` 存在且工作资料用户 `<work_user>` 已就绪，安装并运行验证探针：
-   `adb install -r --user <work_user> ./dist/SandboxVerifyProbe.apk`
+4. 如 `./dist/KernBoxVerify.apk` 存在且工作资料用户 `<work_user>` 已就绪，安装并运行验证探针：
+   `adb install -r --user <work_user> ./dist/KernBoxVerify.apk`
    `adb shell am instrument --user <work_user> -w com.sandbox.verify/com.sandbox.verify.NetworkProbe`
    结合探针报告（网络隔离、IPv6 阻断、`Mountinfo`/`Maps` 卫生扫描、受控匿名化时区/语言/运营商检查），给我一份清晰的验收结果与回滚备忘（参考 `./agent-prompts/UPGRADE_AND_ROLLBACK.md`）。
 

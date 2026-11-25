@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Builds the standalone pure-Java SandboxVerifyProbe.apk (zero tracked keystores)."""
+"""Builds the standalone pure-Java KernBoxVerify.apk (zero tracked keystores)."""
 
 import argparse
 import os
@@ -74,7 +74,7 @@ def run_cmd(tc: dict, *arguments):
 
 def build_apk(args: argparse.Namespace) -> pathlib.Path:
     tc = resolve_toolchain(args)
-    output = pathlib.Path(args.out) if args.out else (REPO_ROOT / "dist" / "SandboxVerifyProbe.apk")
+    output = pathlib.Path(args.out) if args.out else (REPO_ROOT / "dist" / "KernBoxVerify.apk")
     output.parent.mkdir(parents=True, exist_ok=True)
 
     java_sources = sorted(SOURCE.glob("*.java"))
@@ -160,8 +160,8 @@ def build_apk(args: argparse.Namespace) -> pathlib.Path:
 
 
 def main(argv=None) -> int:
-    p = argparse.ArgumentParser(description="Build SandboxVerifyProbe.apk")
-    p.add_argument("--out", help="Output APK path (default: dist/SandboxVerifyProbe.apk)")
+    p = argparse.ArgumentParser(description="Build KernBoxVerify.apk")
+    p.add_argument("--out", help="Output APK path (default: dist/KernBoxVerify.apk)")
     p.add_argument("--keystore", help="Optional PKCS12/JKS release keystore path (ephemeral debug key if omitted)")
     p.add_argument("--alias", default="sandbox-verify-probe", help="Keystore key alias")
     p.add_argument("--storepass", default="android", help="Keystore password")

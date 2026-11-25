@@ -1,6 +1,6 @@
 # Architecture Overview
 
-Android Sandbox Guard separates control, enforcement, privilege brokering, and in-process stealth across four minimally privileged components compiled specifically for each `(oem, kernel, root)` target.
+KernBox separates control, enforcement, privilege brokering, and in-process stealth across four minimally privileged components compiled specifically for each `(oem, kernel, root)` target.
 
 ## 1. Component Topology
 

@@ -8,7 +8,7 @@ import (
 
 // Injected or overridden via -ldflags "-X sandbox_guard/internal/buildinfo.<Field>=..." at compile time.
 var (
-	Version   = "3.0.0-oss"
+	Version   = "1.0.0"
 	OEM       = oem.Current().Name
 	Kernel    = kernelTier
 	Transport = transportTier

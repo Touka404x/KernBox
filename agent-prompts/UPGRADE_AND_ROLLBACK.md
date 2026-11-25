@@ -9,7 +9,7 @@
 ## 场景 A：升级或切换新变体（发给电脑 Agent）
 
 ```text
-请帮我将手机上的 Android Sandbox Guard 升级（或迁移）到目标新版本/新变体 ZIP，保持工作资料用户不丢失并保留现有 `stealth.json` / `perf.json` 配置。
+请帮我将手机上的 KernBox 升级（或迁移）到目标新版本/新变体 ZIP，保持工作资料用户不丢失并保留现有 `stealth.json` / `perf.json` 配置。
 
 1. 先按 `./tools/probe_device.ps1`（或 `.sh`）和 `./tools/select_variant.py` 重新确认目标 ZIP `<artifact>` 与当前手机 100% 匹配，并校验 SHA-256。
 2. 在电脑侧拉取一份当前配置备份：`adb shell su -c "cat /data/adb/sandbox_guard/stealth.json"`（仅保存在本机隔离临时备份目录，不展示敏感内容）和 `perf.json`、`policy.json`。
@@ -30,7 +30,7 @@
 如果发生意外问题（模块默认带有**两次连续开机未完成自动生成 `zygisk_disabled` 熔断**机制）：
 
 ```text
-请帮我紧急停用或回滚 Android Sandbox Guard，恢复工作资料常规放行：
+请帮我紧急停用或回滚 KernBox，恢复工作资料常规放行：
 
 ### 方案 1：仅关闭 Zygisk 隐身钩子（保留守护进程与网络隔离）
 adb shell su -c "/data/adb/sandbox_guard/sandbox_guard ctl stealth-toggle off"

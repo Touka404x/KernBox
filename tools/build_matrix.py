@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Builds the full 30-variant Android Sandbox Guard release matrix into dist/."""
+"""Builds the full 30-variant KernBox release matrix into dist/."""
 
 import argparse
 import datetime
@@ -92,13 +92,13 @@ def build_zygisk_oem(oem: str, stage_dir: pathlib.Path, args: argparse.Namespace
 
 
 def build_verify_apk(out_dir: pathlib.Path, args: argparse.Namespace) -> dict:
-    apk_path = out_dir / "SandboxVerifyProbe.apk"
+    apk_path = out_dir / "KernBoxVerify.apk"
     cmd = [sys.executable, str(REPO_ROOT / "verify" / "build-probe.py"), "--out", str(apk_path)]
     if args.jdk:
         cmd.extend(["--jdk", args.jdk])
     if args.sdk:
         cmd.extend(["--sdk", args.sdk])
-    print("[verify apk build] building SandboxVerifyProbe.apk")
+    print("[verify apk build] building KernBoxVerify.apk")
     subprocess.run(cmd, cwd=REPO_ROOT, check=True)
     raw = apk_path.read_bytes()
     return {
@@ -109,9 +109,9 @@ def build_verify_apk(out_dir: pathlib.Path, args: argparse.Namespace) -> dict:
 
 
 def main(argv=None) -> int:
-    p = argparse.ArgumentParser(description="Build 30-variant Android Sandbox Guard release matrix")
+    p = argparse.ArgumentParser(description="Build 30-variant KernBox release matrix")
     p.add_argument("--out", type=pathlib.Path, default=REPO_ROOT / "dist", help="Output distribution directory")
-    p.add_argument("--version", default="3.0.0-oss", help="Release version string")
+    p.add_argument("--version", default="1.0.0", help="Release version string")
     p.add_argument("--oems", nargs="+", choices=OEMS, default=list(OEMS), help="Subset of OEMs to build")
     p.add_argument("--go", default="", help="Path to go executable")
     p.add_argument("--jdk", default="", help="Optional JDK home")
@@ -139,7 +139,7 @@ def main(argv=None) -> int:
             for kernel, roots in KERNEL_ROOT_PAIRS:
                 guard_bin, broker_bin = build_go_pair(go_exe, oem, kernel, stage_dir)
                 for root in roots:
-                    zip_name = f"SandboxGuard-{oem}-{kernel}-{root}-arm64.zip"
+                    zip_name = f"KernBox-{oem}-{kernel}-{root}-arm64.zip"
                     meta = pack_variant.pack_variant(
                         oem=oem,
                         kernel=kernel,

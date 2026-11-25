@@ -49,7 +49,7 @@ class SelectVariantTests(unittest.TestCase):
         )
         r = sv.select_variant(p)
         self.assertTrue(r["ok"])
-        self.assertEqual(r["artifact"], "SandboxGuard-hyperos-k510-ksu-arm64.zip")
+        self.assertEqual(r["artifact"], "KernBox-hyperos-k510-ksu-arm64.zip")
 
     def test_miui_poco_k419_ksu_legacy(self):
         p = base_profile(
@@ -62,7 +62,7 @@ class SelectVariantTests(unittest.TestCase):
         )
         r = sv.select_variant(p)
         self.assertTrue(r["ok"])
-        self.assertEqual(r["artifact"], "SandboxGuard-hyperos-k419-ksu_legacy-arm64.zip")
+        self.assertEqual(r["artifact"], "KernBox-hyperos-k419-ksu_legacy-arm64.zip")
 
     def test_custom_aosp_rom_on_xiaomi_hardware_selects_aosp(self):
         p = base_profile(
@@ -72,7 +72,7 @@ class SelectVariantTests(unittest.TestCase):
         r = sv.select_variant(p)
         self.assertTrue(r["ok"])
         self.assertEqual(r["oem"], "aosp")
-        self.assertEqual(r["artifact"], "SandboxGuard-aosp-k510-ksu-arm64.zip")
+        self.assertEqual(r["artifact"], "KernBox-aosp-k510-ksu-arm64.zip")
 
     def test_oplus_oneplus_k510_apatch(self):
         p = base_profile(
@@ -82,7 +82,7 @@ class SelectVariantTests(unittest.TestCase):
         )
         r = sv.select_variant(p)
         self.assertTrue(r["ok"])
-        self.assertEqual(r["artifact"], "SandboxGuard-oplus-k510-apatch-arm64.zip")
+        self.assertEqual(r["artifact"], "KernBox-oplus-k510-apatch-arm64.zip")
         self.assertIn("apd module install", r["commands"]["install"])
 
     def test_oplus_oppo_k419_magisk(self):
@@ -95,7 +95,7 @@ class SelectVariantTests(unittest.TestCase):
         )
         r = sv.select_variant(p)
         self.assertTrue(r["ok"])
-        self.assertEqual(r["artifact"], "SandboxGuard-oplus-k419-magisk-arm64.zip")
+        self.assertEqual(r["artifact"], "KernBox-oplus-k419-magisk-arm64.zip")
         self.assertIn("magisk --install-module", r["commands"]["install"])
 
     def test_oneui_samsung_k510_magisk(self):
@@ -106,13 +106,13 @@ class SelectVariantTests(unittest.TestCase):
         )
         r = sv.select_variant(p)
         self.assertTrue(r["ok"])
-        self.assertEqual(r["artifact"], "SandboxGuard-oneui-k510-magisk-arm64.zip")
+        self.assertEqual(r["artifact"], "KernBox-oneui-k510-magisk-arm64.zip")
 
     def test_aosp_pixel_k510_ksu(self):
         p = base_profile()
         r = sv.select_variant(p, preset="jp-docomo")
         self.assertTrue(r["ok"])
-        self.assertEqual(r["artifact"], "SandboxGuard-aosp-k510-ksu-arm64.zip")
+        self.assertEqual(r["artifact"], "KernBox-aosp-k510-ksu-arm64.zip")
         self.assertIn("preset-apply", r["commands"]["preset_apply"])
 
     def test_aosp_lineage_flavor_detection(self):
@@ -132,7 +132,7 @@ class SelectVariantTests(unittest.TestCase):
         r = sv.select_variant(p)
         self.assertTrue(r["ok"])
         self.assertEqual(r["oem"], "generic")
-        self.assertEqual(r["artifact"], "SandboxGuard-generic-k510-ksu-arm64.zip")
+        self.assertEqual(r["artifact"], "KernBox-generic-k510-ksu-arm64.zip")
 
     def test_510_without_cgroupv2_uses_k419_compat(self):
         p = base_profile(
@@ -150,11 +150,11 @@ class SelectVariantTests(unittest.TestCase):
         self.assertTrue(r["ok"])
         self.assertEqual(r["kernel"], "k419")
         self.assertEqual(r["root"], "ksu_legacy")
-        self.assertEqual(r["artifact"], "SandboxGuard-aosp-k419-ksu_legacy-arm64.zip")
+        self.assertEqual(r["artifact"], "KernBox-aosp-k419-ksu_legacy-arm64.zip")
 
     def test_all_valid_selections_match_build_matrix(self):
         matrix_set = {
-            f"SandboxGuard-{oem}-{kernel}-{root}-arm64.zip"
+            f"KernBox-{oem}-{kernel}-{root}-arm64.zip"
             for oem in bm.OEMS
             for kernel, roots in bm.KERNEL_ROOT_PAIRS
             for root in roots

@@ -1,0 +1,42 @@
+name: Bug Report
+description: Report a KernBox runtime, Netfilter, Zygisk stealth, or packaging defect
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before reporting, consider running the read-only diagnostic prompt in `agent-prompts/DIAGNOSE.md`.
+        **Never post hardware serials, IMEIs, MAC addresses, private IPs, or personal app lists.**
+  - type: input
+    id: variant
+    attributes:
+      label: Exact KernBox Variant & Version
+      placeholder: e.g. v1.0.0 / KernBox-hyperos-k510-ksu-arm64.zip
+    validations:
+      required: true
+  - type: dropdown
+    id: root-manager
+    attributes:
+      label: Root Manager
+      options:
+        - KernelSU (>= 0.9)
+        - KernelSU Legacy (< 0.9)
+        - Magisk
+        - APatch
+    validations:
+      required: true
+  - type: textarea
+    id: ctl-output
+    attributes:
+      label: Output of ctl variant-info, ctl status, and ctl stealth-status
+      description: Redact any custom personal fields before pasting.
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction Steps & Expected vs Actual Behavior
+    validations:
+      required: true

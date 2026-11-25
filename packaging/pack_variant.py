@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Packages a single Android Sandbox Guard (OEM, KernelTier, RootManager) root module ZIP."""
+"""Packages a single KernBox (OEM, KernelTier, RootManager) root module ZIP."""
 
 import argparse
 import hashlib
@@ -48,7 +48,7 @@ FIXED_DATE = (2026, 11, 25, 0, 0, 0)
 
 def version_to_code(ver: str) -> str:
     digits = "".join(ch for ch in ver if ch.isdigit())
-    return digits if digits else "300"
+    return digits if digits else "100"
 
 
 def render_template(raw_text: str, mapping: dict) -> bytes:
@@ -162,11 +162,11 @@ def pack_variant(
 
 
 def main(argv=None) -> int:
-    p = argparse.ArgumentParser(description="Package a single Android Sandbox Guard root module ZIP")
+    p = argparse.ArgumentParser(description="Package a single KernBox root module ZIP")
     p.add_argument("--oem", required=True, choices=OEMS)
     p.add_argument("--kernel", required=True, choices=KERNELS)
     p.add_argument("--root", required=True, choices=ROOTS)
-    p.add_argument("--version", default="3.0.0-oss")
+    p.add_argument("--version", default="1.0.0")
     p.add_argument("--guard-bin", required=True, type=pathlib.Path)
     p.add_argument("--broker-bin", required=True, type=pathlib.Path)
     p.add_argument("--zygisk-so", required=True, type=pathlib.Path)
@@ -174,7 +174,7 @@ def main(argv=None) -> int:
     p.add_argument("--quiet", action="store_true")
     args = p.parse_args(argv)
 
-    out_zip = args.out or pathlib.Path(f"SandboxGuard-{args.oem}-{args.kernel}-{args.root}-arm64.zip")
+    out_zip = args.out or pathlib.Path(f"KernBox-{args.oem}-{args.kernel}-{args.root}-arm64.zip")
     pack_variant(
         oem=args.oem,
         kernel=args.kernel,

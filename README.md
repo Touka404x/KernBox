@@ -1,94 +1,104 @@
-# Android Sandbox Guard — Root + 内核满血多变体工作资料隔离沙盒
+# KernBox
+
+**Kernel-level isolated Android Work Profile sandbox with 30 lean device-specialized builds and AI-Agent co-installation.**
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![Android](https://img.shields.io/badge/Android-12%2B%20ARM64-3DDC84.svg)](VARIANT_MATRIX.md)
+[![Variants](https://img.shields.io/badge/Builds-30%20Lean%20Variants-0A66C2.svg)](VARIANT_MATRIX.md)
+[![Root](https://img.shields.io/badge/Root-KernelSU%20%7C%20Magisk%20%7C%20APatch-black.svg)](VARIANT_MATRIX.md)
 
-> **一个真正做到「极致瘦身、一机一专版、手机 + 电脑 Agent 联动即装」的开源 Android Root 工作资料隔离与隐身系统。**
-
-## 为什么不做成一个“大而全”的臃肿安装包？
-
-传统多机型兼容模块往往把所有厂商逻辑、旧内核兼容、不同 Root 框架与无用分支全塞进同一个包里——带来体积膨胀、运行时无效分支判断、不必要的权限规则与隐身特征面扩大。
-
-**Android Sandbox Guard 的设计原则恰恰相反**：
-通过 **编译期裁剪 + 专用打包（30 个精简专版）**，让每一台手机只装入与自身硬件、OEM 系统、内核能力与 Root 管理器精确匹配的最小代码集合：
-- **5 个 OEM 特化（Go Build Tags + C++ 编译期宏）**：`hyperos`（小米/Redmi/POCO）、`oplus`（OnePlus/OPPO/Realme）、`oneui`（三星）、`aosp`（Pixel / LineageOS / GrapheneOS）、`generic`（通用兼容）
-- **2 档内核能力分级**：
-  - `k510`（Linux 5.10+）：启用 `openat2(RESOLVE_BENEATH)`、`pidfd_open`/`pidfd_send_signal`、`process_madvise(MADV_PAGEOUT)` 与 cgroup v2 `cgroup.freeze` 满血内核路径
-  - `k419`（Linux 4.14–5.9 / cgroup v1）：编译期切换 `-tags kernel_compat`，使用防符号链接组件逐级打开、双重 `/proc` UID+starttime 验证查杀与 cgroup v1 freezer 兼容路径
-- **4 类 Root 管理器打包与 SELinux 策略模板**：`ksu`、`ksu_legacy`、`magisk`、`apatch`
-
-> 安装包内置 **AI Agent 安装/诊断/回滚 Prompt** 与只读设备探测脚本，你只需要让手机通过 USB 连接电脑，把提示词复制给电脑上的 AI Agent，它会自动完成匿名探测、专版匹配、SHA-256 校验、刷入与验收。
+**English** · [简体中文](README_CN.md) · [30-Variant Matrix](VARIANT_MATRIX.md) · [Architecture](ARCHITECTURE.md) · [AI Install Playbook](agent-prompts/INSTALL_EN.md) · [Security](SECURITY.md)
 
 ---
 
-## 核心能力（Root + 内核满血版）
+## Why KernBox?
 
-1. **零内核旁路强一致透明代理防火墙（Fail-Closed Netfilter）**：
-   - 基于 `iptables-restore --noflush` 原子事务管理 `SBW_RAW_OUTPUT` / `SBW_OUTPUT` / `SBW_EGRESS` / `SBW_TPROXY_OUT` / `SBW_TPROXY_PRE` 链路；
-   - 默认主路径零 `TRANSPORT_VPN` 痕迹，配合多代际升级围栏（`upgrade_fence`：`StateBlockedBoot` -> `StateBlockedLocked` -> `StateAckWait` -> `StateOpen` <-> `StateUpgradingFence`）防漏流。
-2. **微秒级内核热冻结与内存回收**：
-   - `k510` 原生操作 cgroup v2 `cgroup.freeze` 与 PSI/压力触发 `process_madvise(MADV_PAGEOUT)`，非激活工作资料毫秒级零耗电静默；唤醒零冷启动开销。
-3. **跨进程信任边界与独立 SELinux `sandbox_broker` 域**：
-   - 非特权控制器与守护进程通过双层 UDS（`/dev/socket/sandbox_ctrl/ctrl.sock` <-> `/dev/socket/sandbox_priv/guard.sock`）隔离，强制校验证书 SHA-256、`SO_PEERCRED` 与共享认证令牌。
-4. **双层 Zygisk + ServiceManager 隐身框架（按 OEM 裁剪属性槽位）**：
-   - Native PLT Hook 零内存分配覆写时区/区域/语言/运营商系统属性并清洗 `getifaddrs`；
-   - Java `InMemoryDexClassLoader` 注入 `system_server` 与 `com.android.phone` 的动态代理，对工作资料内进程屏蔽管理资料痕迹、定位/Wi-Fi 扫描、蓝牙地址及真实网口特征；
-   - 内置 **两次连续开机未完成自动熔断**（`zygisk_disabled` + 自动关闭 `stealth.json` 开关）确保不因系统升级变砖。
-5. **开箱即用区域预设**：内置 [`presets/`](presets/)（`neutral`、`jp-docomo`、`us-tmobile`、`uk-ee`、`sg-singtel`、`de-telekom`），支持运行期一键切换。
+Most Android sandbox and multi-profile tools ship one bloated universal binary stuffed with unused OEM workarounds, legacy kernel fallbacks, and runtime branch checks — hurting battery, responsiveness, and stealth footprint.
+
+**KernBox takes the opposite approach:**
+- **30 lean compile-time-specialized builds**: Every release ships 30 targeted ARM64 modules (`5 OEMs × 2 Kernel Tiers × 3 Root Managers`, ~4.1 MB each). Your device only compiles and runs the exact kernel, OEM, SELinux, and Root paths it actually uses.
+- **AI-Agent-first Phone + PC co-installation**: You don't have to guess kernel tiers, cgroup versions, or SELinux rules by hand. Plug your phone into your PC, hand a built-in playbook to your AI coding agent, and let it probe, match, verify SHA-256 checksums, flash, and audit post-boot isolation step-by-step.
 
 ---
 
-## 30 秒上手：手机 + 电脑 Agent 联动安装
+## 30-Second Quick Start with an AI Agent (Recommended)
 
-1. 手机开启 **USB 调试**并连接电脑（确认 `adb devices` 显示 `device`），安装并配置好 KernelSU / Magisk / APatch（KSU/APatch 用户建议配套启用 ZygiskNext 或 ReZygisk）。
-2. 打开你电脑上的 AI Agent（Antigravity / Claude Code / Codex / Cursor 等），打开本仓库目录。
-3. **直接复制 [`agent-prompts/INSTALL_CN.md`](agent-prompts/INSTALL_CN.md) 中的完整提示词发给 Agent**！
+### Prerequisites
+1. A rooted **ARM64 (`arm64-v8a`) Android 12+ (API 31+)** phone (`KernelSU`, `Magisk`, or `APatch`) with **USB Debugging (ADB)** authorized on your PC.
+2. Any terminal-capable AI coding agent on your PC (Antigravity, Claude Code, Codex, Cursor, Gemini CLI, etc.).
 
-Agent 会自动执行以下标准流程（每步均可人工确认）：
+### Send This Prompt to Your PC Agent
+Clone or open this repository on your PC and send:
+
 ```text
-probe_device (.ps1/.sh)  ──▶  select_variant.py  ──▶  SHA256 强校验
-         │                             │                      │
-         ▼                             ▼                      ▼
-   只读匿名硬件/内核画像         精确命中 30 专版之一        ksud/magisk/apd 刷入
-                                                              │
-         SandboxVerifyProbe.apk ◀── ctl variant-info/status ◀─┘ 重启确认
+Read agent-prompts/INSTALL_EN.md and follow its workflow strictly in order for my connected Android phone: run the read-only anonymized device prober, match the exact KernBox variant via tools/select_variant.py, verify the artifact SHA-256 against SHA256SUMS.txt, and pause for my confirmation before flashing, rebooting, or running post-boot checks. Never print my hardware serial, IMEI, MAC, or IP.
+```
+
+What happens automatically under your supervision:
+```text
+probe_device (.ps1/.sh)  ──▶  select_variant.py  ──▶  SHA-256 Strict Verify
+         │                             │                         │
+         ▼                             ▼                         ▼
+ Anonymized device facts     Exact 1-of-30 ZIP match     ksud / magisk / apd flash
+                                                                 │
+         KernBoxVerify.apk ◀── ctl variant-info/status ◀─────────┘ Reboot confirm
 ```
 
 ---
 
-## 仓库目录结构
+## 30-Variant Device Coverage
 
-| 目录 / 文件 | 用途 |
-| :--- | :--- |
-| [`guard/`](guard/) | Go 语言系统守护进程 `sandbox_guard`、隔离 `sandbox_broker`、OEM/内核特化内部包与 `-race` 单元测试 |
-| [`stealth/`](stealth/) | C++17 Zygisk PLT 模块 + Java Binder 动态代理、`stealth/build.py` 与宿主机测试 |
-| [`packaging/`](packaging/) | 4 类 Root 管理器 SELinux 策略、启动脚本模板与严格 LF 检查的 `pack_variant.py` |
-| [`presets/`](presets/) | 可动态热切换的区域/运营商伪装预设 JSON（支持 `ctl preset-apply`） |
-| [`verify/`](verify/) | 纯 Java 独立验收探针 APK（`com.sandbox.verify`）与环境变量驱动构建脚本 |
-| [`tools/`](tools/) | 匿名设备探测器、确定性选包器、全 30 变体构建器、开源隐私泄漏门禁扫描器与单元测试 |
-| [`agent-prompts/`](agent-prompts/) | 面向中文/英文用户的可复制 Agent 提示词（安装、诊断、升级与应急回滚） |
-| [`ARCHITECTURE.md`](ARCHITECTURE.md) | 架构原理、信任边界、状态机与多变体裁剪技术细节 |
-| [`VARIANT_MATRIX.md`](VARIANT_MATRIX.md) | 全 30 个发布包映射表与编译 Flag 说明 |
+KernBox ships `5 OEMs × 2 Kernel Tiers × 3 Root Managers per tier = 30 ARM64 ZIPs` (`KernBox-<oem>-<kernel>-<root>-arm64.zip`) plus the standalone unprivileged probe APK (`KernBoxVerify.apk`):
+
+| Axis | Coverage | Specialization Notes |
+| :--- | :--- | :--- |
+| **OEM Profiles (5)** | `hyperos`, `aosp`, `oplus`, `oneui`, `generic` | Go `-tags oem_<oem>` & C++ `-DOEM_<OEM>` trim OEM bloat rules, clone exclusions, freezer handling, and property slots at compile time. |
+| **Kernel Tiers (2)** | `k510`, `k419` | `k510` (Linux 5.10+ w/ cgroup v2 freeze): `openat2`, `pidfd`, `process_madvise`, `cgroup.freeze`. `k419` (`-tags kernel_compat`): `openat(O_NOFOLLOW)` traversal, verified `/proc` kill, cgroup v1 fallback. |
+| **Root Managers** | `ksu`, `ksu_legacy`, `magisk`, `apatch` | Manager-specific `sepolicy.rule` (`ksu_legacy` targets KSU `< 0.9` / `k419`), `resetprop`/`busybox` lookup, and official CLI install integration. |
+
+> See every artifact filename and build flag in [`VARIANT_MATRIX.md`](VARIANT_MATRIX.md). Custom AOSP ROMs on OEM hardware (e.g., LineageOS on Xiaomi) are automatically classified as `aosp`.
 
 ---
 
-## 开发者从源码一键构建全部 30 个专版
+## Core Capabilities
 
-配置标准环境变量（`GOROOT`、`JAVA_HOME`、`ANDROID_SDK_ROOT`、`ANDROID_NDK_HOME`）后运行：
+- **Fail-Closed Netfilter Isolation & Upgrade Fence**: Atomic `iptables-restore --noflush` management across `SBW_RAW_OUTPUT`, `SBW_OUTPUT`, `SBW_EGRESS`, and `SBW_TPROXY_*`. Blocks boot/locked/upgrade-window leaks deterministically with zero `TRANSPORT_VPN` footprint on the default TProxy path.
+- **Microsecond Hot-Freeze & Memory Reclaim**: Freezes sandbox Work Profile UIDs via cgroup v2 (`k510`) and triggers `process_madvise(MADV_PAGEOUT)` under memory pressure for near-zero idle drain and instant resume; falls back cleanly to cgroup v1 / hibernation on `k419`.
+- **Privilege-Separated Broker & Root IPC**: Splits unprivileged controller UDS (`/dev/socket/sandbox_ctrl/ctrl.sock`) from root daemon UDS (`/dev/socket/sandbox_priv/guard.sock`) via SELinux `sandbox_broker`, enforcing APK signing cert SHA-256, `SO_PEERCRED`, and shared token auth.
+- **Two-Layer Zygisk + Binder Stealth with Two-Strike Kill-Switch**: Zero-allocation Native PLT property/interface sanitization paired with an `InMemoryDexClassLoader` dynamic `IServiceManager` proxy in `system_server` & `com.android.phone`. Ships 6 switchable region/carrier presets under [`presets/`](presets/) (`neutral` default + `jp-docomo`, `us-tmobile`, `uk-ee`, `sg-singtel`, `de-telekom`), plus an automatic 2-failed-boot kill-switch (`zygisk_disabled`).
+- **Independent Verification APK**: Unprivileged pure-Java probe [`KernBoxVerify.apk`](verify/) verifies network isolation, IPv6 blocking, proc hygiene, and KeyMint attestation posture inside the sandboxed user.
+
+---
+
+## AI Operations Playbooks
+
+- **Install & First Audit**: [`agent-prompts/INSTALL_EN.md`](agent-prompts/INSTALL_EN.md) · [中文版](agent-prompts/INSTALL_CN.md)
+- **Read-Only Anonymized Diagnostics**: [`agent-prompts/DIAGNOSE.md`](agent-prompts/DIAGNOSE.md)
+- **Zero-Leak Upgrade & Emergency Rollback**: [`agent-prompts/UPGRADE_AND_ROLLBACK.md`](agent-prompts/UPGRADE_AND_ROLLBACK.md)
+
+---
+
+## Build All 30 Variants from Source
+
+With `go` (matching [`guard/go.mod`](guard/go.mod)), `JAVA_HOME` (JDK 21), `ANDROID_SDK_ROOT` (`platforms;android-35`, `build-tools;35.0.0`), `ANDROID_NDK_HOME`, and Python 3.10+ configured:
+
+```bash
+# Cross-platform Python builder
+python ./tools/build_matrix.py --version 1.0.0
+```
 
 ```powershell
-# Windows PowerShell
-.\tools\build_matrix.ps1 -Version 3.0.0-oss
-
-# 或跨平台 Python 入口
-python ./tools/build_matrix.py --version 3.0.0-oss
+# Windows PowerShell wrapper
+.\tools\build_matrix.ps1 -Version 1.0.0
 ```
 
-构建产物位于 `./dist/`（已加入 `.gitignore`），包含 30 个 `SandboxGuard-<oem>-<kernel>-<root>-arm64.zip`、`SandboxVerifyProbe.apk`、`SHA256SUMS.txt` 与 `variants-manifest.json`。
+Outputs are written to `./dist/` (gitignored): all 30 `KernBox-<oem>-<kernel>-<root>-arm64.zip` modules, `KernBoxVerify.apk`, `SHA256SUMS.txt`, and `variants-manifest.json`. Optional source build flag `-tags transport_vpn` enables legacy VPN fallback builds outside the default 30 TProxy-only releases.
 
 ---
 
-## 开源许可与合规声明
+## Privacy, Security & License
 
-- 本项目采用 [Apache License 2.0](LICENSE) 开源协议。
-- 本项目仅提供 Android 工作资料隔离、隐私安全研究与合法系统防指纹能力，严禁用于任何违法违规用途。
-- **不收集、不内置、也不提交**任何真实硬件序列号、私钥证书或个人网络配置，参见 [`tools/verify_privacy_leak.py`](tools/verify_privacy_leak.py) 与 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
+- **Zero Telemetry / Zero Sensitive Data in Repo**: Device probes strip hardware serials, IMEIs, MACs, and IPs locally and never transmit telemetry. All commits are gated by [`tools/verify_privacy_leak.py`](tools/verify_privacy_leak.py).
+- **Security & Contributions**: See [`SECURITY.md`](SECURITY.md) for vulnerability reporting and [`CONTRIBUTING.md`](CONTRIBUTING.md) for pre-PR hygiene & test checks.
+- **Intended Use**: Provided strictly for personal privacy isolation, managed work-profile research, and defensive Android security testing. Users are responsible for complying with local laws and platform terms.
+- **License**: [Apache License 2.0](LICENSE)

@@ -1,4 +1,4 @@
-# Contributing to Android Sandbox Guard
+# Contributing to KernBox
 
 Thank you for contributing! Because this repository builds multi-OEM rooted system modules, please follow every hygiene, testing, and compile-time isolation check below.
 
