@@ -210,7 +210,7 @@ func fchownFile(f *os.File, uid, gid int) error {
 	if uid < 0 && gid < 0 {
 		return nil
 	}
-	if isUnprivilegedGoTest() && uid == 0 && gid == 0 {
+	if isUnprivilegedGoTest() {
 		return nil
 	}
 	return unix.Fchown(int(f.Fd()), uid, gid)

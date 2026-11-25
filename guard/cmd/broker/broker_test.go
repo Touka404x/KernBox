@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -112,14 +113,23 @@ func TestBrokerForwardingAndRejection(t *testing.T) {
 		}
 	}()
 
+	var credMu sync.Mutex
 	var currentCreds sysio.PeerCredentials
 	var credErr error
+	setCreds := func(creds sysio.PeerCredentials, cerr error) {
+		credMu.Lock()
+		currentCreds = creds
+		credErr = cerr
+		credMu.Unlock()
+	}
 	cfg := BrokerConfig{
 		ClientSockPath: clientSock,
 		GuardSockPath:  guardSock,
 		AuthFilePath:   authPath,
 		AllowTestCtx:   true,
 		GetPeerCreds: func(conn net.Conn) (sysio.PeerCredentials, error) {
+			credMu.Lock()
+			defer credMu.Unlock()
 			return currentCreds, credErr
 		},
 	}
@@ -150,7 +160,7 @@ func TestBrokerForwardingAndRejection(t *testing.T) {
 	}
 
 	// 1. Authorized User 0 untrusted_app -> forwarded cleanly
-	currentCreds = sysio.PeerCredentials{UID: 10376, Context: "u:r:untrusted_app_32:s0:c120,c256"}
+	setCreds(sysio.PeerCredentials{UID: 10376, Context: "u:r:untrusted_app_32:s0:c120,c256"}, nil)
 	r1 := call(`{"id":"1","op":"GET_STATUS"}`+"\n", true)
 	if !r1.OK || r1.ID != "1" {
 		t.Fatalf("authorized RPC failed: %+v", r1)
@@ -172,20 +182,20 @@ func TestBrokerForwardingAndRejection(t *testing.T) {
 	}
 
 	// 2. isolated_app dropped silently (no oracle banner leaked)
-	currentCreds = sysio.PeerCredentials{UID: 10376, Context: "u:r:isolated_app:s0:c120"}
+	setCreds(sysio.PeerCredentials{UID: 10376, Context: "u:r:isolated_app:s0:c120"}, nil)
 	expectSilentClose("isolated_app")
 
 	// 3. SO_PEERCRED error dropped silently
-	credErr = errors.New("bad cred")
+	setCreds(sysio.PeerCredentials{}, errors.New("bad cred"))
 	expectSilentClose("cred_err")
-	credErr = nil
+	setCreds(sysio.PeerCredentials{}, nil)
 
 	// 3b. Work user (User 10) dropped silently
-	currentCreds = sysio.PeerCredentials{UID: 1010376, Context: "u:r:untrusted_app:s0:c10"}
+	setCreds(sysio.PeerCredentials{UID: 1010376, Context: "u:r:untrusted_app:s0:c10"}, nil)
 	expectSilentClose("work_user_u10")
 
 	// 4. Oversized >8192B rejected before forwarding
-	currentCreds = sysio.PeerCredentials{UID: 10376, Context: "u:r:untrusted_app:s0"}
+	setCreds(sysio.PeerCredentials{UID: 10376, Context: "u:r:untrusted_app:s0"}, nil)
 	big := `{"id":"4","op":"GET_STATUS","pkg":"` + strings.Repeat("a", contracts.MaxRPCLineBytes) + `"}` + "\n"
 	r4 := call(big, true)
 	if r4.OK || !strings.Contains(r4.Error, "8192") {
