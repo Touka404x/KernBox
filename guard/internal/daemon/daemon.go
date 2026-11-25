@@ -2549,6 +2549,32 @@ func (d *Daemon) HandleRPC(ctx context.Context, req contracts.RPCRequest) contra
 		})
 		return contracts.RPCResponse{ID: req.ID, OK: true, Error: "", Data: d.buildStatusData(ctx)}
 
+	case contracts.OpStopApp:
+		d.mu.Lock()
+		loaded, policy := d.policyLoaded, d.policy
+		d.mu.Unlock()
+		if !loaded {
+			return contracts.RPCResponse{ID: req.ID, OK: false, Error: "policy not pinned", Data: map[string]any{}}
+		}
+		if err := android.StopSandboxApp(ctx, d.runner, policy.UserID, req.Pkg, policy.EffectiveCallerPackage()); err != nil {
+			return contracts.RPCResponse{ID: req.ID, OK: false, Error: err.Error(), Data: d.buildStatusData(ctx)}
+		}
+		return contracts.RPCResponse{ID: req.ID, OK: true, Error: "", Data: d.buildStatusData(ctx)}
+
+	case contracts.OpRemoveApp:
+		d.mu.Lock()
+		loaded, policy := d.policyLoaded, d.policy
+		d.mu.Unlock()
+		if !loaded {
+			return contracts.RPCResponse{ID: req.ID, OK: false, Error: "policy not pinned", Data: map[string]any{}}
+		}
+		if _, err := android.RemoveSandboxApp(ctx, d.runner, policy.UserID, req.Pkg, policy.EffectiveCallerPackage()); err != nil {
+			return contracts.RPCResponse{ID: req.ID, OK: false, Error: err.Error(), Data: d.buildStatusData(ctx)}
+		}
+		d.evictCachedLauncher(req.Pkg)
+		_, _ = android.SyncHideApps(ctx, d.runner, policy.UserID, policy.Serial)
+		return contracts.RPCResponse{ID: req.ID, OK: true, Error: "", Data: d.buildStatusData(ctx)}
+
 	default:
 		return contracts.RPCResponse{ID: req.ID, OK: false, Error: "unsupported op", Data: map[string]any{}}
 	}
@@ -2905,6 +2931,7 @@ func (d *Daemon) buildStatusData(ctx context.Context) map[string]any {
 		"frozen":               frozen,
 		"freeze_evidence":      freezeEvidence,
 		"zygisk_disabled":      zygiskDisabled,
+		"active_preset":        d.readActivePresetName(),
 		"stealth_boot_tries":   stealthTries,
 		"private_dns_mode":     privDNS,
 		"private_dns_warning":  privDNS == "hostname",

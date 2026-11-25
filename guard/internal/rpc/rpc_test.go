@@ -21,6 +21,8 @@ func TestParseAndValidateRequest(t *testing.T) {
 		`{"id":"req-8","op":"INSTALL_APK","apk_paths":["/data/local/tmp/base.apk","` + contracts.StagingDir + `/split_config.arm64_v8a.apk"]}`,
 		`{"id":"req-9","op":"LAUNCH_APP","pkg":"com.google.android.apps.bard","activity":"com.google.android.apps.bard.shellapp.BardEntryPointActivity"}`,
 		`{"id":"req-10","op":"LAUNCH_APP","pkg":"com.android.vending"}`,
+		`{"id":"req-11","op":"STOP_APP","pkg":"com.android.chrome"}`,
+		`{"id":"req-12","op":"REMOVE_APP","pkg":"com.example.app"}`,
 	} {
 		if _, err := ParseAndValidateRequest([]byte(line)); err != nil {
 			t.Fatalf("valid line %s rejected: %v", line, err)
@@ -56,6 +58,10 @@ func TestParseAndValidateRequest(t *testing.T) {
 		`{"id":"1","op":"LAUNCH_APP","pkg":"com.android.vending","activity":"../evil"}`,
 		`{"id":"1","op":"LAUNCH_APP","pkg":"com.android.vending","activity":".Main;id"}`,
 		`{"id":"1","op":"GET_STATUS","activity":".Main"}`,
+		`{"id":"1","op":"STOP_APP","pkg":""}`,
+		`{"id":"1","op":"STOP_APP","pkg":"com.foo;id"}`,
+		`{"id":"1","op":"REMOVE_APP","pkg":""}`,
+		`{"id":"1","op":"REMOVE_APP","pkg":"../evil"}`,
 	}
 	for _, bad := range badLines {
 		if _, err := ParseAndValidateRequest([]byte(bad)); err == nil {

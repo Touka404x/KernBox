@@ -258,3 +258,34 @@ func TestListSandboxApps(t *testing.T) {
 		t.Fatal("expected forbidden user 0 error")
 	}
 }
+
+func TestStopAndRemoveSandboxApp(t *testing.T) {
+	r := &sandboxRecRunner{
+		out: map[string]string{
+			"cmd package list packages -3 --user 10": "package:com.example.chat\npackage:com.google.android.gms\n",
+			"pm uninstall --user 10 com.example.chat": "Success\n",
+		},
+	}
+	if err := StopSandboxApp(context.Background(), r, 10, "com.example.chat", "com.sandbox.controller"); err != nil {
+		t.Fatal(err)
+	}
+	if err := StopSandboxApp(context.Background(), r, 10, "com.sandbox.controller", "com.sandbox.controller"); err == nil {
+		t.Fatal("expected controller stop rejection")
+	}
+	if err := StopSandboxApp(context.Background(), r, 0, "com.example.chat", "com.sandbox.controller"); err == nil {
+		t.Fatal("expected forbidden user 0 error")
+	}
+
+	out, err := RemoveSandboxApp(context.Background(), r, 10, "com.example.chat", "com.sandbox.controller")
+	if err != nil || out != "Success" {
+		t.Fatalf("expected clean uninstall, got out=%q err=%v", out, err)
+	}
+	for _, prot := range []string{"com.sandbox.controller", "com.sandbox.verify", "com.google.android.gms", "com.android.vending"} {
+		if _, err := RemoveSandboxApp(context.Background(), r, 10, prot, "com.sandbox.controller"); err == nil {
+			t.Fatalf("expected protected package %s rejection", prot)
+		}
+	}
+	if _, err := RemoveSandboxApp(context.Background(), r, 10, "com.not.installed", "com.sandbox.controller"); err == nil {
+		t.Fatal("expected non-installed package rejection")
+	}
+}

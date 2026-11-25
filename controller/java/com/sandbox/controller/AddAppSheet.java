@@ -81,7 +81,6 @@ public final class AddAppSheet extends FrameLayout {
     private final List<AppItem> allDeviceApps = new ArrayList<AppItem>();
     private final Set<String> importedPackages = new HashSet<String>();
     private boolean open = false;
-    private boolean showingDeviceTab = true;
     private boolean loadingApps = false;
 
     public AddAppSheet(
@@ -102,7 +101,7 @@ public final class AddAppSheet extends FrameLayout {
         setClickable(true);
 
         backdrop = new View(context);
-        backdrop.setBackgroundColor(ThemePalette.BACKDROP_DIM);
+        backdrop.setBackgroundColor(ThemePalette.backdropDim(context));
         backdrop.setAlpha(0f);
         backdrop.setOnClickListener(new OnClickListener() {
             @Override
@@ -115,7 +114,7 @@ public final class AddAppSheet extends FrameLayout {
         sheetContainer = new LinearLayout(context);
         sheetContainer.setOrientation(LinearLayout.VERTICAL);
         sheetContainer.setBackground(ThemePalette.topSheetDrawable(
-                context, ThemePalette.BG_PAPER, ThemePalette.BORDER_HAIRLINE, 24f));
+                context, ThemePalette.bgPaper(context), ThemePalette.borderHairline(context), 24f));
         sheetContainer.setClickable(true);
         int hPad = ThemePalette.dp(context, 20f);
         sheetContainer.setPadding(hPad, ThemePalette.dp(context, 12f), hPad, ThemePalette.dp(context, 22f));
@@ -123,22 +122,21 @@ public final class AddAppSheet extends FrameLayout {
         sheetContainer.setElevation(ThemePalette.dp(context, 18f));
         addView(sheetContainer, sheetLp);
 
-        // Top drag handle
         View handle = new View(context);
-        handle.setBackground(ThemePalette.cardDrawable(context, ThemePalette.BORDER_HAIRLINE, Color.TRANSPARENT, 3f));
+        handle.setBackground(ThemePalette.cardDrawable(
+                context, ThemePalette.borderHairline(context), Color.TRANSPARENT, 3f));
         LinearLayout.LayoutParams handleLp = new LinearLayout.LayoutParams(
                 ThemePalette.dp(context, 40f), ThemePalette.dp(context, 4f));
         handleLp.gravity = Gravity.CENTER_HORIZONTAL;
         handleLp.bottomMargin = ThemePalette.dp(context, 14f);
         sheetContainer.addView(handle, handleLp);
 
-        // Header row: title + close button
         LinearLayout headerRow = new LinearLayout(context);
         headerRow.setOrientation(LinearLayout.HORIZONTAL);
         headerRow.setGravity(Gravity.CENTER_VERTICAL);
         TextView titleView = new TextView(context);
         titleView.setText(strings.sheetTitle());
-        titleView.setTextColor(ThemePalette.INK_PRIMARY);
+        titleView.setTextColor(ThemePalette.inkPrimary(context));
         titleView.setTextSize(18f);
         titleView.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
         LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f);
@@ -148,9 +146,9 @@ public final class AddAppSheet extends FrameLayout {
         closeBtn.setText("×");
         closeBtn.setTextSize(20f);
         closeBtn.setGravity(Gravity.CENTER);
-        closeBtn.setTextColor(ThemePalette.INK_SECONDARY);
+        closeBtn.setTextColor(ThemePalette.inkSecondary(context));
         closeBtn.setBackground(ThemePalette.circleRippleDrawable(
-                context, ThemePalette.SURFACE_SUBTLE, ThemePalette.SURFACE_PRESSED, Color.TRANSPARENT));
+                context, ThemePalette.surfaceSubtle(context), ThemePalette.surfacePressed(context), Color.TRANSPARENT));
         closeBtn.setOnClickListener(new OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -162,13 +160,12 @@ public final class AddAppSheet extends FrameLayout {
                 ThemePalette.dp(context, 32f), ThemePalette.dp(context, 32f)));
         sheetContainer.addView(headerRow);
 
-        // Segmented tabs: Device Apps | Install APK
         LinearLayout tabStrip = new LinearLayout(context);
         tabStrip.setOrientation(LinearLayout.HORIZONTAL);
         tabStrip.setPadding(ThemePalette.dp(context, 4f), ThemePalette.dp(context, 4f),
                 ThemePalette.dp(context, 4f), ThemePalette.dp(context, 4f));
         tabStrip.setBackground(ThemePalette.cardDrawable(
-                context, ThemePalette.SURFACE_SUBTLE, ThemePalette.BORDER_HAIRLINE, 14f));
+                context, ThemePalette.surfaceSubtle(context), ThemePalette.borderHairline(context), 14f));
         LinearLayout.LayoutParams tabStripLp = new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT);
         tabStripLp.topMargin = ThemePalette.dp(context, 14f);
@@ -192,18 +189,17 @@ public final class AddAppSheet extends FrameLayout {
         tabStrip.addView(tabApkBtn, new LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f));
         sheetContainer.addView(tabStrip, tabStripLp);
 
-        // Pane 1: Device Apps search & list
         devicePane = new LinearLayout(context);
         devicePane.setOrientation(LinearLayout.VERTICAL);
 
         searchInput = new EditText(context);
         searchInput.setHint(strings.searchHint());
-        searchInput.setHintTextColor(ThemePalette.INK_MUTED);
-        searchInput.setTextColor(ThemePalette.INK_PRIMARY);
+        searchInput.setHintTextColor(ThemePalette.inkMuted(context));
+        searchInput.setTextColor(ThemePalette.inkPrimary(context));
         searchInput.setTextSize(14f);
         searchInput.setSingleLine(true);
         searchInput.setBackground(ThemePalette.cardDrawable(
-                context, ThemePalette.SURFACE_CARD, ThemePalette.BORDER_HAIRLINE, 12f));
+                context, ThemePalette.surfaceCard(context), ThemePalette.borderHairline(context), 12f));
         int sPad = ThemePalette.dp(context, 12f);
         searchInput.setPadding(sPad, ThemePalette.dp(context, 10f), sPad, ThemePalette.dp(context, 10f));
         searchInput.addTextChangedListener(new TextWatcher() {
@@ -227,7 +223,7 @@ public final class AddAppSheet extends FrameLayout {
         devicePane.addView(scroll, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, listMaxHeight));
 
         emptyMsgView = new TextView(context);
-        emptyMsgView.setTextColor(ThemePalette.INK_MUTED);
+        emptyMsgView.setTextColor(ThemePalette.inkMuted(context));
         emptyMsgView.setTextSize(13f);
         emptyMsgView.setGravity(Gravity.CENTER);
         emptyMsgView.setPadding(0, ThemePalette.dp(context, 28f), 0, ThemePalette.dp(context, 28f));
@@ -236,14 +232,13 @@ public final class AddAppSheet extends FrameLayout {
 
         sheetContainer.addView(devicePane);
 
-        // Pane 2: Install staged APK
         apkPane = new LinearLayout(context);
         apkPane.setOrientation(LinearLayout.VERTICAL);
         apkPane.setVisibility(View.GONE);
 
         TextView apkDesc = new TextView(context);
         apkDesc.setText(strings.apkPathLabel());
-        apkDesc.setTextColor(ThemePalette.INK_SECONDARY);
+        apkDesc.setTextColor(ThemePalette.inkSecondary(context));
         apkDesc.setTextSize(13f);
         apkDesc.setLineSpacing(0f, 1.25f);
         LinearLayout.LayoutParams descLp = new LinearLayout.LayoutParams(
@@ -253,14 +248,14 @@ public final class AddAppSheet extends FrameLayout {
 
         apkPathInput = new EditText(context);
         apkPathInput.setHint(strings.apkPathHint());
-        apkPathInput.setHintTextColor(ThemePalette.INK_MUTED);
-        apkPathInput.setTextColor(ThemePalette.INK_PRIMARY);
+        apkPathInput.setHintTextColor(ThemePalette.inkMuted(context));
+        apkPathInput.setTextColor(ThemePalette.inkPrimary(context));
         apkPathInput.setTextSize(13.5f);
         apkPathInput.setTypeface(Typeface.MONOSPACE);
         apkPathInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
         apkPathInput.setSingleLine(true);
         apkPathInput.setBackground(ThemePalette.cardDrawable(
-                context, ThemePalette.SURFACE_CARD, ThemePalette.BORDER_HAIRLINE, 12f));
+                context, ThemePalette.surfaceCard(context), ThemePalette.borderHairline(context), 12f));
         apkPathInput.setPadding(sPad, ThemePalette.dp(context, 11f), sPad, ThemePalette.dp(context, 11f));
         LinearLayout.LayoutParams inputLp = new LinearLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT);
@@ -274,7 +269,7 @@ public final class AddAppSheet extends FrameLayout {
         installApkBtn.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
         installApkBtn.setGravity(Gravity.CENTER);
         installApkBtn.setBackground(ThemePalette.pillRippleDrawable(
-                context, ThemePalette.ACCENT_COPPER, ThemePalette.ACCENT_COPPER_PRESSED, Color.TRANSPARENT, 14f));
+                context, ThemePalette.accentCopper(context), ThemePalette.accentCopperPressed(context), Color.TRANSPARENT, 14f));
         Motion.attachPressScale(installApkBtn);
         installApkBtn.setOnClickListener(new OnClickListener() {
             @Override
@@ -300,16 +295,15 @@ public final class AddAppSheet extends FrameLayout {
     }
 
     private void switchTab(boolean deviceTab) {
-        this.showingDeviceTab = deviceTab;
         Context ctx = getContext();
         tabDeviceBtn.setBackground(deviceTab
-                ? ThemePalette.cardDrawable(ctx, ThemePalette.SURFACE_CARD, ThemePalette.BORDER_HAIRLINE, 10f)
+                ? ThemePalette.cardDrawable(ctx, ThemePalette.surfaceCard(ctx), ThemePalette.borderHairline(ctx), 10f)
                 : null);
-        tabDeviceBtn.setTextColor(deviceTab ? ThemePalette.INK_PRIMARY : ThemePalette.INK_SECONDARY);
+        tabDeviceBtn.setTextColor(deviceTab ? ThemePalette.inkPrimary(ctx) : ThemePalette.inkSecondary(ctx));
         tabApkBtn.setBackground(!deviceTab
-                ? ThemePalette.cardDrawable(ctx, ThemePalette.SURFACE_CARD, ThemePalette.BORDER_HAIRLINE, 10f)
+                ? ThemePalette.cardDrawable(ctx, ThemePalette.surfaceCard(ctx), ThemePalette.borderHairline(ctx), 10f)
                 : null);
-        tabApkBtn.setTextColor(!deviceTab ? ThemePalette.INK_PRIMARY : ThemePalette.INK_SECONDARY);
+        tabApkBtn.setTextColor(!deviceTab ? ThemePalette.inkPrimary(ctx) : ThemePalette.inkSecondary(ctx));
         devicePane.setVisibility(deviceTab ? View.VISIBLE : View.GONE);
         apkPane.setVisibility(deviceTab ? View.GONE : View.VISIBLE);
     }
@@ -460,7 +454,7 @@ public final class AddAppSheet extends FrameLayout {
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setBackground(ThemePalette.cardDrawable(
-                ctx, ThemePalette.SURFACE_CARD, ThemePalette.BORDER_HAIRLINE, 14f));
+                ctx, ThemePalette.surfaceCard(ctx), ThemePalette.borderHairline(ctx), 14f));
         int hPad = ThemePalette.dp(ctx, 12f);
         int vPad = ThemePalette.dp(ctx, 10f);
         row.setPadding(hPad, vPad, hPad, vPad);
@@ -480,7 +474,7 @@ public final class AddAppSheet extends FrameLayout {
         textCol.setOrientation(LinearLayout.VERTICAL);
         TextView nameTv = new TextView(ctx);
         nameTv.setText(item.label);
-        nameTv.setTextColor(ThemePalette.INK_PRIMARY);
+        nameTv.setTextColor(ThemePalette.inkPrimary(ctx));
         nameTv.setTextSize(14f);
         nameTv.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
         nameTv.setMaxLines(1);
@@ -489,7 +483,7 @@ public final class AddAppSheet extends FrameLayout {
 
         TextView pkgTv = new TextView(ctx);
         pkgTv.setText(item.pkg);
-        pkgTv.setTextColor(ThemePalette.INK_MUTED);
+        pkgTv.setTextColor(ThemePalette.inkMuted(ctx));
         pkgTv.setTextSize(11.5f);
         pkgTv.setMaxLines(1);
         pkgTv.setEllipsize(TextUtils.TruncateAt.END);
@@ -543,14 +537,14 @@ public final class AddAppSheet extends FrameLayout {
     private void applyActionState(Context ctx, TextView btn, boolean imported) {
         if (imported) {
             btn.setText("✓ " + strings.btnAdded());
-            btn.setTextColor(ThemePalette.ACCENT_SAGE);
+            btn.setTextColor(ThemePalette.accentSage(ctx));
             btn.setBackground(ThemePalette.cardDrawable(
-                    ctx, ThemePalette.ACCENT_SAGE_SOFT, ThemePalette.BORDER_HAIRLINE, 18f));
+                    ctx, ThemePalette.accentSageSoft(ctx), ThemePalette.borderHairline(ctx), 18f));
         } else {
             btn.setText("+ " + strings.btnImport());
             btn.setTextColor(Color.WHITE);
             btn.setBackground(ThemePalette.pillRippleDrawable(
-                    ctx, ThemePalette.ACCENT_COPPER, ThemePalette.ACCENT_COPPER_PRESSED, Color.TRANSPARENT, 18f));
+                    ctx, ThemePalette.accentCopper(ctx), ThemePalette.accentCopperPressed(ctx), Color.TRANSPARENT, 18f));
         }
     }
 

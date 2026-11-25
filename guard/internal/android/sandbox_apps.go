@@ -112,6 +112,78 @@ func ListSandboxApps(ctx context.Context, r Runner, userID int, excludePkgs ...s
 	return res, nil
 }
 
+// StopSandboxApp force-stops a single package inside the sandbox user,
+// refusing protected caller packages.
+func StopSandboxApp(ctx context.Context, r Runner, userID int, pkg, callerPkg string) error {
+	if oem.IsForbiddenUser(userID) {
+		return fmt.Errorf("invalid work user %d", userID)
+	}
+	if !contracts.ValidPackageName(pkg) {
+		return fmt.Errorf("invalid package name %q", pkg)
+	}
+	protectPkg := strings.TrimSpace(callerPkg)
+	if protectPkg == "" {
+		protectPkg = contracts.DefaultWorkPackage
+	}
+	if pkg == protectPkg {
+		return fmt.Errorf("refusing to force-stop protected controller %s", pkg)
+	}
+	out, err := r.Run(ctx, 5*time.Second, "", "am", "force-stop", "--user", strconv.Itoa(userID), pkg)
+	if err != nil {
+		return fmt.Errorf("am force-stop %s: %w (%s)", pkg, err, strings.TrimSpace(out))
+	}
+	return nil
+}
+
+var protectedRemovePackages = map[string]bool{
+	"android":                 true,
+	"com.android.settings":    true,
+	"com.android.systemui":    true,
+	"com.android.vending":     true,
+	"com.google.android.gms":  true,
+	"com.google.android.gsf":  true,
+	"com.sandbox.controller":  true,
+	"com.sandbox.verify":      true,
+}
+
+// RemoveSandboxApp uninstalls a user-installed (-3) package solely inside the sandbox user,
+// blocking protected system, GMS, and controller packages.
+func RemoveSandboxApp(ctx context.Context, r Runner, userID int, pkg, callerPkg string) (string, error) {
+	if oem.IsForbiddenUser(userID) {
+		return "", fmt.Errorf("invalid work user %d", userID)
+	}
+	if !contracts.ValidPackageName(pkg) {
+		return "", fmt.Errorf("invalid package name %q", pkg)
+	}
+	protectPkg := strings.TrimSpace(callerPkg)
+	if protectPkg == "" {
+		protectPkg = contracts.DefaultWorkPackage
+	}
+	if pkg == protectPkg || protectedRemovePackages[pkg] {
+		return "", fmt.Errorf("refusing to remove protected package %s", pkg)
+	}
+	installed, err := ListSandboxApps(ctx, r, userID, protectPkg, contracts.VerifyProbePackage)
+	if err != nil {
+		return "", fmt.Errorf("list sandbox apps: %w", err)
+	}
+	found := false
+	for _, p := range installed {
+		if p == pkg {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return "", fmt.Errorf("package %s is not a removable user app in work user %d", pkg, userID)
+	}
+	out, uerr := r.Run(ctx, 15*time.Second, "", "pm", "uninstall", "--user", strconv.Itoa(userID), pkg)
+	trimmed := strings.TrimSpace(out)
+	if uerr != nil {
+		return trimmed, fmt.Errorf("pm uninstall %s: %w (%s)", pkg, uerr, trimmed)
+	}
+	return trimmed, nil
+}
+
 func mergeSortedUnique(groups ...[]string) []string {
 	seen := make(map[string]struct{})
 	for _, g := range groups {

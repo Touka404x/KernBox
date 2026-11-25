@@ -1,6 +1,9 @@
 package com.sandbox.controller;
 
 import android.app.Activity;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
@@ -20,6 +23,8 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.window.OnBackInvokedCallback;
+import android.window.OnBackInvokedDispatcher;
 
 import java.util.List;
 import java.util.Locale;
@@ -28,8 +33,9 @@ import java.util.concurrent.Executors;
 
 /**
  * KernBox Companion Controller Activity:
- * Minimal Dieter Rams / Swiss Monograph surface with animated status ring,
- * responsive sandbox app grid, and an animated "+" FAB add-app bottom sheet.
+ * Adaptive Light/Dark Dieter Rams / Swiss Monograph surface with animated status ring,
+ * offline SHA-256 cert fingerprint helper, diagnostics sheet, responsive workspace grid
+ * with long-press management, and animated "+" FAB add-app bottom sheet.
  */
 public final class MainActivity extends Activity {
 
@@ -42,6 +48,8 @@ public final class MainActivity extends Activity {
     private TextView modePill;
     private TextView statusTitleView;
     private TextView statusSubtitleView;
+    private LinearLayout offlineCertBox;
+    private TextView offlineCertDigestView;
     private TextView primaryToggleBtn;
     private TextView metricAppsVal;
     private TextView metricGateVal;
@@ -49,15 +57,21 @@ public final class MainActivity extends Activity {
     private TextView appsCountPill;
     private GridLayout appsGrid;
     private LinearLayout emptyStateCard;
+    private ImageView diagIconBtn;
     private ImageView refreshIconBtn;
     private FrameLayout fabButton;
-    private PlusMarkView fabPlusMark;
     private TextView toastCapsule;
+
     private AddAppSheet addAppSheet;
+    private AppActionSheet appActionSheet;
+    private DiagnosticsSheet diagnosticsSheet;
+    private Object backCallbackToken;
 
     private BrokerProtocol.StatusSnapshot currentSnapshot = BrokerProtocol.StatusSnapshot.empty();
+    private String certSha256 = "";
     private boolean connected = false;
     private boolean busy = false;
+
     private final Runnable hideToastTask = new Runnable() {
         @Override
         public void run() {
@@ -76,8 +90,10 @@ public final class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        this.certSha256 = CertUtil.getSigningCertSha256(this);
         configureSystemBars();
         setContentView(buildRootLayout());
+        registerPredictiveBack();
         renderSnapshot();
         refreshStatus(false);
     }
@@ -100,10 +116,9 @@ public final class MainActivity extends Activity {
     }
 
     @Override
+    @SuppressWarnings("deprecation")
     public void onBackPressed() {
-        if (addAppSheet != null && addAppSheet.isOpen()) {
-            addAppSheet.dismiss();
-            Motion.animateFabToggle(fabButton, false);
+        if (dismissTopOverlayIfOpen()) {
             return;
         }
         super.onBackPressed();
@@ -111,28 +126,67 @@ public final class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        unregisterPredictiveBack();
         mainHandler.removeCallbacksAndMessages(null);
         executor.shutdownNow();
         super.onDestroy();
+    }
+
+    private void registerPredictiveBack() {
+        if (Build.VERSION.SDK_INT >= 33) {
+            OnBackInvokedCallback cb = new OnBackInvokedCallback() {
+                @Override
+                public void onBackInvoked() {
+                    if (!dismissTopOverlayIfOpen()) {
+                        finish();
+                    }
+                }
+            };
+            getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
+                    OnBackInvokedDispatcher.PRIORITY_DEFAULT, cb);
+            this.backCallbackToken = cb;
+        }
+    }
+
+    private void unregisterPredictiveBack() {
+        if (Build.VERSION.SDK_INT >= 33 && backCallbackToken instanceof OnBackInvokedCallback) {
+            getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback((OnBackInvokedCallback) backCallbackToken);
+            backCallbackToken = null;
+        }
+    }
+
+    private boolean dismissTopOverlayIfOpen() {
+        if (appActionSheet != null && appActionSheet.isOpen()) {
+            appActionSheet.dismiss();
+            return true;
+        }
+        if (diagnosticsSheet != null && diagnosticsSheet.isOpen()) {
+            diagnosticsSheet.dismiss();
+            return true;
+        }
+        if (addAppSheet != null && addAppSheet.isOpen()) {
+            addAppSheet.dismiss();
+            Motion.animateFabToggle(fabButton, false);
+            return true;
+        }
+        return false;
     }
 
     private void configureSystemBars() {
         if (Build.VERSION.SDK_INT >= 30) {
             WindowInsetsController ctrl = getWindow().getInsetsController();
             if (ctrl != null) {
-                ctrl.setSystemBarsAppearance(
-                        WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
-                                | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS,
-                        WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
-                                | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
-                );
+                boolean dark = ThemePalette.isDark(this);
+                int mask = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+                        | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
+                ctrl.setSystemBarsAppearance(dark ? 0 : mask, mask);
             }
         }
     }
 
     private View buildRootLayout() {
         FrameLayout root = new FrameLayout(this);
-        root.setBackgroundColor(ThemePalette.BG_PAPER);
+        root.setBackgroundColor(ThemePalette.bgPaper(this));
         root.setFitsSystemWindows(true);
 
         ScrollView scroll = new ScrollView(this);
@@ -153,16 +207,14 @@ public final class MainActivity extends Activity {
         root.addView(scroll, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
-        // Animated "+" Floating Action Button
         fabButton = new FrameLayout(this);
         fabButton.setBackground(ThemePalette.circleRippleDrawable(
-                this, ThemePalette.ACCENT_COPPER, ThemePalette.ACCENT_COPPER_PRESSED, Color.TRANSPARENT));
+                this, ThemePalette.accentCopper(this), ThemePalette.accentCopperPressed(this), Color.TRANSPARENT));
         fabButton.setElevation(ThemePalette.dp(this, 8f));
         fabButton.setContentDescription(strings.sheetTitle());
-        fabPlusMark = new PlusMarkView(this);
+        PlusMarkView fabPlusMark = new PlusMarkView(this);
         int iconSize = ThemePalette.dp(this, 28f);
-        FrameLayout.LayoutParams markLp = new FrameLayout.LayoutParams(iconSize, iconSize, Gravity.CENTER);
-        fabButton.addView(fabPlusMark, markLp);
+        fabButton.addView(fabPlusMark, new FrameLayout.LayoutParams(iconSize, iconSize, Gravity.CENTER));
         Motion.attachPressScale(fabButton);
         fabButton.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -176,7 +228,6 @@ public final class MainActivity extends Activity {
         fabLp.bottomMargin = ThemePalette.dp(this, 24f);
         root.addView(fabButton, fabLp);
 
-        // Minimal animated AddAppSheet overlay
         addAppSheet = new AddAppSheet(this, strings, broker, executor, mainHandler, new AddAppSheet.HostCallback() {
             @Override
             public void onAppImported(String pkg, String label) {
@@ -203,7 +254,50 @@ public final class MainActivity extends Activity {
         root.addView(addAppSheet, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
-        // Subtle floating toast capsule
+        appActionSheet = new AppActionSheet(this, strings, broker, executor, mainHandler, new AppActionSheet.Callback() {
+            @Override
+            public void onActionSuccess(BrokerProtocol.StatusSnapshot snapshot, String toastMessage) {
+                if (snapshot != null && snapshot.policyLoaded) {
+                    connected = true;
+                    currentSnapshot = snapshot;
+                    renderSnapshot();
+                } else {
+                    refreshStatus(false);
+                }
+                showToast(toastMessage, false);
+            }
+
+            @Override
+            public void onActionError(String errorMessage) {
+                showToast(errorMessage, true);
+            }
+
+            @Override
+            public void onCopyToast(String message) {
+                showToast(message, false);
+            }
+        });
+        root.addView(appActionSheet, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+
+        diagnosticsSheet = new DiagnosticsSheet(this, strings, broker, executor, mainHandler, new DiagnosticsSheet.Callback() {
+            @Override
+            public void onSnapshotRefreshed(BrokerProtocol.StatusSnapshot snapshot) {
+                if (snapshot != null && snapshot.policyLoaded) {
+                    connected = true;
+                    currentSnapshot = snapshot;
+                    renderSnapshot();
+                }
+            }
+
+            @Override
+            public void onToast(String message, boolean error) {
+                showToast(message, error);
+            }
+        });
+        root.addView(diagnosticsSheet, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+
         toastCapsule = new TextView(this);
         toastCapsule.setVisibility(View.GONE);
         toastCapsule.setTextColor(Color.WHITE);
@@ -239,7 +333,7 @@ public final class MainActivity extends Activity {
 
         TextView wordmark = new TextView(this);
         wordmark.setText(strings.brandTitle());
-        wordmark.setTextColor(ThemePalette.INK_PRIMARY);
+        wordmark.setTextColor(ThemePalette.inkPrimary(this));
         wordmark.setTextSize(21f);
         wordmark.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
         wordmark.setLetterSpacing(-0.02f);
@@ -247,11 +341,11 @@ public final class MainActivity extends Activity {
 
         modePill = new TextView(this);
         modePill.setText(strings.modeOffline());
-        modePill.setTextColor(ThemePalette.INK_SECONDARY);
+        modePill.setTextColor(ThemePalette.inkSecondary(this));
         modePill.setTextSize(11.5f);
         modePill.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
         modePill.setBackground(ThemePalette.cardDrawable(
-                this, ThemePalette.SURFACE_SUBTLE, ThemePalette.BORDER_HAIRLINE, 16f));
+                this, ThemePalette.surfaceSubtle(this), ThemePalette.borderHairline(this), 16f));
         modePill.setPadding(ThemePalette.dp(this, 11f), ThemePalette.dp(this, 5f),
                 ThemePalette.dp(this, 11f), ThemePalette.dp(this, 5f));
         LinearLayout.LayoutParams pillLp = new LinearLayout.LayoutParams(
@@ -259,14 +353,35 @@ public final class MainActivity extends Activity {
         pillLp.rightMargin = ThemePalette.dp(this, 8f);
         row.addView(modePill, pillLp);
 
+        diagIconBtn = new ImageView(this);
+        diagIconBtn.setImageResource(android.R.drawable.ic_menu_info_details);
+        diagIconBtn.setColorFilter(ThemePalette.inkSecondary(this));
+        diagIconBtn.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        diagIconBtn.setContentDescription(strings.diagTitle());
+        diagIconBtn.setPadding(ThemePalette.dp(this, 8f), ThemePalette.dp(this, 8f),
+                ThemePalette.dp(this, 8f), ThemePalette.dp(this, 8f));
+        diagIconBtn.setBackground(ThemePalette.circleRippleDrawable(
+                this, ThemePalette.surfaceCard(this), ThemePalette.surfacePressed(this), ThemePalette.borderHairline(this)));
+        Motion.attachPressScale(diagIconBtn);
+        diagIconBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                diagnosticsSheet.show(currentSnapshot, connected);
+            }
+        });
+        LinearLayout.LayoutParams diagLp = new LinearLayout.LayoutParams(
+                ThemePalette.dp(this, 36f), ThemePalette.dp(this, 36f));
+        diagLp.rightMargin = ThemePalette.dp(this, 8f);
+        row.addView(diagIconBtn, diagLp);
+
         refreshIconBtn = new ImageView(this);
         refreshIconBtn.setImageResource(android.R.drawable.ic_popup_sync);
-        refreshIconBtn.setColorFilter(ThemePalette.INK_SECONDARY);
+        refreshIconBtn.setColorFilter(ThemePalette.inkSecondary(this));
         refreshIconBtn.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
         refreshIconBtn.setPadding(ThemePalette.dp(this, 8f), ThemePalette.dp(this, 8f),
                 ThemePalette.dp(this, 8f), ThemePalette.dp(this, 8f));
         refreshIconBtn.setBackground(ThemePalette.circleRippleDrawable(
-                this, ThemePalette.SURFACE_CARD, ThemePalette.SURFACE_PRESSED, ThemePalette.BORDER_HAIRLINE));
+                this, ThemePalette.surfaceCard(this), ThemePalette.surfacePressed(this), ThemePalette.borderHairline(this)));
         Motion.attachPressScale(refreshIconBtn);
         refreshIconBtn.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -284,7 +399,7 @@ public final class MainActivity extends Activity {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
         card.setBackground(ThemePalette.cardDrawable(
-                this, ThemePalette.SURFACE_CARD, ThemePalette.BORDER_HAIRLINE, 22f));
+                this, ThemePalette.surfaceCard(this), ThemePalette.borderHairline(this), 22f));
         card.setElevation(ThemePalette.dp(this, 2f));
         int pad = ThemePalette.dp(this, 20f);
         card.setPadding(pad, pad, pad, pad);
@@ -293,7 +408,6 @@ public final class MainActivity extends Activity {
         cardLp.bottomMargin = ThemePalette.dp(this, 22f);
         card.setLayoutParams(cardLp);
 
-        // Top row inside card: Halo ring + state title/subtitle
         LinearLayout topRow = new LinearLayout(this);
         topRow.setOrientation(LinearLayout.HORIZONTAL);
         topRow.setGravity(Gravity.CENTER_VERTICAL);
@@ -307,20 +421,72 @@ public final class MainActivity extends Activity {
         LinearLayout infoCol = new LinearLayout(this);
         infoCol.setOrientation(LinearLayout.VERTICAL);
         statusTitleView = new TextView(this);
-        statusTitleView.setTextColor(ThemePalette.INK_PRIMARY);
+        statusTitleView.setTextColor(ThemePalette.inkPrimary(this));
         statusTitleView.setTextSize(19f);
         statusTitleView.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
         infoCol.addView(statusTitleView);
 
         statusSubtitleView = new TextView(this);
-        statusSubtitleView.setTextColor(ThemePalette.INK_SECONDARY);
+        statusSubtitleView.setTextColor(ThemePalette.inkSecondary(this));
         statusSubtitleView.setTextSize(13f);
         statusSubtitleView.setPadding(0, ThemePalette.dp(this, 3f), 0, 0);
         infoCol.addView(statusSubtitleView);
         topRow.addView(infoCol, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         card.addView(topRow);
 
-        // Single prominent Start / Pause pill button
+        // Compact Offline Setup Cert Helper
+        offlineCertBox = new LinearLayout(this);
+        offlineCertBox.setOrientation(LinearLayout.HORIZONTAL);
+        offlineCertBox.setGravity(Gravity.CENTER_VERTICAL);
+        offlineCertBox.setBackground(ThemePalette.cardDrawable(
+                this, ThemePalette.surfaceSubtle(this), ThemePalette.borderHairline(this), 14f));
+        offlineCertBox.setPadding(ThemePalette.dp(this, 12f), ThemePalette.dp(this, 10f),
+                ThemePalette.dp(this, 12f), ThemePalette.dp(this, 10f));
+        LinearLayout.LayoutParams certBoxLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        certBoxLp.topMargin = ThemePalette.dp(this, 14f);
+
+        LinearLayout certTextCol = new LinearLayout(this);
+        certTextCol.setOrientation(LinearLayout.VERTICAL);
+        TextView certCap = new TextView(this);
+        certCap.setText(strings.offlineCertTitle());
+        certCap.setTextColor(ThemePalette.inkMuted(this));
+        certCap.setTextSize(11f);
+        certTextCol.addView(certCap);
+
+        offlineCertDigestView = new TextView(this);
+        offlineCertDigestView.setText(certSha256.isEmpty() ? "—" : CertUtil.shortDigest(certSha256));
+        offlineCertDigestView.setTextColor(ThemePalette.inkPrimary(this));
+        offlineCertDigestView.setTextSize(12.5f);
+        offlineCertDigestView.setTypeface(Typeface.MONOSPACE);
+        certTextCol.addView(offlineCertDigestView);
+        offlineCertBox.addView(certTextCol, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        TextView copyCertBtn = new TextView(this);
+        copyCertBtn.setText(strings.btnCopyCert());
+        copyCertBtn.setTextColor(Color.WHITE);
+        copyCertBtn.setTextSize(12f);
+        copyCertBtn.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+        copyCertBtn.setBackground(ThemePalette.pillRippleDrawable(
+                this, ThemePalette.accentCopper(this), ThemePalette.accentCopperPressed(this), Color.TRANSPARENT, 14f));
+        copyCertBtn.setPadding(ThemePalette.dp(this, 12f), ThemePalette.dp(this, 6f),
+                ThemePalette.dp(this, 12f), ThemePalette.dp(this, 6f));
+        Motion.attachPressScale(copyCertBtn);
+        copyCertBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (!certSha256.isEmpty()) {
+                    ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                    if (cm != null) {
+                        cm.setPrimaryClip(ClipData.newPlainText("kernbox-cert-sha256", certSha256));
+                    }
+                    showToast(strings.copiedCertToast(), false);
+                }
+            }
+        });
+        offlineCertBox.addView(copyCertBtn);
+        card.addView(offlineCertBox, certBoxLp);
+
         primaryToggleBtn = new TextView(this);
         primaryToggleBtn.setTextSize(15f);
         primaryToggleBtn.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
@@ -334,17 +500,15 @@ public final class MainActivity extends Activity {
         });
         LinearLayout.LayoutParams btnLp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, ThemePalette.dp(this, 48f));
-        btnLp.topMargin = ThemePalette.dp(this, 18f);
+        btnLp.topMargin = ThemePalette.dp(this, 16f);
         btnLp.bottomMargin = ThemePalette.dp(this, 16f);
         card.addView(primaryToggleBtn, btnLp);
 
-        // Thin divider
         View divider = new View(this);
-        divider.setBackgroundColor(ThemePalette.BORDER_HAIRLINE);
+        divider.setBackgroundColor(ThemePalette.borderHairline(this));
         card.addView(divider, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, Math.max(1, ThemePalette.dp(this, 1f))));
 
-        // 3-column architectural metric bar
         LinearLayout metricsRow = new LinearLayout(this);
         metricsRow.setOrientation(LinearLayout.HORIZONTAL);
         LinearLayout.LayoutParams metricsLp = new LinearLayout.LayoutParams(
@@ -365,14 +529,14 @@ public final class MainActivity extends Activity {
         col.setGravity(Gravity.CENTER_HORIZONTAL);
 
         TextView valTv = new TextView(this);
-        valTv.setTextColor(ThemePalette.INK_PRIMARY);
+        valTv.setTextColor(ThemePalette.inkPrimary(this));
         valTv.setTextSize(14f);
         valTv.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
         col.addView(valTv);
 
         TextView capTv = new TextView(this);
         capTv.setText(caption);
-        capTv.setTextColor(ThemePalette.INK_MUTED);
+        capTv.setTextColor(ThemePalette.inkMuted(this));
         capTv.setTextSize(11.5f);
         capTv.setPadding(0, ThemePalette.dp(this, 2f), 0, 0);
         col.addView(capTv);
@@ -392,17 +556,17 @@ public final class MainActivity extends Activity {
 
         TextView title = new TextView(this);
         title.setText(strings.sectionApps());
-        title.setTextColor(ThemePalette.INK_PRIMARY);
+        title.setTextColor(ThemePalette.inkPrimary(this));
         title.setTextSize(16f);
         title.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
         row.addView(title, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
         appsCountPill = new TextView(this);
         appsCountPill.setText("0");
-        appsCountPill.setTextColor(ThemePalette.INK_SECONDARY);
+        appsCountPill.setTextColor(ThemePalette.inkSecondary(this));
         appsCountPill.setTextSize(12f);
         appsCountPill.setBackground(ThemePalette.cardDrawable(
-                this, ThemePalette.SURFACE_SUBTLE, ThemePalette.BORDER_HAIRLINE, 12f));
+                this, ThemePalette.surfaceSubtle(this), ThemePalette.borderHairline(this), 12f));
         appsCountPill.setPadding(ThemePalette.dp(this, 10f), ThemePalette.dp(this, 3f),
                 ThemePalette.dp(this, 10f), ThemePalette.dp(this, 3f));
         row.addView(appsCountPill);
@@ -423,20 +587,20 @@ public final class MainActivity extends Activity {
         emptyStateCard.setOrientation(LinearLayout.VERTICAL);
         emptyStateCard.setGravity(Gravity.CENTER_HORIZONTAL);
         emptyStateCard.setBackground(ThemePalette.cardDrawable(
-                this, ThemePalette.SURFACE_CARD, ThemePalette.BORDER_HAIRLINE, 18f));
+                this, ThemePalette.surfaceCard(this), ThemePalette.borderHairline(this), 18f));
         emptyStateCard.setPadding(ThemePalette.dp(this, 24f), ThemePalette.dp(this, 28f),
                 ThemePalette.dp(this, 24f), ThemePalette.dp(this, 28f));
 
         TextView emptyTitle = new TextView(this);
         emptyTitle.setText(strings.emptyTitle());
-        emptyTitle.setTextColor(ThemePalette.INK_PRIMARY);
+        emptyTitle.setTextColor(ThemePalette.inkPrimary(this));
         emptyTitle.setTextSize(15f);
         emptyTitle.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
         emptyStateCard.addView(emptyTitle);
 
         TextView emptySub = new TextView(this);
         emptySub.setText(strings.emptySubtitle());
-        emptySub.setTextColor(ThemePalette.INK_SECONDARY);
+        emptySub.setTextColor(ThemePalette.inkSecondary(this));
         emptySub.setTextSize(13f);
         emptySub.setGravity(Gravity.CENTER);
         emptySub.setPadding(0, ThemePalette.dp(this, 6f), 0, 0);
@@ -539,7 +703,7 @@ public final class MainActivity extends Activity {
             primaryToggleBtn.setText(strings.btnSyncing());
             primaryToggleBtn.setEnabled(false);
             primaryToggleBtn.setBackground(ThemePalette.pillRippleDrawable(
-                    this, ThemePalette.ACCENT_COPPER, ThemePalette.ACCENT_COPPER_PRESSED, Color.TRANSPARENT, 16f));
+                    this, ThemePalette.accentCopper(this), ThemePalette.accentCopperPressed(this), Color.TRANSPARENT, 16f));
             primaryToggleBtn.setTextColor(Color.WHITE);
             return;
         }
@@ -548,15 +712,16 @@ public final class MainActivity extends Activity {
         if (!connected) {
             haloView.setMode(BreathingHaloView.Mode.OFFLINE);
             modePill.setText(strings.modeOffline());
-            modePill.setTextColor(ThemePalette.INK_SECONDARY);
+            modePill.setTextColor(ThemePalette.inkSecondary(this));
             modePill.setBackground(ThemePalette.cardDrawable(
-                    this, ThemePalette.SURFACE_SUBTLE, ThemePalette.BORDER_HAIRLINE, 16f));
+                    this, ThemePalette.surfaceSubtle(this), ThemePalette.borderHairline(this), 16f));
             statusTitleView.setText(strings.statusOfflineTitle());
             statusSubtitleView.setText(strings.offlineHint());
+            offlineCertBox.setVisibility(certSha256.isEmpty() ? View.GONE : View.VISIBLE);
             primaryToggleBtn.setText(strings.btnRetry());
-            primaryToggleBtn.setTextColor(ThemePalette.INK_PRIMARY);
+            primaryToggleBtn.setTextColor(ThemePalette.inkPrimary(this));
             primaryToggleBtn.setBackground(ThemePalette.pillRippleDrawable(
-                    this, ThemePalette.SURFACE_SUBTLE, ThemePalette.SURFACE_PRESSED, ThemePalette.BORDER_HAIRLINE, 16f));
+                    this, ThemePalette.surfaceSubtle(this), ThemePalette.surfacePressed(this), ThemePalette.borderHairline(this), 16f));
             metricAppsVal.setText("—");
             metricGateVal.setText("—");
             metricFreezeVal.setText("—");
@@ -564,6 +729,7 @@ public final class MainActivity extends Activity {
             return;
         }
 
+        offlineCertBox.setVisibility(View.GONE);
         boolean active = !currentSnapshot.paused;
         haloView.setMode(active ? BreathingHaloView.Mode.ACTIVE : BreathingHaloView.Mode.PAUSED);
 
@@ -572,11 +738,11 @@ public final class MainActivity extends Activity {
         } else {
             modePill.setText(active ? strings.modeIsolated() : strings.modeStandby());
         }
-        modePill.setTextColor(active ? ThemePalette.ACCENT_SAGE : ThemePalette.INK_SECONDARY);
+        modePill.setTextColor(active ? ThemePalette.accentSage(this) : ThemePalette.inkSecondary(this));
         modePill.setBackground(ThemePalette.cardDrawable(
                 this,
-                active ? ThemePalette.ACCENT_SAGE_SOFT : ThemePalette.SURFACE_SUBTLE,
-                ThemePalette.BORDER_HAIRLINE,
+                active ? ThemePalette.accentSageSoft(this) : ThemePalette.surfaceSubtle(this),
+                ThemePalette.borderHairline(this),
                 16f));
 
         statusTitleView.setText(active ? strings.statusActiveTitle() : strings.statusPausedTitle());
@@ -585,14 +751,14 @@ public final class MainActivity extends Activity {
 
         if (active) {
             primaryToggleBtn.setText(strings.btnPause());
-            primaryToggleBtn.setTextColor(ThemePalette.INK_PRIMARY);
+            primaryToggleBtn.setTextColor(ThemePalette.inkPrimary(this));
             primaryToggleBtn.setBackground(ThemePalette.pillRippleDrawable(
-                    this, ThemePalette.SURFACE_SUBTLE, ThemePalette.SURFACE_PRESSED, ThemePalette.BORDER_HAIRLINE, 16f));
+                    this, ThemePalette.surfaceSubtle(this), ThemePalette.surfacePressed(this), ThemePalette.borderHairline(this), 16f));
         } else {
             primaryToggleBtn.setText(strings.btnStart());
             primaryToggleBtn.setTextColor(Color.WHITE);
             primaryToggleBtn.setBackground(ThemePalette.pillRippleDrawable(
-                    this, ThemePalette.ACCENT_COPPER, ThemePalette.ACCENT_COPPER_PRESSED, Color.TRANSPARENT, 16f));
+                    this, ThemePalette.accentCopper(this), ThemePalette.accentCopperPressed(this), Color.TRANSPARENT, 16f));
         }
 
         metricAppsVal.setText(String.valueOf(currentSnapshot.sandboxApps.size()));
@@ -664,7 +830,7 @@ public final class MainActivity extends Activity {
         tile.setOrientation(LinearLayout.VERTICAL);
         tile.setGravity(Gravity.CENTER_HORIZONTAL);
         tile.setBackground(ThemePalette.pillRippleDrawable(
-                this, ThemePalette.SURFACE_CARD, ThemePalette.SURFACE_PRESSED, ThemePalette.BORDER_HAIRLINE, 16f));
+                this, ThemePalette.surfaceCard(this), ThemePalette.surfacePressed(this), ThemePalette.borderHairline(this), 16f));
         tile.setPadding(ThemePalette.dp(this, 6f), ThemePalette.dp(this, 12f),
                 ThemePalette.dp(this, 6f), ThemePalette.dp(this, 10f));
 
@@ -679,12 +845,12 @@ public final class MainActivity extends Activity {
             TextView mono = new TextView(this);
             String first = info.label.isEmpty() ? "?" : info.label.substring(0, 1).toUpperCase(Locale.ROOT);
             mono.setText(first);
-            mono.setTextColor(ThemePalette.ACCENT_COPPER);
+            mono.setTextColor(ThemePalette.accentCopper(this));
             mono.setTextSize(16f);
             mono.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
             mono.setGravity(Gravity.CENTER);
             mono.setBackground(ThemePalette.circleRippleDrawable(
-                    this, ThemePalette.ACCENT_COPPER_SOFT, ThemePalette.SURFACE_PRESSED, ThemePalette.BORDER_HAIRLINE));
+                    this, ThemePalette.accentCopperSoft(this), ThemePalette.surfacePressed(this), ThemePalette.borderHairline(this)));
             LinearLayout.LayoutParams mLp = new LinearLayout.LayoutParams(
                     ThemePalette.dp(this, 40f), ThemePalette.dp(this, 40f));
             mLp.bottomMargin = ThemePalette.dp(this, 6f);
@@ -693,7 +859,7 @@ public final class MainActivity extends Activity {
 
         TextView labelTv = new TextView(this);
         labelTv.setText(info.label);
-        labelTv.setTextColor(ThemePalette.INK_PRIMARY);
+        labelTv.setTextColor(ThemePalette.inkPrimary(this));
         labelTv.setTextSize(11.5f);
         labelTv.setMaxLines(1);
         labelTv.setEllipsize(TextUtils.TruncateAt.END);
@@ -706,6 +872,13 @@ public final class MainActivity extends Activity {
             @Override
             public void onClick(View v) {
                 launchSandboxApp(info);
+            }
+        });
+        tile.setOnLongClickListener(new View.OnLongClickListener() {
+            @Override
+            public boolean onLongClick(View v) {
+                appActionSheet.show(info.pkg, info.label, info.icon);
+                return true;
             }
         });
         return tile;
@@ -736,8 +909,8 @@ public final class MainActivity extends Activity {
         toastCapsule.setText(message);
         toastCapsule.setBackground(ThemePalette.cardDrawable(
                 this,
-                isError ? ThemePalette.ACCENT_ERROR : ThemePalette.INK_PRIMARY,
-                Color.TRANSPARENT,
+                isError ? ThemePalette.accentError(this) : ThemePalette.INK_PRIMARY,
+                ThemePalette.isDark(this) ? ThemePalette.borderHairline(this) : Color.TRANSPARENT,
                 20f));
         toastCapsule.setVisibility(View.VISIBLE);
         toastCapsule.animate().cancel();

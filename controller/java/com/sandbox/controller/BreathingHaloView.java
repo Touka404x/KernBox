@@ -30,7 +30,7 @@ public final class BreathingHaloView extends View {
     private final ArgbEvaluator colorEval = new ArgbEvaluator();
 
     private Mode mode = Mode.OFFLINE;
-    private int currentColor = ThemePalette.ACCENT_STONE;
+    private int currentColor;
     private float breathPhase = 0f;
     private float spinAngle = 0f;
     private boolean hostResumed = true;
@@ -42,10 +42,11 @@ public final class BreathingHaloView extends View {
     public BreathingHaloView(Context context) {
         super(context);
         float density = context.getResources().getDisplayMetrics().density;
+        currentColor = ThemePalette.accentStone(context);
 
         dialPaint.setStyle(Paint.Style.STROKE);
         dialPaint.setStrokeWidth(1.25f * density);
-        dialPaint.setColor(ThemePalette.BORDER_HAIRLINE);
+        dialPaint.setColor(ThemePalette.borderHairline(context));
 
         haloPaint.setStyle(Paint.Style.FILL);
         corePaint.setStyle(Paint.Style.FILL);
@@ -84,18 +85,19 @@ public final class BreathingHaloView extends View {
             return;
         }
         this.mode = nextMode;
+        Context ctx = getContext();
         int targetColor;
         switch (nextMode) {
             case ACTIVE:
-                targetColor = ThemePalette.ACCENT_SAGE;
+                targetColor = ThemePalette.accentSage(ctx);
                 break;
             case BUSY:
-                targetColor = ThemePalette.ACCENT_COPPER;
+                targetColor = ThemePalette.accentCopper(ctx);
                 break;
             case PAUSED:
             case OFFLINE:
             default:
-                targetColor = ThemePalette.ACCENT_STONE;
+                targetColor = ThemePalette.accentStone(ctx);
                 break;
         }
         animateColorTo(targetColor);
@@ -174,20 +176,16 @@ public final class BreathingHaloView extends View {
         float cy = h * 0.5f;
         float maxR = Math.min(w, h) * 0.44f;
 
-        // Outer hairline architectural dial
         canvas.drawCircle(cx, cy, maxR, dialPaint);
 
-        // Breathing soft halo
         float haloScale = mode == Mode.ACTIVE ? (0.58f + 0.26f * breathPhase) : 0.54f;
         int haloAlpha = mode == Mode.ACTIVE ? Math.round(52 - 22 * breathPhase) : 26;
         haloPaint.setColor((currentColor & 0x00FFFFFF) | (haloAlpha << 24));
         canvas.drawCircle(cx, cy, maxR * haloScale, haloPaint);
 
-        // Inner core indicator dot
         corePaint.setColor(currentColor);
         canvas.drawCircle(cx, cy, maxR * 0.28f, corePaint);
 
-        // Minimal rotating sweep arc during BUSY transitions
         if (mode == Mode.BUSY) {
             arcPaint.setColor(currentColor);
             float r = maxR * 0.88f;

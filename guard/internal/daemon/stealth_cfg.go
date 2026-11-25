@@ -553,3 +553,19 @@ func (d *Daemon) ApplyPresetFile(ctx context.Context, presetPath string) (Stealt
 	}
 	return cfg, nil
 }
+
+func (d *Daemon) readActivePresetName() string {
+	cfgPath, _, _ := d.resolvedStealthPaths()
+	raw, err := sysio.ReadRootOwnedSmallFile(cfgPath, contracts.MaxSmallFileBytes)
+	if err != nil {
+		return "neutral"
+	}
+	var cfg StealthConfig
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return "neutral"
+	}
+	if name := strings.TrimSpace(cfg.ActivePreset); name != "" {
+		return name
+	}
+	return "neutral"
+}

@@ -36,6 +36,8 @@ var allowedOps = map[string]bool{
 	contracts.OpSyncHideApps:   true,
 	contracts.OpRunProbe:       true,
 	contracts.OpLaunchApp:      true,
+	contracts.OpStopApp:        true,
+	contracts.OpRemoveApp:      true,
 }
 
 func IsSafeAPKPath(p string) bool {
@@ -76,7 +78,8 @@ func ParseAndValidateRequest(rawLine []byte) (contracts.RPCRequest, error) {
 	if !allowedOps[req.Op] {
 		return contracts.RPCRequest{}, fmt.Errorf("unsupported op %q", req.Op)
 	}
-	if req.Op == contracts.OpImportExisting || req.Op == contracts.OpLaunchApp {
+	if req.Op == contracts.OpImportExisting || req.Op == contracts.OpLaunchApp ||
+		req.Op == contracts.OpStopApp || req.Op == contracts.OpRemoveApp {
 		if !contracts.ValidPackageName(req.Pkg) {
 			return contracts.RPCRequest{}, fmt.Errorf("invalid package name %q", req.Pkg)
 		}

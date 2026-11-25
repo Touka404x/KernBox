@@ -154,6 +154,25 @@ func TestDaemonRPCOperations(t *testing.T) {
 			t.Fatalf("forbidden shell invocation detected: %s", c)
 		}
 	}
+
+	// 4. STOP_APP & REMOVE_APP respect protected packages and update sandbox_apps
+	runner.out["am force-stop --user 10 com.android.chrome"] = ""
+	runner.out["cmd package list packages -3 --user 10"] = "package:com.android.chrome\npackage:" + pkg + "\n"
+	runner.out["pm uninstall --user 10 com.android.chrome"] = "Success\n"
+	respStop := d.HandleRPC(ctx, contracts.RPCRequest{ID: "stp-1", Op: contracts.OpStopApp, Pkg: "com.android.chrome"})
+	if !respStop.OK {
+		t.Fatalf("STOP_APP failed: %+v", respStop)
+	}
+	if badStop := d.HandleRPC(ctx, contracts.RPCRequest{ID: "stp-2", Op: contracts.OpStopApp, Pkg: pkg}); badStop.OK {
+		t.Fatalf("expected controller STOP_APP rejection")
+	}
+	respRemove := d.HandleRPC(ctx, contracts.RPCRequest{ID: "rm-1", Op: contracts.OpRemoveApp, Pkg: "com.android.chrome"})
+	if !respRemove.OK {
+		t.Fatalf("REMOVE_APP failed: %+v", respRemove)
+	}
+	if badRemove := d.HandleRPC(ctx, contracts.RPCRequest{ID: "rm-2", Op: contracts.OpRemoveApp, Pkg: "com.google.android.gms"}); badRemove.OK {
+		t.Fatalf("expected protected GMS REMOVE_APP rejection")
+	}
 }
 
 type mockVPNStatusHandle struct {

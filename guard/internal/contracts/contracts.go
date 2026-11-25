@@ -442,6 +442,8 @@ const (
 	OpSyncHideApps   = "SYNC_HIDE_APPS"
 	OpRunProbe       = "RUN_PROBE"
 	OpLaunchApp      = "LAUNCH_APP"
+	OpStopApp        = "STOP_APP"
+	OpRemoveApp      = "REMOVE_APP"
 )
 
 type RPCConfigOverrides struct {

@@ -19,7 +19,10 @@ public final class BrokerProtocol {
     public static final String OP_INSTALL_APK = "INSTALL_APK";
     public static final String OP_START_VPN = "START_VPN";
     public static final String OP_PAUSE_VPN = "PAUSE_VPN";
+    public static final String OP_RUN_PROBE = "RUN_PROBE";
     public static final String OP_LAUNCH_APP = "LAUNCH_APP";
+    public static final String OP_STOP_APP = "STOP_APP";
+    public static final String OP_REMOVE_APP = "REMOVE_APP";
 
     private BrokerProtocol() {}
 
@@ -35,16 +38,24 @@ public final class BrokerProtocol {
         return buildSimpleRequest(id, OP_PAUSE_VPN);
     }
 
+    public static String buildRunProbe(String id) {
+        return buildSimpleRequest(id, OP_RUN_PROBE);
+    }
+
     public static String buildImportExisting(String id, String pkg) {
-        return "{\"id\":" + quote(nonEmpty(id, "req"))
-                + ",\"op\":" + quote(OP_IMPORT_EXISTING)
-                + ",\"pkg\":" + quote(nonNull(pkg)) + "}";
+        return buildPkgRequest(id, OP_IMPORT_EXISTING, pkg);
     }
 
     public static String buildLaunchApp(String id, String pkg) {
-        return "{\"id\":" + quote(nonEmpty(id, "req"))
-                + ",\"op\":" + quote(OP_LAUNCH_APP)
-                + ",\"pkg\":" + quote(nonNull(pkg)) + "}";
+        return buildPkgRequest(id, OP_LAUNCH_APP, pkg);
+    }
+
+    public static String buildStopApp(String id, String pkg) {
+        return buildPkgRequest(id, OP_STOP_APP, pkg);
+    }
+
+    public static String buildRemoveApp(String id, String pkg) {
+        return buildPkgRequest(id, OP_REMOVE_APP, pkg);
     }
 
     public static String buildInstallApk(String id, String apkPath) {
@@ -55,6 +66,12 @@ public final class BrokerProtocol {
 
     private static String buildSimpleRequest(String id, String op) {
         return "{\"id\":" + quote(nonEmpty(id, "req")) + ",\"op\":" + quote(op) + "}";
+    }
+
+    private static String buildPkgRequest(String id, String op, String pkg) {
+        return "{\"id\":" + quote(nonEmpty(id, "req"))
+                + ",\"op\":" + quote(op)
+                + ",\"pkg\":" + quote(nonNull(pkg)) + "}";
     }
 
     public static boolean isAllowedApkPath(String rawPath) {
@@ -114,14 +131,22 @@ public final class BrokerProtocol {
         String variant = asString(data.get("variant"), "");
         String state = asString(data.get("state"), "UNKNOWN");
         String mode = asString(data.get("mode"), "");
+        String activePreset = asString(data.get("active_preset"), "neutral");
         boolean paused = asBoolean(data.get("paused"), true);
         boolean policyLoaded = asBoolean(data.get("policy_loaded"), false);
         boolean openGate = asBoolean(data.get("sbw_open"), false);
+        boolean sbwRawArmed = asBoolean(data.get("sbw_raw_armed"), false);
         boolean frozen = asBoolean(data.get("frozen"), false);
         boolean hotFrozen = asBoolean(data.get("hot_frozen"), false);
+        boolean tproxyReady = asBoolean(data.get("tproxy_ready"), false);
+        boolean zygiskDisabled = asBoolean(data.get("zygisk_disabled"), false);
+        boolean privateDnsWarning = asBoolean(data.get("private_dns_warning"), false);
+        boolean probeApkInstalled = asBoolean(data.get("probe_apk_installed"), false);
+        boolean instrumentOk = asBoolean(data.get("instrument_ok"), false);
         int userId = asInt(data.get("user_id"), 10);
         int runningProcs = asInt(data.get("u10_running_procs"), 0);
         int hibernatedCount = asInt(data.get("hibernated_count"), 0);
+        int stuckWorkSockets = asInt(data.get("stuck_work_sockets"), 0);
         String lastError = asString(data.get("last_error"), "");
         String exitIp = "";
         boolean vpnRunning = openGate;
@@ -146,15 +171,23 @@ public final class BrokerProtocol {
                 variant,
                 state,
                 mode,
+                activePreset,
                 paused,
                 policyLoaded,
                 openGate,
+                sbwRawArmed,
                 frozen,
                 hotFrozen,
+                tproxyReady,
+                zygiskDisabled,
+                privateDnsWarning,
+                probeApkInstalled,
+                instrumentOk,
                 vpnRunning,
                 userId,
                 runningProcs,
                 hibernatedCount,
+                stuckWorkSockets,
                 exitIp,
                 lastError,
                 Collections.unmodifiableList(apps)
@@ -246,15 +279,23 @@ public final class BrokerProtocol {
         public final String variant;
         public final String state;
         public final String mode;
+        public final String activePreset;
         public final boolean paused;
         public final boolean policyLoaded;
         public final boolean sbwOpen;
+        public final boolean sbwRawArmed;
         public final boolean frozen;
         public final boolean hotFrozen;
+        public final boolean tproxyReady;
+        public final boolean zygiskDisabled;
+        public final boolean privateDnsWarning;
+        public final boolean probeApkInstalled;
+        public final boolean instrumentOk;
         public final boolean vpnRunning;
         public final int userId;
         public final int runningProcs;
         public final int hibernatedCount;
+        public final int stuckWorkSockets;
         public final String exitIp;
         public final String lastError;
         public final List<String> sandboxApps;
@@ -264,15 +305,23 @@ public final class BrokerProtocol {
                 String variant,
                 String state,
                 String mode,
+                String activePreset,
                 boolean paused,
                 boolean policyLoaded,
                 boolean sbwOpen,
+                boolean sbwRawArmed,
                 boolean frozen,
                 boolean hotFrozen,
+                boolean tproxyReady,
+                boolean zygiskDisabled,
+                boolean privateDnsWarning,
+                boolean probeApkInstalled,
+                boolean instrumentOk,
                 boolean vpnRunning,
                 int userId,
                 int runningProcs,
                 int hibernatedCount,
+                int stuckWorkSockets,
                 String exitIp,
                 String lastError,
                 List<String> sandboxApps) {
@@ -280,15 +329,23 @@ public final class BrokerProtocol {
             this.variant = variant;
             this.state = state;
             this.mode = mode;
+            this.activePreset = activePreset;
             this.paused = paused;
             this.policyLoaded = policyLoaded;
             this.sbwOpen = sbwOpen;
+            this.sbwRawArmed = sbwRawArmed;
             this.frozen = frozen;
             this.hotFrozen = hotFrozen;
+            this.tproxyReady = tproxyReady;
+            this.zygiskDisabled = zygiskDisabled;
+            this.privateDnsWarning = privateDnsWarning;
+            this.probeApkInstalled = probeApkInstalled;
+            this.instrumentOk = instrumentOk;
             this.vpnRunning = vpnRunning;
             this.userId = userId;
             this.runningProcs = runningProcs;
             this.hibernatedCount = hibernatedCount;
+            this.stuckWorkSockets = stuckWorkSockets;
             this.exitIp = exitIp;
             this.lastError = lastError;
             this.sandboxApps = sandboxApps;
@@ -296,8 +353,9 @@ public final class BrokerProtocol {
 
         public static StatusSnapshot empty() {
             return new StatusSnapshot(
-                    "", "", "OFFLINE", "", true, false, false, false, false, false,
-                    10, 0, 0, "", "", Collections.<String>emptyList()
+                    "", "", "OFFLINE", "", "neutral",
+                    true, false, false, false, false, false, false, false, false, false, false, false,
+                    10, 0, 0, 0, "", "", Collections.<String>emptyList()
             );
         }
     }
@@ -342,7 +400,7 @@ public final class BrokerProtocol {
 
         private Map<String, Object> parseObject() {
             Map<String, Object> map = new LinkedHashMap<String, Object>();
-            pos++; // {
+            pos++;
             skipWs();
             if (peek('}')) {
                 pos++;
@@ -372,7 +430,7 @@ public final class BrokerProtocol {
 
         private List<Object> parseArray() {
             List<Object> list = new ArrayList<Object>();
-            pos++; // [
+            pos++;
             skipWs();
             if (peek(']')) {
                 pos++;
