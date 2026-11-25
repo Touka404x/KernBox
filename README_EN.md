@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/kernbox-icon.png" width="120" height="120" alt="KernBox" />
+  <img src="assets/kernbox-icon.png" width="104" height="104" alt="KernBox" />
 </p>
 
 <h1 align="center">KernBox</h1>
@@ -30,7 +30,11 @@
 ---
 
 <p align="center">
-  <img src="assets/kernbox-showcase.png" width="100%" alt="KernBox Minimalist Controller UI and Adaptive Icons" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/kernbox-showcase-en-dark.png" />
+    <source media="(prefers-color-scheme: light)" srcset="assets/kernbox-showcase-en-light.png" />
+    <img src="assets/kernbox-showcase-en-dark.png" width="100%" alt="KernBox Minimalist Controller Dual-Theme UI and Live Diagnostics Showcase" />
+  </picture>
 </p>
 
 ---

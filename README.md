@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/kernbox-icon.png" width="120" height="120" alt="KernBox" />
+  <img src="assets/kernbox-icon.png" width="104" height="104" alt="KernBox" />
 </p>
 
 <h1 align="center">KernBox</h1>
@@ -30,7 +30,11 @@
 ---
 
 <p align="center">
-  <img src="assets/kernbox-showcase.png" width="100%" alt="KernBox 控制端极简 UI 与桌面自适应图标" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/kernbox-showcase-zh-dark.png" />
+    <source media="(prefers-color-scheme: light)" srcset="assets/kernbox-showcase-zh-light.png" />
+    <img src="assets/kernbox-showcase-zh-dark.png" width="100%" alt="KernBox 极简控制端明暗双主题与实时隔离自检展示" />
+  </picture>
 </p>
 
 ---
