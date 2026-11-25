@@ -108,6 +108,23 @@ def build_verify_apk(out_dir: pathlib.Path, args: argparse.Namespace) -> dict:
     }
 
 
+def build_controller_apk(out_dir: pathlib.Path, args: argparse.Namespace) -> dict:
+    apk_path = out_dir / "KernBox.apk"
+    cmd = [sys.executable, str(REPO_ROOT / "controller" / "build-controller.py"), "--out", str(apk_path)]
+    if args.jdk:
+        cmd.extend(["--jdk", args.jdk])
+    if args.sdk:
+        cmd.extend(["--sdk", args.sdk])
+    print("[controller apk build] building KernBox.apk")
+    subprocess.run(cmd, cwd=REPO_ROOT, check=True)
+    raw = apk_path.read_bytes()
+    return {
+        "artifact": apk_path.name,
+        "size": len(raw),
+        "sha256": hashlib.sha256(raw).hexdigest().lower(),
+    }
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description="Build 30-variant KernBox release matrix")
     p.add_argument("--out", type=pathlib.Path, default=REPO_ROOT / "dist", help="Output distribution directory")
@@ -128,6 +145,7 @@ def main(argv=None) -> int:
     stage_dir.mkdir(parents=True, exist_ok=True)
 
     try:
+        ctrl_meta = build_controller_apk(out_dir, args)
         apk_meta = build_verify_apk(out_dir, args)
 
         zygisk_map: dict[str, pathlib.Path] = {}
@@ -154,6 +172,7 @@ def main(argv=None) -> int:
                     variants.append(meta)
 
         checksum_lines = [f"{m['sha256']}  {m['artifact']}" for m in variants]
+        checksum_lines.append(f"{ctrl_meta['sha256']}  {ctrl_meta['artifact']}")
         checksum_lines.append(f"{apk_meta['sha256']}  {apk_meta['artifact']}")
         (out_dir / "SHA256SUMS.txt").write_text("\n".join(checksum_lines) + "\n", encoding="utf-8", newline="\n")
 
@@ -162,6 +181,7 @@ def main(argv=None) -> int:
             "version": args.version,
             "generated_utc": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "total_variants": len(variants),
+            "controller_apk": ctrl_meta,
             "verify_apk": apk_meta,
             "variants": variants,
         }

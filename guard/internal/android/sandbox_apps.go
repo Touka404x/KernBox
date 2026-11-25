@@ -85,6 +85,33 @@ func parsePackageList(output string) []string {
 	return out
 }
 
+// ListSandboxApps returns sorted third-party package names installed inside the sandbox user,
+// excluding any specified internal packages.
+func ListSandboxApps(ctx context.Context, r Runner, userID int, excludePkgs ...string) ([]string, error) {
+	if oem.IsForbiddenUser(userID) {
+		return nil, fmt.Errorf("invalid work user %d", userID)
+	}
+	exclude := make(map[string]struct{}, len(excludePkgs))
+	for _, p := range excludePkgs {
+		if p != "" {
+			exclude[p] = struct{}{}
+		}
+	}
+	out, err := r.Run(ctx, 3*time.Second, "", "cmd", "package", "list", "packages", "-3", "--user", strconv.Itoa(userID))
+	if err != nil {
+		return nil, err
+	}
+	raw := parsePackageList(out)
+	res := make([]string, 0, len(raw))
+	for _, pkg := range raw {
+		if _, skip := exclude[pkg]; skip {
+			continue
+		}
+		res = append(res, pkg)
+	}
+	return res, nil
+}
+
 func mergeSortedUnique(groups ...[]string) []string {
 	seen := make(map[string]struct{})
 	for _, g := range groups {

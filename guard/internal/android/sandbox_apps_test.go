@@ -240,3 +240,21 @@ func TestInstallSandboxAPKsStagesSplitAndCommits(t *testing.T) {
 		t.Fatal("accepted apk outside allowed staging directory")
 	}
 }
+
+func TestListSandboxApps(t *testing.T) {
+	r := &sandboxRecRunner{
+		out: map[string]string{
+			"cmd package list packages -3 --user 10": "package:com.zeta.app\npackage:com.sandbox.controller\npackage:com.alpha.app\npackage:com.sandbox.verify\npackage:com.zeta.app\n",
+		},
+	}
+	apps, err := ListSandboxApps(context.Background(), r, 10, "com.sandbox.controller", "com.sandbox.verify")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(apps) != 2 || apps[0] != "com.alpha.app" || apps[1] != "com.zeta.app" {
+		t.Fatalf("unexpected sandbox apps list: %v", apps)
+	}
+	if _, err := ListSandboxApps(context.Background(), r, 0, "com.sandbox.controller"); err == nil {
+		t.Fatal("expected forbidden user 0 error")
+	}
+}

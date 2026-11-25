@@ -70,7 +70,7 @@ KernBox ships `5 OEMs × 2 Kernel Tiers × 3 Root Managers per tier = 30 ARM64 Z
 - **Microsecond Hot-Freeze & Memory Reclaim**: Freezes sandbox Work Profile UIDs via cgroup v2 (`k510`) and triggers `process_madvise(MADV_PAGEOUT)` under memory pressure for near-zero idle drain and instant resume; falls back cleanly to cgroup v1 / hibernation on `k419`.
 - **Privilege-Separated Broker & Root IPC**: Splits unprivileged controller UDS (`/dev/socket/sandbox_ctrl/ctrl.sock`) from root daemon UDS (`/dev/socket/sandbox_priv/guard.sock`) via SELinux `sandbox_broker`, enforcing APK signing cert SHA-256, `SO_PEERCRED`, and shared token auth.
 - **Two-Layer Zygisk + Binder Stealth with Two-Strike Kill-Switch**: Zero-allocation Native PLT property/interface sanitization paired with an `InMemoryDexClassLoader` dynamic `IServiceManager` proxy in `system_server` & `com.android.phone`. Ships 6 switchable region/carrier presets under [`presets/`](presets/) (`neutral` default + `jp-docomo`, `us-tmobile`, `uk-ee`, `sg-singtel`, `de-telekom`), plus an automatic 2-failed-boot kill-switch (`zygisk_disabled`).
-- **Independent Verification APK**: Unprivileged pure-Java probe [`KernBoxVerify.apk`](verify/) verifies network isolation, IPv6 blocking, proc hygiene, and KeyMint attestation posture inside the sandboxed user.
+- **Minimal Companion Controller & Verification APKs**: Pure-SDK [`KernBox.apk`](controller/) (`com.sandbox.controller`) for one-tap sandbox Start/Pause, workspace app launching, and `+` app import / APK install over the unprivileged broker socket, paired with unprivileged probe [`KernBoxVerify.apk`](verify/) for network isolation, IPv6 blocking, proc hygiene, and KeyMint posture checks.
 
 ---
 
@@ -96,7 +96,7 @@ python ./tools/build_matrix.py --version 1.0.0
 .\tools\build_matrix.ps1 -Version 1.0.0
 ```
 
-Outputs are written to `./dist/` (gitignored): all 30 `KernBox-<oem>-<kernel>-<root>-arm64.zip` modules, `KernBoxVerify.apk`, `SHA256SUMS.txt`, and `variants-manifest.json`. Optional source build flag `-tags transport_vpn` enables legacy VPN fallback builds outside the default 30 TProxy-only releases.
+Outputs are written to `./dist/` (gitignored): all 30 `KernBox-<oem>-<kernel>-<root>-arm64.zip` modules, `KernBox.apk`, `KernBoxVerify.apk`, `SHA256SUMS.txt`, and `variants-manifest.json`. Optional source build flag `-tags transport_vpn` enables legacy VPN fallback builds outside the default 30 TProxy-only releases.
 
 ---
 

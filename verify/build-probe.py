@@ -59,10 +59,48 @@ def resolve_toolchain(args: argparse.Namespace) -> dict:
         "platform": platform,
         "d8": tools_dir / exe_name("d8", ".bat"),
         "aapt": tools_dir / exe_name("aapt"),
+        "aapt2": tools_dir / exe_name("aapt2"),
         "zipalign": tools_dir / exe_name("zipalign"),
         "apksigner": tools_dir / exe_name("apksigner", ".bat"),
         "env": env,
     }
+
+
+def stage_icon_resources(res_dir: pathlib.Path) -> None:
+    icons_root = REPO_ROOT / "assets" / "android"
+    drawable_dir = res_dir / "drawable-nodpi"
+    drawable_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(icons_root / "ic_launcher_adaptive_432.png", drawable_dir / "ic_launcher_foreground.png")
+
+    for density in ("mdpi", "hdpi", "xhdpi", "xxhdpi", "xxxhdpi"):
+        src_png = icons_root / f"mipmap-{density}" / "ic_launcher.png"
+        dst_dir = res_dir / f"mipmap-{density}"
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src_png, dst_dir / "ic_launcher.png")
+        shutil.copyfile(src_png, dst_dir / "ic_launcher_round.png")
+
+    anydpi_dir = res_dir / "mipmap-anydpi-v26"
+    anydpi_dir.mkdir(parents=True, exist_ok=True)
+    adaptive_xml = (
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        '<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">\n'
+        '    <background android:drawable="@color/ic_launcher_background" />\n'
+        '    <foreground android:drawable="@drawable/ic_launcher_foreground" />\n'
+        '</adaptive-icon>\n'
+    )
+    (anydpi_dir / "ic_launcher.xml").write_text(adaptive_xml, encoding="utf-8", newline="\n")
+    (anydpi_dir / "ic_launcher_round.xml").write_text(adaptive_xml, encoding="utf-8", newline="\n")
+
+    values_dir = res_dir / "values"
+    values_dir.mkdir(parents=True, exist_ok=True)
+    (values_dir / "colors.xml").write_text(
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        "<resources>\n"
+        '    <color name="ic_launcher_background">#F2EEE2</color>\n'
+        "</resources>\n",
+        encoding="utf-8",
+        newline="\n",
+    )
 
 
 def run_cmd(tc: dict, *arguments):
@@ -131,8 +169,29 @@ def build_apk(args: argparse.Namespace) -> pathlib.Path:
                 archive.write(compiled, compiled.relative_to(classes).as_posix())
 
         run_cmd(tc, tc["d8"], "--min-api", "26", "--lib", tc["platform"], "--output", staging, jar)
+        res_dir = staging / "res"
+        stage_icon_resources(res_dir)
+        compiled_res = staging / "compiled-res.zip"
+        run_cmd(tc, tc["aapt2"], "compile", "--dir", res_dir, "-o", compiled_res)
+
         unsigned = staging / "unsigned.apk"
-        run_cmd(tc, tc["aapt"], "package", "-f", "-M", SOURCE / "AndroidManifest.xml", "-I", tc["platform"], "-F", unsigned)
+        run_cmd(
+            tc,
+            tc["aapt2"],
+            "link",
+            "-o",
+            unsigned,
+            "-I",
+            tc["platform"],
+            "--manifest",
+            SOURCE / "AndroidManifest.xml",
+            "--min-sdk-version",
+            "26",
+            "--target-sdk-version",
+            "35",
+            "--auto-add-overlay",
+            compiled_res,
+        )
         with ZipFile(unsigned, "a") as archive:
             archive.write(staging / "classes.dex", "classes.dex")
 

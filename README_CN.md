@@ -70,7 +70,7 @@ KernBox 每次发布同步产出 `5 大系统阵营 × 2 档内核能力 × 3 �
 - **微秒级热冻结与主动内存回收**：`k510` 原生操控 `cgroup.freeze` 与压力触发 `process_madvise(MADV_PAGEOUT)`，工作资料不用时几乎零后台耗电、切回即用；`k419` 自动回退 cgroup v1 / 安全休眠。
 - **独立 SELinux `sandbox_broker` 权限隔离**：双层 UDS（`ctrl.sock` 与 `guard.sock`）分离控制端与 Root 守护进程，强制校验 `SO_PEERCRED`、APK 签名证书 SHA-256 与共享令牌。
 - **双层 Zygisk + Binder 隐身与防卡开机熔断**：Native PLT 零内存分配覆写时区/语言/运营商属性与网口信息，配合内存加载 DEX 动态代理（`system_server` + `com.android.phone`）；内置 [`presets/`](presets/) 6 套区域模板（默认中性 `neutral`，含 `jp-docomo`、`us-tmobile`、`uk-ee`、`sg-singtel`、`de-telekom`）及 **两次连续开机未完成自动关闭隐身钩子** 保护。
-- **独立非特权验证探针**：随包附带纯 Java 编译的 [`KernBoxVerify.apk`](verify/)，安装后即可校验沙盒内网络隔离、IPv6 阻断、进程卫生与 KeyMint 状态。
+- **极简伴侣控制端与独立验证探针**：随包产出纯 SDK 构建的 [`KernBox.apk`](controller/)（`com.sandbox.controller`，支持一键启停沙盒、工作区应用启动及 `+` 号导入应用 / 安装 APK）与非特权验收探针 [`KernBoxVerify.apk`](verify/)。
 
 ---
 
@@ -90,7 +90,8 @@ KernBox 每次发布同步产出 `5 大系统阵营 × 2 档内核能力 × 3 �
 | [`stealth/`](stealth/) | C++17 Zygisk PLT 模块 + Java Binder 动态代理与宿主机测试 |
 | [`packaging/`](packaging/) | 4 类 Root 管理器 `sepolicy.rule`、启动模板与严格 LF 校验打包器 |
 | [`presets/`](presets/) | 6 套区域/运营商运行期热切换预设 JSON（`ctl preset-apply`） |
-| [`verify/`](verify/) | 独立验收探针 APK 源码与构建脚本（`com.sandbox.verify`） |
+| [`controller/`](controller/) | 极简伴侣控制端 APK 源码与构建脚本（`com.sandbox.controller` / `KernBox.apk`） |
+| [`verify/`](verify/) | 独立验收探针 APK 源码与构建脚本（`com.sandbox.verify` / `KernBoxVerify.apk`） |
 | [`tools/`](tools/) | 匿名探测脚本、确定性选包器、全 30 变体构建器、隐私泄漏门禁与单元测试 |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | 架构原理、信任边界与状态机详述 |
 
@@ -110,7 +111,7 @@ python ./tools/build_matrix.py --version 1.0.0
 .\tools\build_matrix.ps1 -Version 1.0.0
 ```
 
-所有产出生成在 `./dist/`（已忽略）：30 个 `KernBox-<oem>-<kernel>-<root>-arm64.zip`、`KernBoxVerify.apk`、`SHA256SUMS.txt` 与 `variants-manifest.json`。源码还保留可选编译标志 `-tags transport_vpn` 供特殊兼容构建（默认公开矩阵为纯 TProxy 精简路径）。
+所有产出生成在 `./dist/`（已忽略）：30 个 `KernBox-<oem>-<kernel>-<root>-arm64.zip`、`KernBox.apk`、`KernBoxVerify.apk`、`SHA256SUMS.txt` 与 `variants-manifest.json`。源码还保留可选编译标志 `-tags transport_vpn` 供特殊兼容构建（默认公开矩阵为纯 TProxy 精简路径）。
 
 ---
 

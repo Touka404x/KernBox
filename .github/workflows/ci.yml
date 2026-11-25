@@ -72,3 +72,11 @@ jobs:
           javac --release 11 -encoding UTF-8 -Xlint:all -Werror -cp "$ANDROID_JAR" -d /tmp/stealth_classes \
             stealth/java/com/sandbox/stealth/*.java stealth/tests/StealthHookHostTest.java
           java -cp "/tmp/stealth_classes:$ANDROID_JAR" com.sandbox.stealth.StealthHookHostTest
+
+      - name: Java Controller BrokerProtocolHostTest
+        run: |
+          mkdir -p /tmp/ctrl_classes
+          javac --release 11 -encoding UTF-8 -Xlint:all -Werror -d /tmp/ctrl_classes \
+            controller/java/com/sandbox/controller/BrokerProtocol.java \
+            controller/tests/BrokerProtocolHostTest.java
+          java -cp /tmp/ctrl_classes com.sandbox.controller.BrokerProtocolHostTest

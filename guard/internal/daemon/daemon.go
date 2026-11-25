@@ -2956,6 +2956,11 @@ func (d *Daemon) buildStatusData(ctx context.Context) map[string]any {
 		} else {
 			data["frozen_uids"] = []int{}
 		}
+		if apps, err := android.ListSandboxApps(ctx, d.runner, policy.UserID, policy.EffectiveCallerPackage(), "com.sandbox.verify"); err == nil {
+			data["sandbox_apps"] = apps
+		} else {
+			data["sandbox_apps"] = []string{}
+		}
 	}
 	if traces := d.getLaunchTraces(); len(traces) > 0 {
 		data["last_launch_trace"] = traces[len(traces)-1]
