@@ -28,11 +28,7 @@
 </p>
 
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/kernbox-showcase-zh-dark.png" />
-    <source media="(prefers-color-scheme: light)" srcset="assets/kernbox-showcase-zh-light.png" />
-    <img src="assets/kernbox-showcase-zh-dark.png" width="100%" alt="KernBox 内核级 Work Profile 隔离架构与极简控制端明暗双主题主视觉" />
-  </picture>
+  <img src="assets/kernbox-showcase-zh-light.png" width="100%" alt="KernBox 内核级 Work Profile 隔离架构与极简控制端主视觉" />
 </p>
 
 ---

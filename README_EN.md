@@ -28,11 +28,7 @@
 </p>
 
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/kernbox-showcase-en-dark.png" />
-    <source media="(prefers-color-scheme: light)" srcset="assets/kernbox-showcase-en-light.png" />
-    <img src="assets/kernbox-showcase-en-dark.png" width="100%" alt="KernBox Kernel-Level Work Profile Boundary & Minimalist Controller Dual-Theme Hero Showcase" />
-  </picture>
+  <img src="assets/kernbox-showcase-en-light.png" width="100%" alt="KernBox Kernel-Level Work Profile Boundary & Minimalist Controller Hero Showcase" />
 </p>
 
 ---
