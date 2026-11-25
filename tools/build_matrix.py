@@ -135,7 +135,7 @@ def build_controller_apk(out_dir: pathlib.Path, args: argparse.Namespace) -> dic
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description="Build 30-variant KernBox release matrix")
     p.add_argument("--out", type=pathlib.Path, default=REPO_ROOT / "dist", help="Output distribution directory")
-    p.add_argument("--version", default="1.1.0", help="Release version string")
+    p.add_argument("--version", default="1.2.0", help="Release version string")
     p.add_argument("--oems", nargs="+", choices=OEMS, default=list(OEMS), help="Subset of OEMs to build")
     p.add_argument("--controller-keystore", default="", help="Optional release keystore for KernBox.apk")
     p.add_argument("--controller-alias", default="kernbox-controller", help="Optional keystore alias for KernBox.apk")

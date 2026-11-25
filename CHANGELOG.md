@@ -2,6 +2,22 @@
 
 All notable changes to **KernBox** are documented in this file.
 
+## [1.2.0] - 2026-11-25
+
+### Added
+- **Brand Identity & Dual-Theme Showcases (`assets/`, `README*.md`)**: Designed crisp transparent superellipse squircle icon (`assets/kernbox-icon.png`) and Retina light/dark bilingual product showcases (`assets/kernbox-showcase-{zh,en}-{dark,light}.png`) rendered via `<picture>` theme switching.
+- **Packaging Lifecycle Hooks (`packaging/`)**: Added POSIX-compliant `action.sh` (in-manager one-tap pause/resume toggle) and `uninstall.sh` (restores hibernated apps/bloat, flushes `SBW_*` netfilter chains & policy routing rules, cleans runtime sockets); upgraded `versionCode` generation to monotonic `major*10000 + minor*100 + patch`.
+- **Verification & Governance (`.github/`, `docs/`, `agent-prompts/`)**: Added GitHub Actions `shellcheck` + full `KernBox.apk` / `KernBoxVerify.apk` CI gates, `testing`-package leak assertion on Linux/arm64 binaries, structured issue templates (`config.yml`, `feature-request.yml`), FAQ troubleshooting Mermaid decision tree, and complete English documentation (`docs/FAQ_EN.md`, `docs/TPROXY_INTEGRATION_EN.md`, `agent-prompts/DIAGNOSE_EN.md`, `agent-prompts/UPGRADE_AND_ROLLBACK_EN.md`).
+
+### Changed & Fixed
+- **Controller APK (`controller/`)**: Implemented true Android 15+ Edge-to-Edge (`WindowInsets`) across all activities/sheets, light/dark navigation bar styling (`values-v27`/`values-night-v27`), dual background executors (`rpcExecutor` + `iconExecutor`) with Work Profile `LauncherApps` icon fallback, scrollable `DiagnosticsSheet` with full 12-item scorecard & redacted JSON report export, multi-line split APK installation (`buildInstallApks`), contextual offline remediation helper, and strict `JsonParser` depth/EOF bounds.
+- **Stealth & Verification Probe (`stealth/`, `verify/`)**: Added Android 15/16 `IServiceManager.getService2`/`checkService2` `ServiceWithMetadata` unwrapping, NDK `--min-sdk 31` target, expanded native property hook slots (`kMaxPropHookSlots=24`) with `gsm.sim.state` & legacy `__system_property_read`, broadened `getifaddrs` tunnel/MAC sanitization, additional Binder privacy/location/device-policy hooks, compact `am instrument` JSON output, private/loopback reject checks, and `exit_geo_match` reporting.
+- **Guard Daemon, Netfilter, Android Lifecycle & SELinux (`guard/`, `tools/`)**:
+  - Fixed `ksu.rule` dual `ksu`/`su` domain transitions (KernelSU >= 0.9 / KSU-Next / SukiSU), `resolveIPTablesCompanionBin` nft/legacy suffix resolution, `SBW_TPROXY_PRE` loopback target (`127.0.0.1`), `TProxyReadyProbe` UID/IP checks, and stale `pref 2025` rule cleanup.
+  - Fixed empty `sandboxAckPath`/`mainConfigPath`/`proxyCtlScript` resolution for custom `policy.json` proxy layouts, added `EnsureProxyBaseWatch` + `reload-policy` error propagation, removed `"testing"` import from Linux `sysio`, and switched `InstallSandboxAPKs` to `O_NOFOLLOW` FD streaming (`pm install-write ... -`).
+  - Hardened `HotFreezeSandboxUserWithOpts`, `InspectSandboxActivityFast`, `UnfreezeCgroupV1` (never thaws global `frozen/freezer.state`), `ApplyPresetFile` (`DisallowUnknownFields` + `O_NOFOLLOW`), `ReadMihomoControllerConfig` (4 MiB cap + `Proxy: nil`), `UplinkIfRegex` / `vpn_management` `(lockdown)` matching, and `probe_device` / `select_variant.py` checks.
+  - Updated `golang.org/x/sys` to `v0.50.0`.
+
 ## [1.1.0] - 2026-11-25
 
 ### Added

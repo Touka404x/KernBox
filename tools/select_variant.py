@@ -139,7 +139,7 @@ def install_command_for_root(root: str, artifact: str) -> str:
     return f"adb push {artifact} {remote}"
 
 
-def select_variant(profile: Dict[str, Any], version: str = "1.0.0", preset: Optional[str] = None) -> Dict[str, Any]:
+def select_variant(profile: Dict[str, Any], version: str = "1.2.0", preset: Optional[str] = None) -> Dict[str, Any]:
     errors: List[str] = []
     warnings: List[str] = []
     reasons: List[str] = []
@@ -253,7 +253,7 @@ def select_variant(profile: Dict[str, Any], version: str = "1.0.0", preset: Opti
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description="Select optimal KernBox variant from device_profile.json")
     p.add_argument("--profile", required=True, help="Path to device_profile.json (or '-' for stdin)")
-    p.add_argument("--version", default="1.0.0", help="Release version tag")
+    p.add_argument("--version", default="1.2.0", help="Release version tag")
     p.add_argument("--preset", help="Optional preset name under presets/ (e.g. jp-docomo, us-tmobile)")
     p.add_argument("--json", action="store_true", help="Emit structured JSON output")
     args = p.parse_args(argv)

@@ -122,7 +122,7 @@ flowchart LR
 配置好 `go`（匹配 [`guard/go.mod`](guard/go.mod)）、`JAVA_HOME`（JDK 21）、`ANDROID_SDK_ROOT`（`android-35` + `build-tools;35.0.0`）、`ANDROID_NDK_HOME` 与 Python 3.10+ 后执行：
 
 ```bash
-python ./tools/build_matrix.py --version 1.1.0
+python ./tools/build_matrix.py --version 1.2.0
 ```
 
 全部产出写入 `./dist/`（已 gitignore）：30 个 `KernBox-*-arm64.zip`、`KernBox.apk`、`KernBoxVerify.apk`、`SHA256SUMS.txt` 与 `variants-manifest.json`。所有源码均强制通过 [`tools/verify_privacy_leak.py`](tools/verify_privacy_leak.py) 门禁校验，不含任何遥测、硬件序列号、私有 IP 或预置密钥，基于 [Apache License 2.0](LICENSE) 开源。

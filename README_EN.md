@@ -110,7 +110,7 @@ Every release ships `5 OEMs × 2 Kernel Tiers × 3 Root Managers per tier = 30 A
 With `go` (matching [`guard/go.mod`](guard/go.mod)), `JAVA_HOME` (JDK 21), `ANDROID_SDK_ROOT` (`platforms;android-35`, `build-tools;35.0.0`), `ANDROID_NDK_HOME`, and Python 3.10+:
 
 ```bash
-python ./tools/build_matrix.py --version 1.1.0
+python ./tools/build_matrix.py --version 1.2.0
 ```
 
 Outputs are written to `./dist/` (gitignored). All repository commits pass [`tools/verify_privacy_leak.py`](tools/verify_privacy_leak.py) with zero telemetry, hardware serials, private IPs, or prebuilt keystores, released under [Apache License 2.0](LICENSE).

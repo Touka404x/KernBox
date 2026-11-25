@@ -175,7 +175,7 @@ def main(argv=None) -> int:
     p.add_argument("--oem", required=True, choices=OEMS)
     p.add_argument("--kernel", required=True, choices=KERNELS)
     p.add_argument("--root", required=True, choices=ROOTS)
-    p.add_argument("--version", default="1.0.0")
+    p.add_argument("--version", default="1.2.0")
     p.add_argument("--guard-bin", required=True, type=pathlib.Path)
     p.add_argument("--broker-bin", required=True, type=pathlib.Path)
     p.add_argument("--zygisk-so", required=True, type=pathlib.Path)

@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version string without leading 'v' (e.g. 1.1.0)"
+        description: "Release version string without leading 'v' (e.g. 1.2.0)"
         required: false
-        default: "1.1.0"
+        default: "1.2.0"
         type: string
 
 permissions:
@@ -55,7 +55,7 @@ jobs:
           else
             RAW="${{ inputs.version }}"
           fi
-          RAW="${RAW:-1.1.0}"
+          RAW="${RAW:-1.2.0}"
           echo "version=${RAW}" >> "$GITHUB_OUTPUT"
 
       - name: Build & verify 30 KernBox variants + KernBox.apk + KernBoxVerify.apk
