@@ -3,6 +3,7 @@ package android
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -287,5 +288,97 @@ func TestStopAndRemoveSandboxApp(t *testing.T) {
 	}
 	if _, err := RemoveSandboxApp(context.Background(), r, 10, "com.not.installed", "com.sandbox.controller"); err == nil {
 		t.Fatal("expected non-installed package rejection")
+	}
+}
+
+type streamingMockRunner struct {
+	mu          sync.Mutex
+	calls       []string
+	streamBytes [][]byte
+	abandonErr  error
+	failWrite   bool
+}
+
+func (s *streamingMockRunner) Run(ctx context.Context, _ time.Duration, _ string, name string, args ...string) (string, error) {
+	line := name + " " + strings.Join(args, " ")
+	s.mu.Lock()
+	s.calls = append(s.calls, line)
+	s.mu.Unlock()
+	if name == "pm" && len(args) > 0 && args[0] == "install-create" {
+		return "Success: created install session [8801]\n", nil
+	}
+	if name == "pm" && len(args) > 0 && args[0] == "install-abandon" {
+		s.abandonErr = ctx.Err()
+		return "Success\n", nil
+	}
+	return "Success\n", nil
+}
+
+func (s *streamingMockRunner) RunWithStdinReader(_ context.Context, _ time.Duration, stdin io.Reader, name string, args ...string) (string, error) {
+	line := name + " " + strings.Join(args, " ")
+	s.mu.Lock()
+	s.calls = append(s.calls, line)
+	s.mu.Unlock()
+	if stdin != nil {
+		data, _ := io.ReadAll(stdin)
+		s.mu.Lock()
+		s.streamBytes = append(s.streamBytes, data)
+		s.mu.Unlock()
+	}
+	if s.failWrite {
+		return "Failure", errors.New("write error")
+	}
+	return "Success\n", nil
+}
+
+func TestInstallSandboxAPKsStreamsViaStdinAndAbandonsOnCancelledCtx(t *testing.T) {
+	dir := t.TempDir()
+	baseApk := filepath.Join(dir, "base.apk")
+	if err := os.WriteFile(baseApk, []byte("PK-STREAM-APK"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	rr := &streamingMockRunner{}
+	res, err := InstallSandboxAPKs(context.Background(), rr, 10, []string{baseApk}, []string{dir})
+	if err != nil {
+		t.Fatalf("InstallSandboxAPKs streaming failed: %v", err)
+	}
+	if res.SessionID != "8801" || len(rr.streamBytes) != 1 || string(rr.streamBytes[0]) != "PK-STREAM-APK" {
+		t.Fatalf("unexpected streamed install result: res=%+v bytes=%q", res, rr.streamBytes)
+	}
+	if !strings.Contains(strings.Join(rr.calls, "\n"), "pm install-write -S 13 8801 split_0.apk -") {
+		t.Fatalf("expected '-' stdin install-write call, got: %v", rr.calls)
+	}
+
+	// Cancelled parent context must still abandon session with non-cancelled ctx.
+	cctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	rrFail := &streamingMockRunner{failWrite: true}
+	if _, err := InstallSandboxAPKs(cctx, rrFail, 10, []string{baseApk}, []string{dir}); err == nil {
+		t.Fatal("expected write failure")
+	}
+	if rrFail.abandonErr != nil {
+		t.Fatalf("expected abandon ctx non-cancelled, got %v", rrFail.abandonErr)
+	}
+}
+
+func TestSyncSandboxAppPoliciesSkipLocaleWhenDisabled(t *testing.T) {
+	r := &sandboxRecRunner{
+		out: map[string]string{
+			"cmd package list packages -3 --user 10": "package:com.custom.app\n",
+		},
+	}
+	res, err := SyncSandboxAppPoliciesWithOpts(context.Background(), r, 10, PolicySyncOptions{
+		DefaultLocale: "en-US",
+		SkipLocale:    true,
+	})
+	if err != nil {
+		t.Fatalf("SyncSandboxAppPoliciesWithOpts failed: %v", err)
+	}
+	if res.LocationApps == 0 {
+		t.Fatalf("expected appops still enforced when SkipLocale=true, got %+v", res)
+	}
+	if strings.Contains(strings.Join(r.calls, "\n"), "cmd locale ") {
+		t.Fatalf("expected zero cmd locale invocations when SkipLocale=true, got %v", r.calls)
 	}
 }

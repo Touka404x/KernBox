@@ -82,6 +82,7 @@ func TestFlushSandboxConnectionsOnlyClosesMatchingInbound(t *testing.T) {
 		{"wildcard_v6", `{"external-controller":"[::]:9097","secret":"s2"}`, "http://[::1]:9097", "s2"},
 		{"http_scheme", `{"external-controller":"http://127.0.0.1:9097/","secret":"s3"}`, "http://127.0.0.1:9097", "s3"},
 		{"yaml_fallback", "mode: rule\nexternal-controller: \"0.0.0.0:9099\" # clash api\nsecret: 'sec#yaml'\n", "http://127.0.0.1:9099", "sec#yaml"},
+		{"yaml_unquoted_hash", "external-controller: 127.0.0.1:9098 # ctrl\nsecret: my#pass # comment\n", "http://127.0.0.1:9098", "my#pass"},
 	} {
 		p := filepath.Join(dir, tc.name+".cfg")
 		if err := os.WriteFile(p, []byte(tc.body), 0640); err != nil {
@@ -94,5 +95,13 @@ func TestFlushSandboxConnectionsOnlyClosesMatchingInbound(t *testing.T) {
 		if gotURL != tc.wantURL || gotSec != tc.wantSec {
 			t.Fatalf("%s got (%q, %q) want (%q, %q)", tc.name, gotURL, gotSec, tc.wantURL, tc.wantSec)
 		}
+	}
+
+	// Ensure HTTP_PROXY cannot hijack loopback REST calls.
+	t.Setenv("HTTP_PROXY", "http://127.0.0.1:1")
+	t.Setenv("http_proxy", "http://127.0.0.1:1")
+	closed2, err := FlushSandboxConnections(context.Background(), cfgPath, "sandbox-tproxy")
+	if err != nil || closed2 != 2 {
+		t.Fatalf("expected direct loopback flush ignoring HTTP_PROXY, got closed=%d err=%v", closed2, err)
 	}
 }

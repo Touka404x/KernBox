@@ -51,6 +51,7 @@ type PolicySyncOptions struct {
 	CallerPackage       string
 	DefaultLocale       string
 	PreserveUserLocales bool
+	SkipLocale          bool
 	LocaleOverrides     map[string]string
 	BluetoothDeviceName string
 }
@@ -320,7 +321,7 @@ func SyncSandboxAppPoliciesWithOpts(ctx context.Context, r Runner, userID int, o
 	locTargets := mergeSortedUnique(userPkgs, coreSandboxApps, oem.Current().ExtraLocationDenyPackages)
 	res.PackagesHash = computePolicyFingerprint(userID, localeTargets, opts)
 
-	localeSupported := true
+	localeSupported := !opts.SkipLocale
 	for _, pkg := range localeTargets {
 		if !localeSupported {
 			break
@@ -438,29 +439,31 @@ func SetSandboxAppLocale(ctx context.Context, r Runner, userID int, pkg, locale 
 	return err
 }
 
-func validateAPKPathForDirs(apk string, allowedDirs []string) (int64, error) {
+func openValidatedAPKForDirs(apk string, allowedDirs []string) (*os.File, int64, error) {
 	if apk == "" || !strings.HasSuffix(apk, ".apk") || strings.Contains(apk, "..") ||
 		strings.ContainsAny(apk, "\x00\r\n\t;&|$`'\" ") {
-		return 0, fmt.Errorf("unsafe apk path %q", apk)
+		return nil, 0, fmt.Errorf("unsafe apk path %q", apk)
 	}
 	bases := allowedDirs
 	if len(bases) == 0 {
 		if strings.ContainsRune(apk, '\\') {
-			return 0, fmt.Errorf("unsafe apk path %q", apk)
+			return nil, 0, fmt.Errorf("unsafe apk path %q", apk)
 		}
 		bases = []string{"/data/local/tmp", contracts.StagingDir}
 	}
 	cleanAPK := filepath.Clean(apk)
-	st, err := os.Lstat(cleanAPK)
+	f, st, err := openRegularFileNoFollow(cleanAPK)
 	if err != nil {
-		return 0, fmt.Errorf("stat %s: %w", apk, err)
+		return nil, 0, fmt.Errorf("open %s: %w", apk, err)
 	}
-	if st.Mode()&os.ModeSymlink != 0 || !st.Mode().IsRegular() || st.Size() <= 0 {
-		return 0, fmt.Errorf("%s is not a non-empty regular file", apk)
+	if st.Size() <= 0 {
+		_ = f.Close()
+		return nil, 0, fmt.Errorf("%s is empty", apk)
 	}
 	realParent, err := filepath.EvalSymlinks(filepath.Dir(cleanAPK))
 	if err != nil {
-		return 0, fmt.Errorf("resolve parent %s: %w", apk, err)
+		_ = f.Close()
+		return nil, 0, fmt.Errorf("resolve parent %s: %w", apk, err)
 	}
 	matched := false
 	for _, d := range bases {
@@ -475,9 +478,10 @@ func validateAPKPathForDirs(apk string, allowedDirs []string) (int64, error) {
 		}
 	}
 	if !matched {
-		return 0, fmt.Errorf("apk path %q outside allowed staging dirs", apk)
+		_ = f.Close()
+		return nil, 0, fmt.Errorf("apk path %q outside allowed staging dirs", apk)
 	}
-	return st.Size(), nil
+	return f, st.Size(), nil
 }
 
 // InstallSandboxAPKs stages and commits single or split APKs strictly inside User userID.
@@ -488,12 +492,23 @@ func InstallSandboxAPKs(ctx context.Context, r Runner, userID int, apkPaths []st
 	if len(apkPaths) == 0 || len(apkPaths) > 32 {
 		return InstallAPKResult{}, errors.New("expected 1..32 apk paths")
 	}
+	files := make([]*os.File, 0, len(apkPaths))
+	closeAll := func() {
+		for _, f := range files {
+			if f != nil {
+				_ = f.Close()
+			}
+		}
+	}
+	defer closeAll()
+
 	sizes := make([]int64, len(apkPaths))
 	for i, p := range apkPaths {
-		sz, err := validateAPKPathForDirs(p, allowedDirs)
+		f, sz, err := openValidatedAPKForDirs(p, allowedDirs)
 		if err != nil {
 			return InstallAPKResult{}, err
 		}
+		files = append(files, f)
 		sizes[i] = sz
 	}
 
@@ -508,18 +523,34 @@ func InstallSandboxAPKs(ctx context.Context, r Runner, userID int, apkPaths []st
 	}
 	sid := m[1]
 
+	abandonSession := func() {
+		abCtx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+		defer cancel()
+		_, _ = r.Run(abCtx, 4*time.Second, "", "pm", "install-abandon", sid)
+	}
+
+	rr, canStream := r.(ReaderRunner)
 	for i, p := range apkPaths {
 		splitName := fmt.Sprintf("split_%d.apk", i)
-		if out, werr := r.Run(ctx, 20*time.Second, "", "pm", "install-write",
-			"-S", strconv.FormatInt(sizes[i], 10), sid, splitName, p); werr != nil {
-			_, _ = r.Run(ctx, 4*time.Second, "", "pm", "install-abandon", sid)
+		sizeStr := strconv.FormatInt(sizes[i], 10)
+		var out string
+		var werr error
+		if canStream {
+			out, werr = rr.RunWithStdinReader(ctx, 60*time.Second, files[i], "pm", "install-write",
+				"-S", sizeStr, sid, splitName, "-")
+		} else {
+			out, werr = r.Run(ctx, 60*time.Second, "", "pm", "install-write",
+				"-S", sizeStr, sid, splitName, p)
+		}
+		if werr != nil {
+			abandonSession()
 			return InstallAPKResult{}, fmt.Errorf("pm install-write %s: %w (%s)", p, werr, strings.TrimSpace(out))
 		}
 	}
 
-	commitOut, err := r.Run(ctx, 20*time.Second, "", "pm", "install-commit", sid)
+	commitOut, err := r.Run(ctx, 45*time.Second, "", "pm", "install-commit", sid)
 	if err != nil {
-		_, _ = r.Run(ctx, 4*time.Second, "", "pm", "install-abandon", sid)
+		abandonSession()
 		return InstallAPKResult{}, fmt.Errorf("pm install-commit: %w (%s)", err, strings.TrimSpace(commitOut))
 	}
 	return InstallAPKResult{

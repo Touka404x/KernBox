@@ -91,6 +91,13 @@ def determine_root_and_tier(profile: Dict[str, Any], kernel: str) -> Tuple[str, 
     raw_ver = str(profile.get("root_version") or "").strip()
 
     if raw_root in ("", "none", "unknown"):
+        if profile.get("root_access_denied"):
+            return (
+                kernel,
+                None,
+                "ADB shell su permission was denied by your root manager: grant Shell (com.android.shell) root access in KernelSU / Magisk / APatch Manager and re-run probe_device.",
+                None,
+            )
         return kernel, None, "No supported root manager (KernelSU / Magisk / APatch) detected via ADB.", None
     if raw_root == "ksu_legacy":
         warn = None
@@ -100,10 +107,15 @@ def determine_root_and_tier(profile: Dict[str, Any], kernel: str) -> Tuple[str, 
         return kernel, "ksu_legacy", "Explicit ksu_legacy root profile mapped to k419/ksu_legacy.", warn
     if raw_root in ("ksu", "kernelsu"):
         ver = parse_semver_tuple(raw_ver)
-        if ver is not None and (ver[0], ver[1]) < (0, 9):
+        is_legacy_ver = ver is not None and (ver[0], ver[1]) < (0, 9)
+        if ver is None:
+            cm = re.search(r"\b(\d{4,6})\b", raw_ver)
+            if cm and int(cm.group(1)) < 11400:
+                is_legacy_ver = True
+        if is_legacy_ver:
             warn = None
             if kernel != "k419":
-                warn = f"Legacy KernelSU {raw_ver} (< 0.9) maps to k419/ksu_legacy release artifact."
+                warn = f"Legacy KernelSU {raw_ver} (< 0.9 / versionCode < 11400) maps to k419/ksu_legacy release artifact."
                 kernel = "k419"
             return kernel, "ksu_legacy", f"KernelSU ({raw_ver}) mapped to k419/ksu_legacy.", warn
         if kernel == "k419":

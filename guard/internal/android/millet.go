@@ -216,13 +216,15 @@ func InspectCgroupV1Freeze(fs CgroupFS, clientUID, pid int) FreezeState {
 		{"/dev/freezer/frozen/tasks", "/dev/freezer/frozen/freezer.state"},
 		{"/dev/freezer/frozen/cgroup.procs", "/dev/freezer/frozen/freezer.state"},
 	} {
-		tasksPath, freezeStatePath := frozenPair[0], frozenPair[1]
+		tasksPath := frozenPair[0]
 		if procs, err := fs.ReadFile(tasksPath); err == nil {
 			for _, row := range strings.Split(string(procs), "\n") {
 				if strings.TrimSpace(row) == pidStr {
+					// Never record the shared global frozen/freezer.state as FreezePath:
+					// thawing a global freezer group would thaw unrelated host processes.
 					return FreezeState{
 						Frozen:        true,
-						FreezePath:    freezeStatePath,
+						FreezePath:    "",
 						InFrozenGroup: true,
 						Evidence:      tasksPath + " contains " + pidStr,
 					}
@@ -239,22 +241,31 @@ func UnfreezeCgroupV1(fs CgroupFS, clientUID, pid int, st FreezeState) error {
 		fs = osCgroupFS{}
 	}
 	var errs []error
-	if st.FreezePath != "" && strings.HasSuffix(st.FreezePath, "freezer.state") {
+	uidFrozenSuffix := fmt.Sprintf("/uid_%d/freezer.state", clientUID)
+	if !st.InFrozenGroup && st.FreezePath != "" && strings.HasSuffix(st.FreezePath, uidFrozenSuffix) {
 		if err := fs.WriteFile(st.FreezePath, []byte("THAWED")); err != nil {
 			errs = append(errs, err)
 		}
-	} else {
-		uidStatePath := fmt.Sprintf("/sys/fs/cgroup/freezer/uid_%d/freezer.state", clientUID)
-		if _, err := fs.ReadFile(uidStatePath); err == nil {
-			if err := fs.WriteFile(uidStatePath, []byte("THAWED")); err != nil {
-				errs = append(errs, err)
+	} else if clientUID > 0 {
+		for _, uidStatePath := range []string{
+			fmt.Sprintf("/sys/fs/cgroup/freezer/uid_%d/freezer.state", clientUID),
+			fmt.Sprintf("/dev/freezer/uid_%d/freezer.state", clientUID),
+		} {
+			if _, err := fs.ReadFile(uidStatePath); err == nil {
+				if err := fs.WriteFile(uidStatePath, []byte("THAWED")); err != nil {
+					errs = append(errs, err)
+				}
 			}
 		}
 	}
 	if st.InFrozenGroup && pid > 0 {
 		pidBytes := []byte(strconv.Itoa(pid))
-		if err := fs.WriteFile("/sys/fs/cgroup/freezer/tasks", pidBytes); err != nil {
-			if err2 := fs.WriteFile("/sys/fs/cgroup/freezer/cgroup.procs", pidBytes); err2 != nil {
+		rootDir := "/sys/fs/cgroup/freezer"
+		if strings.HasPrefix(st.Evidence, "/dev/freezer/") {
+			rootDir = "/dev/freezer"
+		}
+		if err := fs.WriteFile(rootDir+"/cgroup.procs", pidBytes); err != nil {
+			if err2 := fs.WriteFile(rootDir+"/tasks", pidBytes); err2 != nil {
 				errs = append(errs, err2)
 			}
 		}

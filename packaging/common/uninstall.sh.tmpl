@@ -1,0 +1,56 @@
+#!/system/bin/sh
+# Clean module uninstall hook for KernBox.
+
+MODDIR=${0%/*}
+[ "$MODDIR" = "$0" ] && MODDIR=.
+GUARD_HOME=/data/adb/sandbox_guard
+GUARD_BIN="$GUARD_HOME/sandbox_guard"
+export PATH={{ROOT_PATH_PREFIX}}:/data/adb/ksu/bin:/data/adb/ap/bin:/data/adb/magisk/bin:/system/bin:/system/xbin:$PATH
+
+# Best-effort restore of hibernated sandbox apps and pruned bloat before stopping daemon.
+if [ -x "$GUARD_BIN" ]; then
+    "$GUARD_BIN" ctl resume >/dev/null 2>&1 || true
+    "$GUARD_BIN" ctl restore-bloat >/dev/null 2>&1 || true
+fi
+
+if [ -f "$MODDIR/service.sh" ]; then
+    sh "$MODDIR/service.sh" stop >/dev/null 2>&1 || true
+fi
+
+for pfile in "$GUARD_HOME/broker-svc.pid" "$GUARD_HOME/guard-svc.pid" "$GUARD_HOME/guard.pid" "$GUARD_HOME/service.pid"; do
+    if [ -f "$pfile" ]; then
+        read -r pid < "$pfile" 2>/dev/null || pid=""
+        case "$pid" in
+            ''|*[!0-9]*) ;;
+            *) kill "$pid" 2>/dev/null || true ;;
+        esac
+    fi
+done
+
+# Tear down any remaining SBW_* netfilter hooks and policy routing rules.
+for ipt in iptables ip6tables; do
+    command -v "$ipt" >/dev/null 2>&1 || continue
+    "$ipt" -t mangle -D OUTPUT -j SBW_TPROXY_OUT 2>/dev/null || true
+    "$ipt" -t mangle -D PREROUTING -j SBW_TPROXY_PRE 2>/dev/null || true
+    "$ipt" -t raw -D OUTPUT -j SBW_RAW_OUTPUT 2>/dev/null || true
+    "$ipt" -t filter -D OUTPUT -j SBW_OUTPUT 2>/dev/null || true
+    "$ipt" -t filter -D OUTPUT -j SBW_EGRESS 2>/dev/null || true
+    for tbl_chain in \
+        "mangle:SBW_TPROXY_OUT" \
+        "mangle:SBW_TPROXY_PRE" \
+        "raw:SBW_RAW_OUTPUT" \
+        "filter:SBW_OUTPUT" \
+        "filter:SBW_EGRESS"; do
+        tbl=${tbl_chain%%:*}
+        ch=${tbl_chain#*:}
+        "$ipt" -t "$tbl" -F "$ch" 2>/dev/null || true
+        "$ipt" -t "$tbl" -X "$ch" 2>/dev/null || true
+    done
+done
+
+for pref in 2025 2026; do
+    ip rule del pref "$pref" 2>/dev/null || true
+    ip -6 rule del pref "$pref" 2>/dev/null || true
+done
+
+rm -rf /dev/socket/sandbox_ctrl /dev/socket/sandbox_priv /dev/sandbox_cfg "$GUARD_HOME"

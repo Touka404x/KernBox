@@ -426,6 +426,7 @@ func (d *Daemon) syncPolicies(ctx context.Context, policy contracts.Policy) (and
 		CallerPackage:       policy.EffectiveCallerPackage(),
 		DefaultLocale:       baseLocale,
 		PreserveUserLocales: perf.PreserveUserLocales && stealthCfg.PreserveUserLocales,
+		SkipLocale:          !stealthCfg.SpoofLocale,
 		LocaleOverrides:     perf.LocaleOverrides,
 		BluetoothDeviceName: btName,
 	})
@@ -1275,6 +1276,7 @@ func (d *Daemon) reconcileOnce(ctx context.Context, req reconcileReq) error {
 		KernelRejectQuicUDP443: quicReject,
 	}
 
+	appliedOK := true
 	if err := d.nf.ApplyOrVerify(ctx, gateSpec, false); err != nil {
 		if d.log != nil {
 			d.log.Printf("netfilter apply failed: %v", err)
@@ -1283,7 +1285,9 @@ func (d *Daemon) reconcileOnce(ctx context.Context, req reconcileReq) error {
 		gateSpec.Open = false
 		gateSpec.Session = nil
 		gateSpec.ArmRawDrop = extCap
-		_ = d.nf.ApplyOrVerify(ctx, gateSpec, false)
+		if ferr := d.nf.ApplyOrVerify(ctx, gateSpec, false); ferr != nil {
+			appliedOK = false
+		}
 		dec.NextState = StateBlockedLocked
 		dec.OpenGate = false
 		dec.ArmRawDrop = extCap
@@ -1318,7 +1322,12 @@ func (d *Daemon) reconcileOnce(ctx context.Context, req reconcileReq) error {
 	d.lastOpen = dec.OpenGate
 	d.lastSession = sess
 	d.lastVPNStatus = vpnStatus
-	d.lastAppliedSpec = &gateSpec
+	if appliedOK {
+		specCopy := gateSpec
+		d.lastAppliedSpec = &specCopy
+	} else {
+		d.lastAppliedSpec = nil
+	}
 	if dec.NextState == StateOpen && inGrace {
 		d.switchGraceUntilNs = nextGraceUntil
 	} else {
@@ -3236,7 +3245,11 @@ func RunCtl(args []string) error {
 	}
 	sub := args[0]
 	rest := args[1:]
-	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
+	ctlTimeout := 35 * time.Second
+	if sub == "install-apk" {
+		ctlTimeout = 120 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), ctlTimeout)
 	defer cancel()
 	runner := netfilter.ExecRunner{}
 	nf := netfilter.NewController()
@@ -3355,6 +3368,12 @@ func RunCtl(args []string) error {
 		endpointPortFlag := fs.Int("endpoint-port", contracts.EndpointPort, "endpoint port for VPN mode")
 		portalDNSFlag := fs.String("portal-dns", contracts.PortalDNS4, "portal DNSv4 inside sandbox")
 		proxyDirFlag := fs.String("proxy-dir", "", "optional external proxy base dir")
+		proxyCtlFlag := fs.String("proxy-ctl", "", "optional external proxy control script path")
+		proxyConfigFlag := fs.String("proxy-config", "", "optional external proxy config.json path")
+		proxyAckFlag := fs.String("proxy-ack", "", "optional external proxy ack file path")
+		proxyPidFlag := fs.String("proxy-pid", "", "optional external proxy core.pid path")
+		proxyInboundFlag := fs.String("proxy-inbound", "", "optional external proxy inbound name")
+		proxyProcessFlag := fs.String("proxy-process", "", "optional external proxy core process name")
 		proxySkipFlag := fs.String("proxy-skip-prefix", "", "optional external proxy iptables chain prefix")
 		if err := fs.Parse(rest); err != nil {
 			return err
@@ -3409,26 +3428,51 @@ func RunCtl(args []string) error {
 			TProxyPort:       *tpPortFlag,
 			TProxyMark:       uint32(*tpMarkFlag),
 			ProxyBaseDir:     strings.TrimSpace(*proxyDirFlag),
+			ProxyCtlScript:   strings.TrimSpace(*proxyCtlFlag),
+			ProxyConfigPath:  strings.TrimSpace(*proxyConfigFlag),
+			ProxyAckPath:     strings.TrimSpace(*proxyAckFlag),
+			ProxyCorePIDPath: strings.TrimSpace(*proxyPidFlag),
+			ProxyInboundName: strings.TrimSpace(*proxyInboundFlag),
+			ProxyCoreProcess: strings.TrimSpace(*proxyProcessFlag),
 			ProxySkipPrefix:  strings.TrimSpace(*proxySkipFlag),
 		}
-		if policy.Mode == "" {
-			if prev, perr := ReadPolicy(); perr == nil && prev.Mode != "" {
+		if prev, perr := ReadPolicy(); perr == nil {
+			if policy.Mode == "" {
 				policy.Mode = prev.Mode
-				if policy.TProxyPort == 0 {
-					policy.TProxyPort = prev.TProxyPort
-				}
-				if policy.TProxyMark == 0 {
-					policy.TProxyMark = prev.TProxyMark
-				}
-				if policy.ProxyBaseDir == "" {
-					policy.ProxyBaseDir = prev.ProxyBaseDir
-				}
-				if policy.ProxySkipPrefix == "" {
-					policy.ProxySkipPrefix = prev.ProxySkipPrefix
-				}
-			} else {
-				policy.Mode = contracts.ModeTProxy
 			}
+			if policy.TProxyPort == 0 {
+				policy.TProxyPort = prev.TProxyPort
+			}
+			if policy.TProxyMark == 0 {
+				policy.TProxyMark = prev.TProxyMark
+			}
+			if policy.ProxyBaseDir == "" {
+				policy.ProxyBaseDir = prev.ProxyBaseDir
+			}
+			if policy.ProxyCtlScript == "" {
+				policy.ProxyCtlScript = prev.ProxyCtlScript
+			}
+			if policy.ProxyConfigPath == "" {
+				policy.ProxyConfigPath = prev.ProxyConfigPath
+			}
+			if policy.ProxyAckPath == "" {
+				policy.ProxyAckPath = prev.ProxyAckPath
+			}
+			if policy.ProxyCorePIDPath == "" {
+				policy.ProxyCorePIDPath = prev.ProxyCorePIDPath
+			}
+			if policy.ProxyInboundName == "" {
+				policy.ProxyInboundName = prev.ProxyInboundName
+			}
+			if policy.ProxyCoreProcess == "" {
+				policy.ProxyCoreProcess = prev.ProxyCoreProcess
+			}
+			if policy.ProxySkipPrefix == "" {
+				policy.ProxySkipPrefix = prev.ProxySkipPrefix
+			}
+		}
+		if policy.Mode == "" {
+			policy.Mode = contracts.ModeTProxy
 		}
 		if policy.Mode == contracts.ModeVPN {
 			policy.TProxyPort, policy.TProxyMark = 0, 0

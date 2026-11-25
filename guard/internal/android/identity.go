@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -19,6 +20,12 @@ import (
 
 type Runner interface {
 	Run(ctx context.Context, timeout time.Duration, stdin string, name string, args ...string) (string, error)
+}
+
+// ReaderRunner is an optional Runner extension supporting streaming stdin from an io.Reader
+// (used e.g. to feed APK file descriptors directly to `pm install-write -S <sz> <sid> <split> -`).
+type ReaderRunner interface {
+	RunWithStdinReader(ctx context.Context, timeout time.Duration, stdin io.Reader, name string, args ...string) (string, error)
 }
 
 var (
@@ -191,9 +198,10 @@ func WorkUserMatches(dump string, user, serial int) bool {
 	prefix := fmt.Sprintf("UserInfo{%d:", user)
 	for _, line := range strings.Split(dump, "\n") {
 		trimmed := strings.TrimSpace(line)
+		padded := trimmed + " "
 		if strings.HasPrefix(trimmed, prefix) &&
-			strings.Contains(trimmed, fmt.Sprintf(" serialNo=%d ", serial)) &&
-			strings.Contains(trimmed+" ", " parentId=0 ") {
+			strings.Contains(padded, fmt.Sprintf(" serialNo=%d ", serial)) &&
+			strings.Contains(padded, " parentId=0 ") {
 			return true
 		}
 	}
@@ -252,7 +260,7 @@ func WorkDPCMatches(owners string, user int, adminComp ...string) bool {
 	prefix := strconv.Itoa(user) + ":"
 	for _, row := range strings.Split(owners, "\n") {
 		fields := strings.Fields(row)
-		if len(fields) != 3 || fields[0] != "User" || fields[1] != prefix {
+		if len(fields) < 3 || fields[0] != "User" || fields[1] != prefix {
 			continue
 		}
 		flags := strings.Split(fields[2], ",")
@@ -391,7 +399,8 @@ func VerifyStaticIdentity(ctx context.Context, r Runner, policy contracts.Policy
 		vpnBound := false
 		wantLine := u + ": " + callerPkg
 		for _, line := range strings.Split(vpnOwners, "\n") {
-			if strings.TrimSpace(line) == wantLine {
+			trimmed := strings.TrimSpace(line)
+			if trimmed == wantLine || strings.HasPrefix(trimmed, wantLine+" ") {
 				vpnBound = true
 				break
 			}

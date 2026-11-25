@@ -9,15 +9,25 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync/atomic"
 	"syscall"
-	"testing"
 	"time"
 
 	"golang.org/x/sys/unix"
 )
 
+var unprivilegedTestMode atomic.Bool
+
+// EnableUnprivilegedTestMode relaxes root-only UID/chcon/fchown checks inside go tests
+// when executed by an unprivileged CI user. No-op when running as euid 0.
+func EnableUnprivilegedTestMode() {
+	if os.Geteuid() != 0 {
+		unprivilegedTestMode.Store(true)
+	}
+}
+
 func isUnprivilegedGoTest() bool {
-	return testing.Testing() && os.Geteuid() != 0
+	return unprivilegedTestMode.Load() && os.Geteuid() != 0
 }
 
 func platformReadOnlyNonBlockCloexec() uint64 {
@@ -86,6 +96,15 @@ func ReadRootOwnedSmallFile(path string, maxBytes int64) ([]byte, error) {
 
 // ReadRootOwnedSmallFilePerm reads a root-owned regular file enforcing forbidPermMask == 0.
 func ReadRootOwnedSmallFilePerm(path string, maxBytes int64, forbidPermMask uint32) ([]byte, error) {
+	return readSmallFileNoFollow(path, maxBytes, true, forbidPermMask)
+}
+
+// ReadSmallFileNoFollow opens path with O_NOFOLLOW, verifies regular file & size bound, and reads it.
+func ReadSmallFileNoFollow(path string, maxBytes int64) ([]byte, error) {
+	return readSmallFileNoFollow(path, maxBytes, false, 0)
+}
+
+func readSmallFileNoFollow(path string, maxBytes int64, checkOwnerPerm bool, forbidPermMask uint32) ([]byte, error) {
 	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
 	if err != nil {
 		return nil, mapOpenat2Err(err)
@@ -100,15 +119,17 @@ func ReadRootOwnedSmallFilePerm(path string, maxBytes int64, forbidPermMask uint
 	if !meta.IsRegular {
 		return nil, ErrNotRegularFile
 	}
-	expectedUID := 0
-	if isUnprivilegedGoTest() {
-		expectedUID = os.Geteuid()
-	}
-	if meta.UID != expectedUID {
-		return nil, fmt.Errorf("%w: %s uid=%d", ErrInvalidOwner, path, meta.UID)
-	}
-	if meta.Perm&forbidPermMask != 0 {
-		return nil, fmt.Errorf("file %s has unsafe permissions %04o", path, meta.Perm)
+	if checkOwnerPerm {
+		expectedUID := 0
+		if isUnprivilegedGoTest() {
+			expectedUID = os.Geteuid()
+		}
+		if meta.UID != expectedUID {
+			return nil, fmt.Errorf("%w: %s uid=%d", ErrInvalidOwner, path, meta.UID)
+		}
+		if meta.Perm&forbidPermMask != 0 {
+			return nil, fmt.Errorf("file %s has unsafe permissions %04o", path, meta.Perm)
+		}
 	}
 	if meta.Size > maxBytes {
 		return nil, fmt.Errorf("%w: %s size=%d", ErrFileTooLarge, path, meta.Size)
@@ -149,7 +170,7 @@ func Lsetfilecon(path, seCtx string) error {
 	if err == nil {
 		return nil
 	}
-	out, cerr := exec.Command("/system/bin/chcon", seCtx, path).CombinedOutput()
+	out, cerr := exec.Command("/system/bin/chcon", "-h", seCtx, path).CombinedOutput()
 	if cerr != nil {
 		if isUnprivilegedGoTest() {
 			return nil

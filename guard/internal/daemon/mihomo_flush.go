@@ -27,7 +27,7 @@ func ReadMihomoControllerConfig(configPath string) (baseURL string, secret strin
 	if configPath == "" {
 		configPath = contracts.MainConfigPath
 	}
-	raw, err := sysio.ReadRootOwnedSmallFilePerm(configPath, 512<<10, 0022)
+	raw, err := sysio.ReadRootOwnedSmallFilePerm(configPath, 4<<20, 0022)
 	if err != nil {
 		return "", "", err
 	}
@@ -104,8 +104,11 @@ func stripYAMLCommentAndQuotes(s string) string {
 		}
 		return strings.Trim(s, `"'`)
 	}
-	if idx := strings.IndexByte(s, '#'); idx >= 0 {
-		s = strings.TrimSpace(s[:idx])
+	for i := 0; i < len(s); i++ {
+		if s[i] == '#' && (i == 0 || s[i-1] == ' ' || s[i-1] == '\t') {
+			s = strings.TrimSpace(s[:i])
+			break
+		}
 	}
 	return strings.TrimSpace(s)
 }
@@ -145,7 +148,8 @@ func flushMihomoInboundURL(ctx context.Context, baseURL, secret, inboundName str
 	defer cancel()
 
 	client := &http.Client{
-		Timeout: 1500 * time.Millisecond,
+		Timeout:   1500 * time.Millisecond,
+		Transport: &http.Transport{Proxy: nil},
 		CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
 		},

@@ -208,3 +208,38 @@ func TestMilletCgroupV2FreezeAndUnfreeze(t *testing.T) {
 		t.Fatal("failed to move pid to unfrozen/cgroup.procs")
 	}
 }
+
+func TestIdentityEdgeCasesAndUplinkRegex(t *testing.T) {
+	// serialNo at end of line and parentId=0 still match WorkUserMatches
+	dumpEOL := "  UserInfo{10:Work Sandbox:1030} parentId=0 serialNo=1000\n"
+	if !WorkUserMatches(dumpEOL, 10, 1000) {
+		t.Fatal("expected WorkUserMatches to accept serialNo at end of line")
+	}
+	// Trailing metadata column in device_policy list-owners
+	ownersExtra := "User 10: admin=" + contracts.DefaultAdminComponent + ",ProfileOwner extra=1\n"
+	if !WorkDPCMatches(ownersExtra, 10, contracts.DefaultAdminComponent) {
+		t.Fatal("expected WorkDPCMatches to tolerate trailing columns")
+	}
+	// Android 14+ (lockdown) suffix in dumpsys vpn_management
+	pkg := contracts.DefaultWorkPackage
+	r := fakeRunner{outputs: map[string]string{
+		"cmd user list -v":                                               "0: id=0, name=Owner, type=full.SYSTEM (running)\n1: id=10, name=Work, type=profile.MANAGED, (parentId=0) (running)\n",
+		"dumpsys user --user 10":                                         "  UserInfo{10:Work:1030} serialNo=1000 isPrimary=false parentId=0\n    Type: android.os.usertype.profile.MANAGED\n    Flags: 4144\n    State: RUNNING_UNLOCKED\n",
+		"cmd device_policy list-owners":                                  "User 10: admin=" + contracts.DefaultAdminComponent + ",ProfileOwner\n",
+		"settings --user 10 get secure always_on_vpn_app":                pkg + "\n",
+		"settings --user 10 get secure always_on_vpn_lockdown":           "1\n",
+		"settings --user 10 get secure always_on_vpn_lockdown_whitelist": "null\n",
+		"dumpsys vpn_management":                                         "  10: " + pkg + " (lockdown)\n",
+		"cmd package list packages --user 10 -U " + pkg:                  "package:" + pkg + " uid:1010376\n",
+	}}
+	if _, err := VerifyStaticIdentity(context.Background(), r, contracts.Policy{
+		UserID: 10, Serial: 1000, CallerPackage: pkg, CallerCertSHA256: strings.Repeat("a", 64),
+	}); err != nil {
+		t.Fatalf("VerifyStaticIdentity failed on (lockdown) vpn_management line: %v", err)
+	}
+	for _, ifName := range []string{"v4-ccmni0", "v4-seth_lte0", "v4-wlan0", "rmnet_mhi0", "rmnet_usb0", "wwan0", "ncm0", "usb0"} {
+		if !contracts.UplinkIfRegex.MatchString(ifName) {
+			t.Fatalf("expected UplinkIfRegex to match %q", ifName)
+		}
+	}
+}

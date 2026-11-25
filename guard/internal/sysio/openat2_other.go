@@ -29,6 +29,12 @@ func (hostStubResolver) OpenFileBeneath(dirFD int, relPath string, how OpenHowSp
 	return nil, errors.New("openat2 only supported on linux")
 }
 
+func EnableUnprivilegedTestMode() {}
+
+func ReadSmallFileNoFollow(path string, maxBytes int64) ([]byte, error) {
+	return ReadRootOwnedSmallFilePerm(path, maxBytes, 0)
+}
+
 func ReadRootOwnedSmallFile(path string, maxBytes int64) ([]byte, error) {
 	return ReadRootOwnedSmallFilePerm(path, maxBytes, 0077)
 }

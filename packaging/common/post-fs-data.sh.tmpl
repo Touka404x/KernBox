@@ -35,8 +35,11 @@ if [ "$tries" -ge 2 ]; then
     fi
     rm -f /dev/sandbox_cfg/stealth.json
 else
-    echo "$((tries + 1))" > "$BOOT_TRIES_FILE"
-    chmod 0600 "$BOOT_TRIES_FILE" 2>/dev/null || true
+    tmp_tries="$BOOT_TRIES_FILE.tmp.$$"
+    echo "$((tries + 1))" > "$tmp_tries"
+    chmod 0600 "$tmp_tries" 2>/dev/null || true
+    mv -f "$tmp_tries" "$BOOT_TRIES_FILE" 2>/dev/null || rm -f "$tmp_tries"
+    sync 2>/dev/null || true
 fi
 
 # Hide unlocked bootloader properties natively (skipped if stealth kill-switch triggered).
@@ -48,38 +51,45 @@ if [ ! -e "$MODDIR/zygisk_disabled" ]; then
             break
         fi
     done
-    if [ -n "$RESETPROP" ] && [ -x "$RESETPROP" ]; then
-        "$RESETPROP" -n ro.boot.verifiedbootstate green 2>/dev/null || true
-        "$RESETPROP" -n ro.boot.flash.locked 1 2>/dev/null || true
-        "$RESETPROP" -n ro.boot.vbmeta.device_state locked 2>/dev/null || true
-        "$RESETPROP" -n ro.boot.veritymode enforcing 2>/dev/null || true
-        "$RESETPROP" -n ro.boot.warranty_bit 0 2>/dev/null || true
-        "$RESETPROP" -n sys.oem_unlock_allowed 0 2>/dev/null || true
+    run_resetprop() {
+        if [ -n "$RESETPROP" ]; then
+            "$RESETPROP" "$@"
+        else
+            magisk resetprop "$@"
+        fi
+    }
+    if [ -n "$RESETPROP" ] || command -v magisk >/dev/null 2>&1; then
+        run_resetprop -n ro.boot.verifiedbootstate green 2>/dev/null || true
+        run_resetprop -n ro.boot.flash.locked 1 2>/dev/null || true
+        run_resetprop -n ro.boot.vbmeta.device_state locked 2>/dev/null || true
+        run_resetprop -n ro.boot.veritymode enforcing 2>/dev/null || true
+        run_resetprop -n ro.boot.warranty_bit 0 2>/dev/null || true
+        run_resetprop -n sys.oem_unlock_allowed 0 2>/dev/null || true
 
         for wprop in ro.warranty_bit ro.vendor.boot.warranty_bit ro.vendor.warranty_bit; do
             wval=$(getprop "$wprop" 2>/dev/null || true)
             if [ -n "$wval" ] && [ "$wval" != "0" ]; then
-                "$RESETPROP" -n "$wprop" 0 2>/dev/null || true
+                run_resetprop -n "$wprop" 0 2>/dev/null || true
             fi
         done
 
         if [ "$(getprop ro.debuggable 2>/dev/null || true)" = "1" ]; then
-            "$RESETPROP" -n ro.debuggable 0 2>/dev/null || true
+            run_resetprop -n ro.debuggable 0 2>/dev/null || true
         fi
         if [ "$(getprop ro.secure 2>/dev/null || true)" = "0" ]; then
-            "$RESETPROP" -n ro.secure 1 2>/dev/null || true
+            run_resetprop -n ro.secure 1 2>/dev/null || true
         fi
         if [ "$(getprop ro.adb.secure 2>/dev/null || true)" = "0" ]; then
-            "$RESETPROP" -n ro.adb.secure 1 2>/dev/null || true
+            run_resetprop -n ro.adb.secure 1 2>/dev/null || true
         fi
 
         btags=$(getprop ro.build.tags 2>/dev/null || true)
         if [ "$btags" = "test-keys" ] || [ "$btags" = "dev-keys" ]; then
-            "$RESETPROP" -n ro.build.tags release-keys 2>/dev/null || true
+            run_resetprop -n ro.build.tags release-keys 2>/dev/null || true
         fi
         btype=$(getprop ro.build.type 2>/dev/null || true)
         if [ "$btype" = "userdebug" ] || [ "$btype" = "eng" ]; then
-            "$RESETPROP" -n ro.build.type user 2>/dev/null || true
+            run_resetprop -n ro.build.type user 2>/dev/null || true
         fi
     fi
 fi

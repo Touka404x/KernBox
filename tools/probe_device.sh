@@ -120,13 +120,24 @@ su -c "
   tp=0
   if grep -qw TPROXY /proc/net/ip_tables_targets 2>/dev/null; then
     tp=1
+  elif iptables -t mangle -j TPROXY --help >/dev/null 2>&1; then
+    tp=1
   elif iptables -t mangle -L PREROUTING -n >/dev/null 2>&1 && zcat /proc/config.gz 2>/dev/null | grep -Eq \"CONFIG_NETFILTER_XT_TARGET_TPROXY=[ym]\"; then
+    tp=1
+  elif command -v nft >/dev/null 2>&1 && zcat /proc/config.gz 2>/dev/null | grep -Eq \"CONFIG_NFT_TPROXY=[ym]\"; then
     tp=1
   fi
   inst=0
   { [ -d /data/adb/modules/sandbox_guard ] || [ -x /data/adb/sandbox_guard/sandbox_guard ]; } && inst=1
-  printf \"ROOT=%s\nROOTVER=%s\nZYGISK=%s\nCG2=%s\nTPROXY=%s\nINSTALLED=%s\nTS=%s\nPIF=%s\nHIDER=%s\n\" \"\$rmgr\" \"\$rver\" \"\$zy\" \"\$cg2\" \"\$tp\" \"\$inst\" \"\$ts\" \"\$pif\" \"\$hider\"
-" 2>/dev/null || echo "ROOT=none"
+  printf \"ROOT=%s\nROOTVER=%s\nZYGISK=%s\nCG2=%s\nTPROXY=%s\nINSTALLED=%s\nTS=%s\nPIF=%s\nHIDER=%s\nROOT_DENIED=0\n\" \"\$rmgr\" \"\$rver\" \"\$zy\" \"\$cg2\" \"\$tp\" \"\$inst\" \"\$ts\" \"\$pif\" \"\$hider\"
+" 2>/dev/null || {
+  echo "ROOT=none"
+  if command -v su >/dev/null 2>&1 || pm list packages 2>/dev/null | grep -Eq "me\.weishu\.kernelsu|com\.topjohnwu\.magisk|me\.bmax\.apatch|io\.github\.huskydg\.magisk"; then
+    echo "ROOT_DENIED=1"
+  else
+    echo "ROOT_DENIED=0"
+  fi
+}
 ')
 
 JSON=$(printf '%s\n' "$RAW" | python3 -c '
@@ -140,19 +151,20 @@ krel = kv.get("KREL", "")
 m = re.match(r"^(\d+)\.(\d+)", krel)
 kmaj, kmin = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
 sdk = int(kv["SDK"]) if kv.get("SDK", "").isdigit() else 0
+EXCLUDED_CLONE_USERS = {95, 150, 999}
 work = set()
 for part in kv.get("USERS_V", "").split("|"):
     um = re.search(r"id=(\d+).*(?:MANAGED_PROFILE|profile\.MANAGED)", part)
     if um:
         uid = int(um.group(1))
-        if uid > 0 and uid != 999:
+        if uid > 0 and uid not in EXCLUDED_CLONE_USERS:
             work.add(uid)
 for part in kv.get("USERS_PM", "").split("|"):
     um = re.search(r"UserInfo\{(\d+):[^:]*:([0-9a-fA-F]+)\}", part)
     if um:
         uid = int(um.group(1))
         flags = int(um.group(2), 16)
-        if uid > 0 and uid != 999 and (flags & 0x20) != 0:
+        if uid > 0 and uid not in EXCLUDED_CLONE_USERS and (flags & 0x20) != 0:
             work.add(uid)
 print(json.dumps({
     "schema_version": 1,
@@ -173,6 +185,7 @@ print(json.dumps({
     },
     "root_manager": kv.get("ROOT") or "none",
     "root_version": kv.get("ROOTVER", ""),
+    "root_access_denied": kv.get("ROOT_DENIED") == "1",
     "zygisk_detected": kv.get("ZYGISK") == "1",
     "cgroup_v2_freeze": kv.get("CG2") == "1",
     "tproxy_capable": kv.get("TPROXY") == "1",

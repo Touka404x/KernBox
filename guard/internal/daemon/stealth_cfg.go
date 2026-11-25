@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -349,7 +350,9 @@ func (d *Daemon) ToggleStealth(enable bool) (StealthConfig, error) {
 			return StealthConfig{}, err
 		}
 	} else {
-		_ = os.WriteFile(disabledFlag, []byte("disabled via ctl\n"), 0644)
+		if err := sysio.WriteAtomic(disabledFlag, []byte("disabled via ctl\n"), sysio.WriteAtomicOptions{Perm: 0644, UID: 0, GID: 0}); err != nil {
+			return StealthConfig{}, err
+		}
 	}
 
 	d.mu.Lock()
@@ -431,19 +434,14 @@ func (d *Daemon) ApplyPresetFile(ctx context.Context, presetPath string) (Stealt
 	if strings.TrimSpace(presetPath) == "" || strings.ContainsAny(presetPath, "\x00\r\n") {
 		return StealthConfig{}, errors.New("invalid preset path")
 	}
-	info, err := os.Lstat(presetPath)
-	if err != nil {
-		return StealthConfig{}, err
-	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Size() > contracts.MaxSmallFileBytes {
-		return StealthConfig{}, errors.New("preset file must be a regular file within size limit")
-	}
-	raw, err := os.ReadFile(presetPath)
+	raw, err := sysio.ReadSmallFileNoFollow(presetPath, contracts.MaxSmallFileBytes)
 	if err != nil {
 		return StealthConfig{}, err
 	}
 	var p RegionPreset
-	if err := json.Unmarshal(raw, &p); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&p); err != nil {
 		return StealthConfig{}, fmt.Errorf("parse preset JSON: %w", err)
 	}
 	if p.Locale != nil && *p.Locale != "" && !contracts.ValidLocaleTag(strings.TrimSpace(*p.Locale)) {

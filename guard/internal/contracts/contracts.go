@@ -121,7 +121,7 @@ var (
 	LocaleTagRegex      = regexp.MustCompile(`^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})*$`)
 	SHA256HexRegex      = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	TunIfRegex          = regexp.MustCompile(`^tun[0-9]{1,10}$`)
-	UplinkIfRegex       = regexp.MustCompile(`^(wlan[0-9]+|rmnet_data[0-9]+|rmnet[0-9]*|rmnet_ipa[0-9]*|v4-rmnet[a-z0-9_]*|ccmni[0-9]+|seth_lte[0-9]+|umts_router|eth[0-9]+|rndis[0-9]+)$`)
+	UplinkIfRegex       = regexp.MustCompile(`^(wlan[0-9]+|v4-wlan[0-9]+|rmnet_data[0-9]+|rmnet_mhi[0-9]*|rmnet_usb[0-9]*|rmnet[0-9]*|rmnet_ipa[0-9]*|v4-rmnet[a-z0-9_]*|ccmni[0-9]+|v4-ccmni[0-9]+|seth_lte[0-9]+|v4-seth_lte[0-9]+|wwan[0-9]+|ncm[0-9]+|usb[0-9]+|umts_router|eth[0-9]+|rndis[0-9]+)$`)
 	BootIDRegex         = regexp.MustCompile(`^[0-9a-fA-F-]{8,64}$`)
 	ComponentClassRegex = regexp.MustCompile(`^[a-zA-Z0-9_.$]{1,255}$`)
 	ChainPrefixRegex    = regexp.MustCompile(`^[A-Z][A-Z0-9_]{1,20}$`)

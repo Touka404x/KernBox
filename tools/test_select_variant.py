@@ -279,6 +279,24 @@ class SelectVariantTests(unittest.TestCase):
         self.assertTrue(r_gen["ok"])
         self.assertEqual(r_gen["artifact"], "KernBox-generic-k419-apatch-arm64.zip")
 
+    def test_numeric_ksu_version_code_and_root_denied_message(self):
+        p_legacy = base_profile(root_manager="ksu", root_version="11200")
+        r_leg = sv.select_variant(p_legacy)
+        self.assertTrue(r_leg["ok"])
+        self.assertEqual(r_leg["kernel"], "k419")
+        self.assertEqual(r_leg["root"], "ksu_legacy")
+
+        p_mod = base_profile(root_manager="ksu", root_version="11986")
+        r_mod = sv.select_variant(p_mod)
+        self.assertTrue(r_mod["ok"])
+        self.assertEqual(r_mod["kernel"], "k510")
+        self.assertEqual(r_mod["root"], "ksu")
+
+        p_denied = base_profile(root_manager="none", root_version="", root_access_denied=True)
+        r_den = sv.select_variant(p_denied)
+        self.assertFalse(r_den["ok"])
+        self.assertTrue(any("com.android.shell" in e for e in r_den["errors"]))
+
 
 if __name__ == "__main__":
     unittest.main()

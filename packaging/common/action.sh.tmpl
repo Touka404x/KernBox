@@ -1,0 +1,44 @@
+#!/system/bin/sh
+# Magisk 28+ / KernelSU 1.0+ / APatch in-app Action button handler for KernBox.
+
+MODDIR=${0%/*}
+[ "$MODDIR" = "$0" ] && MODDIR=.
+GUARD_HOME=/data/adb/sandbox_guard
+GUARD_BIN="$GUARD_HOME/sandbox_guard"
+export PATH={{ROOT_PATH_PREFIX}}:/data/adb/ksu/bin:/data/adb/ap/bin:/data/adb/magisk/bin:/system/bin:/system/xbin:$PATH
+
+echo "=== KernBox {{VERSION}} ({{OEM}}/{{KERNEL}}/{{ROOT}}) ==="
+
+if [ ! -x "$GUARD_BIN" ]; then
+    echo "! sandbox_guard binary not found at $GUARD_BIN"
+    exit 1
+fi
+
+if [ ! -S /dev/socket/sandbox_priv/guard.sock ]; then
+    echo "- Daemon socket offline; starting service.sh..."
+    if [ -f "$MODDIR/service.sh" ]; then
+        sh "$MODDIR/service.sh" >/dev/null 2>&1 || true
+    fi
+    w=0
+    while [ "$w" -lt 20 ] && [ ! -S /dev/socket/sandbox_priv/guard.sock ]; do
+        sleep 0.1
+        w=$((w + 1))
+    done
+fi
+
+status_out=$("$GUARD_BIN" ctl status 2>&1 || true)
+case "$status_out" in
+    *'"paused": true'*|*'"paused":true'*)
+        echo "- Sandbox is PAUSED; resuming..."
+        "$GUARD_BIN" ctl resume
+        ;;
+    *'"state"'*)
+        echo "- Sandbox is ACTIVE; pausing & hibernating..."
+        "$GUARD_BIN" ctl pause
+        ;;
+    *)
+        echo "! Unable to query sandbox status:"
+        echo "$status_out"
+        exit 1
+        ;;
+esac

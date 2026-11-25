@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os/exec"
 	"runtime"
 	"strconv"
@@ -76,7 +77,15 @@ func resolveIPTablesCompanionBin(name, v4, v6 string, lookPath func(string) (str
 
 type ExecRunner struct{}
 
-func (ExecRunner) Run(ctx context.Context, timeout time.Duration, stdin string, name string, args ...string) (string, error) {
+func (e ExecRunner) Run(ctx context.Context, timeout time.Duration, stdin string, name string, args ...string) (string, error) {
+	var r io.Reader
+	if stdin != "" {
+		r = strings.NewReader(stdin)
+	}
+	return e.RunWithStdinReader(ctx, timeout, r, name, args...)
+}
+
+func (ExecRunner) RunWithStdinReader(ctx context.Context, timeout time.Duration, stdin io.Reader, name string, args ...string) (string, error) {
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	bin := name
@@ -85,8 +94,8 @@ func (ExecRunner) Run(ctx context.Context, timeout time.Duration, stdin string, 
 		bin = resolveIPTablesCompanionBin(name, v4, v6, exec.LookPath)
 	}
 	cmd := exec.CommandContext(cctx, bin, args...)
-	if stdin != "" {
-		cmd.Stdin = strings.NewReader(stdin)
+	if stdin != nil {
+		cmd.Stdin = stdin
 	}
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb

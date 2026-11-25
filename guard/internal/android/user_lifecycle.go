@@ -920,7 +920,24 @@ func HotFreezeSandboxUserWithOpts(ctx context.Context, r Runner, userID int, sta
 	// Freeze cgroups FIRST, then scan cgroup.procs and reclaim pages with pidfd + UID verification.
 	frozenNow := SetCgroupFreezeUIDs(cgroupRoot, userID, freezableUIDs, true)
 	if len(freezableUIDs) > 0 && len(frozenNow) == 0 {
-		return 0, errors.New("no writable cgroup freeze control found for sandbox UIDs")
+		if !HasAnyCgroupFreezeSupport(cgroupRoot, userID) {
+			return 0, errors.New("no writable cgroup freeze control found for sandbox UIDs")
+		}
+		freezableSet := make(map[int]bool, len(freezableUIDs))
+		for _, uid := range freezableUIDs {
+			freezableSet[uid] = true
+		}
+		hasRunningFreezable := false
+		for _, pe := range scanUserProcEntriesWithRoot(cgroupRoot, userID) {
+			if freezableSet[pe.uid] {
+				hasRunningFreezable = true
+				break
+			}
+		}
+		if hasRunningFreezable {
+			return 0, errors.New("no writable cgroup freeze control found for active sandbox UIDs")
+		}
+		return 0, nil
 	}
 	frozenSet := make(map[int]bool, len(frozenNow))
 	for _, uid := range frozenNow {
@@ -1366,15 +1383,11 @@ func InspectSandboxActivityFast(
 	}
 
 	audioActive := false
-	if checkedAsound, activeAsound := checkAsoundAnyActive(asoundRoot); checkedAsound && activeAsound {
-		audioActive = true
-	} else {
-		audOut, errAud := r.Run(ctx, 4*time.Second, "", "dumpsys", "audio")
-		if errAud != nil {
-			return SandboxActivitySnapshot{}, fmt.Errorf("dumpsys audio: %w", errAud)
-		}
-		audioActive = ParseAudioActiveForUser(audOut, uidStart, uidEnd)
+	audOut, errAud := r.Run(ctx, 4*time.Second, "", "dumpsys", "audio")
+	if errAud != nil {
+		return SandboxActivitySnapshot{}, fmt.Errorf("dumpsys audio: %w", errAud)
 	}
+	audioActive = ParseAudioActiveForUser(audOut, uidStart, uidEnd)
 
 	fgUser := false
 	topOut, errTop := r.Run(ctx, 3*time.Second, "", "dumpsys", "activity", "top")

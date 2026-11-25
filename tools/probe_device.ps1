@@ -142,14 +142,27 @@ ROOT_OUT=$(su -c '
   tp=0
   if grep -qw TPROXY /proc/net/ip_tables_targets 2>/dev/null; then
     tp=1
+  elif iptables -t mangle -j TPROXY --help >/dev/null 2>&1; then
+    tp=1
   elif iptables -t mangle -L PREROUTING -n >/dev/null 2>&1 && zcat /proc/config.gz 2>/dev/null | grep -Eq "CONFIG_NETFILTER_XT_TARGET_TPROXY=[ym]"; then
+    tp=1
+  elif command -v nft >/dev/null 2>&1 && zcat /proc/config.gz 2>/dev/null | grep -Eq "CONFIG_NFT_TPROXY=[ym]"; then
     tp=1
   fi
   inst=0
   [ -d /data/adb/modules/sandbox_guard ] || [ -x /data/adb/sandbox_guard/sandbox_guard ] && inst=1
-  printf "ROOT=%s\nROOTVER=%s\nZYGISK=%s\nCG2=%s\nTPROXY=%s\nINSTALLED=%s\nTS=%s\nPIF=%s\nHIDER=%s\n" "$rmgr" "$rver" "$zy" "$cg2" "$tp" "$inst" "$ts" "$pif" "$hider"
-' 2>/dev/null || echo "ROOT=none")
-echo "$ROOT_OUT"
+  printf "ROOT=%s\nROOTVER=%s\nZYGISK=%s\nCG2=%s\nTPROXY=%s\nINSTALLED=%s\nTS=%s\nPIF=%s\nHIDER=%s\nROOT_DENIED=0\n" "$rmgr" "$rver" "$zy" "$cg2" "$tp" "$inst" "$ts" "$pif" "$hider"
+' 2>/dev/null)
+if [ -z "$ROOT_OUT" ]; then
+  echo "ROOT=none"
+  if command -v su >/dev/null 2>&1 || pm list packages 2>/dev/null | grep -Eq "me\.weishu\.kernelsu|com\.topjohnwu\.magisk|me\.bmax\.apatch|io\.github\.huskydg\.magisk"; then
+    echo "ROOT_DENIED=1"
+  else
+    echo "ROOT_DENIED=0"
+  fi
+else
+  echo "$ROOT_OUT"
+fi
 '@
 
 $raw = Invoke-Adb @("shell", $shellProbe)
@@ -174,12 +187,13 @@ if ($krel -match '^(\d+)\.(\d+)') {
 $sdk = 0
 if ("$($kv['SDK'])" -match '^\d+$') { $sdk = [int]$kv['SDK'] }
 
+$excludedCloneUsers = @(95, 150, 999)
 $workUserSet = New-Object 'System.Collections.Generic.SortedSet[int]'
 if ($kv['USERS_V']) {
     foreach ($u in ($kv['USERS_V'] -split '\|')) {
         if ($u -match 'id=(\d+).*(MANAGED_PROFILE|profile\.MANAGED)') {
             $uid = [int]$Matches[1]
-            if ($uid -gt 0 -and $uid -ne 999) { [void]$workUserSet.Add($uid) }
+            if ($uid -gt 0 -and ($excludedCloneUsers -notcontains $uid)) { [void]$workUserSet.Add($uid) }
         }
     }
 }
@@ -188,7 +202,7 @@ if ($kv['USERS_PM']) {
         if ($u -match 'UserInfo\{(\d+):[^:]*:([0-9a-fA-F]+)\}') {
             $uid = [int]$Matches[1]
             $flags = [Convert]::ToInt32($Matches[2], 16)
-            if ($uid -gt 0 -and $uid -ne 999 -and (($flags -band 0x20) -ne 0)) {
+            if ($uid -gt 0 -and ($excludedCloneUsers -notcontains $uid) -and (($flags -band 0x20) -ne 0)) {
                 [void]$workUserSet.Add($uid)
             }
         }
@@ -219,6 +233,7 @@ $profile = [ordered]@{
     }
     root_manager = $rootMgr
     root_version = "$($kv['ROOTVER'])"
+    root_access_denied = ($kv['ROOT_DENIED'] -eq '1')
     zygisk_detected = ($kv['ZYGISK'] -eq '1')
     cgroup_v2_freeze = ($kv['CG2'] -eq '1')
     tproxy_capable = ($kv['TPROXY'] -eq '1')

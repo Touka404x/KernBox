@@ -187,8 +187,9 @@ func authorizeUnixPeer(conn net.Conn, sockPath, wantCtx string) error {
 		if creds.UID != 0 {
 			return fmt.Errorf("unauthorized uid %d on %s", creds.UID, sockPath)
 		}
-		if wantCtx != "" && creds.Context != wantCtx {
-			return fmt.Errorf("unauthorized peer context %q on %s", creds.Context, sockPath)
+		peerCtx := strings.TrimSpace(strings.TrimRight(creds.Context, "\x00"))
+		if wantCtx != "" && peerCtx != wantCtx {
+			return fmt.Errorf("unauthorized peer context %q on %s", peerCtx, sockPath)
 		}
 		return nil
 	}

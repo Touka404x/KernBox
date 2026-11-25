@@ -32,7 +32,7 @@ ROOT_PROFILE = {
     "magisk": {
         "sepolicy": "magisk.rule",
         "path_prefix": "/data/adb/magisk",
-        "resetprop": "/data/adb/magisk/resetprop",
+        "resetprop": "/data/adb/magisk/resetprop /sbin/resetprop /debug_ramdisk/resetprop",
         "busybox": "/data/adb/magisk/busybox /data/adb/ksu/bin/busybox /data/adb/ap/bin/busybox",
     },
     "apatch": {
@@ -47,8 +47,15 @@ FIXED_DATE = (2026, 11, 25, 0, 0, 0)
 
 
 def version_to_code(ver: str) -> str:
-    digits = "".join(ch for ch in ver if ch.isdigit())
-    return digits if digits else "100"
+    """Convert semver 'major.minor.patch' to a monotonic integer code (e.g. 1.2.0 -> '10200')."""
+    parts = [int(p) for p in ver.strip().lstrip("vV").split(".") if p.isdigit()]
+    if len(parts) >= 3:
+        return str(parts[0] * 10000 + parts[1] * 100 + parts[2])
+    if len(parts) == 2:
+        return str(parts[0] * 10000 + parts[1] * 100)
+    if len(parts) == 1:
+        return str(parts[0] * 10000)
+    return "10000"
 
 
 def render_template(raw_text: str, mapping: dict) -> bytes:
@@ -117,6 +124,8 @@ def pack_variant(
         ("customize.sh", render_template((COMMON_DIR / "customize.sh.tmpl").read_text(encoding="utf-8"), mapping), 0o755),
         ("post-fs-data.sh", render_template((COMMON_DIR / "post-fs-data.sh.tmpl").read_text(encoding="utf-8"), mapping), 0o755),
         ("service.sh", render_template((COMMON_DIR / "service.sh.tmpl").read_text(encoding="utf-8"), mapping), 0o755),
+        ("action.sh", render_template((COMMON_DIR / "action.sh.tmpl").read_text(encoding="utf-8"), mapping), 0o755),
+        ("uninstall.sh", render_template((COMMON_DIR / "uninstall.sh.tmpl").read_text(encoding="utf-8"), mapping), 0o755),
         ("sepolicy.rule", (SEPOLICY_DIR / rp["sepolicy"]).read_bytes().replace(b"\r\n", b"\n"), 0o644),
         ("defaults/stealth.json", (COMMON_DIR / "defaults" / "stealth.json").read_bytes().replace(b"\r\n", b"\n"), 0o600),
         ("defaults/perf.json", (COMMON_DIR / "defaults" / "perf.json").read_bytes().replace(b"\r\n", b"\n"), 0o600),
