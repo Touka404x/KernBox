@@ -41,7 +41,9 @@
    - Magisk: `adb shell su -c "magisk --install-module /data/local/tmp/<artifact>"`
    - APatch: `adb shell su -c "apd module install /data/local/tmp/<artifact>"`
 4. 清理手机 `/data/local/tmp/<artifact>`。
-5. **在执行 `adb reboot` 前必须征求我口头/文字确认**（说明重启后会自动激活 Zygisk 隐身并带有 2 次失败自动熔断防变砖保护）。
+5. （可选）如果 `./dist/KernBox.apk` 存在，向用户确认后安装配套控制端到主空间，并用 `apksigner verify --print-certs ./dist/KernBox.apk` 获取签名 SHA-256 绑定至 `/data/adb/sandbox_guard/policy.json`：
+   `adb install -r ./dist/KernBox.apk`
+6. **在执行 `adb reboot` 前必须征求我口头/文字确认**（说明重启后会自动激活 Zygisk 隐身并带有 2 次失败自动熔断防变砖保护）。
 
 ### 第 5 步：重启后满血功能与网络边界验收
 1. 等待 `adb wait-for-device` 与 `sys.boot_completed=1`。
