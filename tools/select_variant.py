@@ -199,6 +199,11 @@ def select_variant(profile: Dict[str, Any], version: str = "1.0.0", preset: Opti
             "USB Debugging (adb_enabled=1) is active: turn off USB Debugging after installation and "
             "verification so apps inspecting Settings.Global.ADB_ENABLED see a retail device."
         )
+    if readiness.get("accessibility_services_active") is True:
+        warnings.append(
+            "Active Android Accessibility Service(s) detected: non-essential accessibility services "
+            "can trigger Play Integrity appAccessRiskVerdict; disable them before sensitive use."
+        )
 
     artifact = f"KernBox-{oem}-{kernel}-{root}-arm64.zip" if (not errors and root) else None
 
@@ -221,6 +226,7 @@ def select_variant(profile: Dict[str, Any], version: str = "1.0.0", preset: Opti
             "reboot": "adb reboot",
             "status_check": 'adb shell su -c "/data/adb/sandbox_guard/sandbox_guard ctl variant-info && /data/adb/sandbox_guard/sandbox_guard ctl status && /data/adb/sandbox_guard/sandbox_guard ctl stealth-status"',
             "verify_install": f'adb install -r --user {work_user} KernBoxVerify.apk && adb shell am instrument --user {work_user} -w com.sandbox.verify/com.sandbox.verify.NetworkProbe',
+            "verify_cleanup": f"adb uninstall --user {work_user} com.sandbox.verify",
         }
         if preset:
             preset_name = preset if preset.endswith(".json") else f"{preset}.json"

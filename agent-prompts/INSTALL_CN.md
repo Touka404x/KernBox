@@ -55,10 +55,13 @@
 4. 如 `./dist/KernBoxVerify.apk` 存在且工作资料用户 `<work_user>` 已就绪，安装并运行验证探针：
    `adb install -r --user <work_user> ./dist/KernBoxVerify.apk`
    `adb shell am instrument --user <work_user> -w com.sandbox.verify/com.sandbox.verify.NetworkProbe`
-   解析输出的 `real_device_scorecard` 逐项汇报（`work_profile_hidden`、`vpn_footprint_clean`、`ipv6_leak_blocked`、`proc_mounts_clean`、`proc_maps_clean`、`su_paths_hidden`、`boot_props_locked`、`usb_debugging_off`、`keymint_rot_locked`、`carrier_and_geo_configured`）：
+   解析输出的 `real_device_scorecard` 全部 12 项并逐条汇报（`work_profile_hidden`、`vpn_footprint_clean`、`ipv6_leak_blocked`、`proc_mounts_clean`、`proc_maps_clean`、`su_paths_hidden`、`isolated_proc_clean`、`boot_props_locked`、`usb_debugging_off`、`accessibility_risk_clean`、`keymint_rot_locked`、`carrier_and_geo_configured`）：
    - 若 `keymint_rot_locked` 为 `warn`，提醒我未锁 BL 机型的硬件密钥认证需搭配 TrickyStore + PlayIntegrityFix 模块；
-   - 若 `usb_debugging_off` 为 `warn`，提醒我在确认验收全部通过后**关闭手机「USB 调试」并拔线**再正式运行目标 App；
-   - 并附带一份简明回滚备忘（参考 `./agent-prompts/UPGRADE_AND_ROLLBACK.md`）。
+   - 若 `accessibility_risk_clean` 为 `warn`，提醒我关闭非必要系统无障碍服务以免影响 `appAccessRiskVerdict`；
+   - 若 `usb_debugging_off` 为 `warn`，提醒我在确认验收全部通过后**关闭手机「USB 调试」并拔线**；
+5. **验收后强制清理测试探针（防止自签名测试 APK 留存成为指纹风险）**：
+   `adb uninstall --user <work_user> com.sandbox.verify`
+   然后告诉我稳态运行三原则：**① 一沙盒绑定一个固定匹配出口的预设，不要高频跨区来回切换 `preset-apply`；② 日常暂停优先使用热冻结而非反复强停或清数据重装；③ 保持 Work Profile 账号独立不跨空间混登**，并附带简明回滚备忘（参考 `./agent-prompts/UPGRADE_AND_ROLLBACK.md`）。
 
 ### 安全红线（绝对遵守）
 - 禁止修改本机的 `~/.ssh`、系统hosts，或向公网上传任何 `device_profile.json` / 原始日志。

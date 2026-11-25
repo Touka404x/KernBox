@@ -55,6 +55,8 @@ echo "VBSTATE=$(getprop_s ro.boot.verifiedbootstate)"
 echo "FLOCKED=$(getprop_s ro.boot.flash.locked)"
 echo "BTAGS=$(getprop_s ro.build.tags)"
 echo "ADB_EN=$(settings get global adb_enabled 2>/dev/null | tr -d "\r\n")"
+ACC_RAW=$(settings get secure enabled_accessibility_services 2>/dev/null | tr -d "\r\n")
+if [ -n "$ACC_RAW" ] && [ "$ACC_RAW" != "null" ]; then echo "ACC_ON=1"; else echo "ACC_ON=0"; fi
 echo "USERS_V=$(cmd user list -v 2>/dev/null | tr "\n" "|" | tr -d "\r")"
 echo "USERS_PM=$(pm list users 2>/dev/null | tr "\n" "|" | tr -d "\r")"
 su -c "
@@ -181,6 +183,7 @@ print(json.dumps({
         "bootloader_flash_locked": kv.get("FLOCKED", ""),
         "build_tags": kv.get("BTAGS", ""),
         "adb_enabled": kv.get("ADB_EN") == "1",
+        "accessibility_services_active": kv.get("ACC_ON") == "1",
         "trickystore_detected": kv.get("TS") == "1",
         "pif_detected": kv.get("PIF") == "1",
         "root_hider_detected": kv.get("HIDER") == "1",

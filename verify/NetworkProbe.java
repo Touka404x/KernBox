@@ -367,10 +367,20 @@ public final class NetworkProbe extends Instrumentation {
             sg.put("private_dns_mode", safeGlobalStr(cr, "private_dns_mode"));
         } catch (Throwable ignored) {}
 
+        JSONObject ss = new JSONObject();
+        try {
+            ContentResolver cr = context.getContentResolver();
+            String rawAcc = Settings.Secure.getString(cr, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+            boolean accActive = rawAcc != null && !rawAcc.trim().isEmpty()
+                && !"null".equalsIgnoreCase(rawAcc.trim());
+            ss.put("accessibility_services_active", accActive);
+        } catch (Throwable ignored) {}
+
         try {
             env.put("connectivity", conn);
             env.put("geo", geo);
             env.put("settings_global", sg);
+            env.put("settings_secure", ss);
         } catch (Exception ignored) {}
         return env;
     }
@@ -754,25 +764,13 @@ public final class NetworkProbe extends Instrumentation {
             recordScorecardCheck(checks, counts, "ipv6_leak_blocked", ipv6Blocked ? "pass" : "fail");
 
             JSONObject proc = report.optJSONObject("proc_hygiene");
-            JSONObject mounts = proc != null ? proc.optJSONObject("mountinfo") : null;
-            boolean mountsClean = mounts != null
-                && mounts.optBoolean("readable", false)
-                && mounts.optInt("suspicious_count", -1) == 0;
-            recordScorecardCheck(checks, counts, "proc_mounts_clean", mountsClean ? "pass" : "fail");
+            recordScorecardCheck(checks, counts, "proc_mounts_clean", isMountsClean(proc) ? "pass" : "fail");
+            recordScorecardCheck(checks, counts, "proc_maps_clean", isMapsClean(proc) ? "pass" : "fail");
+            recordScorecardCheck(checks, counts, "su_paths_hidden", isSuHidden(proc) ? "pass" : "fail");
 
-            JSONObject maps = proc != null ? proc.optJSONObject("maps") : null;
-            boolean mapsClean = maps != null
-                && maps.optBoolean("readable", false)
-                && maps.optInt("suspicious_count", -1) == 0
-                && maps.optInt("anon_rwxp_count", -1) == 0
-                && maps.optInt("memfd_count", -1) == 0;
-            recordScorecardCheck(checks, counts, "proc_maps_clean", mapsClean ? "pass" : "fail");
-
-            JSONObject suPaths = proc != null ? proc.optJSONObject("su_paths") : null;
-            boolean suHidden = suPaths != null
-                && suPaths.has("any_visible")
-                && !suPaths.optBoolean("any_visible", true);
-            recordScorecardCheck(checks, counts, "su_paths_hidden", suHidden ? "pass" : "fail");
+            JSONObject iso = report.optJSONObject("isolated_process");
+            boolean isoClean = isMountsClean(iso) && isMapsClean(iso) && isSuHidden(iso);
+            recordScorecardCheck(checks, counts, "isolated_proc_clean", isoClean ? "pass" : "fail");
 
             JSONObject bp = proc != null ? proc.optJSONObject("boot_props") : null;
             boolean bootLocked = bp != null
@@ -786,6 +784,12 @@ public final class NetworkProbe extends Instrumentation {
             JSONObject sg = env != null ? env.optJSONObject("settings_global") : null;
             boolean adbOff = sg != null && sg.optInt("adb_enabled", -1) == 0;
             recordScorecardCheck(checks, counts, "usb_debugging_off", adbOff ? "pass" : "warn");
+
+            JSONObject ss = env != null ? env.optJSONObject("settings_secure") : null;
+            boolean accClean = ss != null
+                && ss.has("accessibility_services_active")
+                && !ss.optBoolean("accessibility_services_active", true);
+            recordScorecardCheck(checks, counts, "accessibility_risk_clean", accClean ? "pass" : "warn");
 
             JSONObject integrity = report.optJSONObject("integrity");
             JSONObject rot = integrity != null ? integrity.optJSONObject("root_of_trust") : null;
@@ -814,6 +818,29 @@ public final class NetworkProbe extends Instrumentation {
             } catch (Exception ignored) {}
         }
         return scorecard;
+    }
+
+    private static boolean isMountsClean(JSONObject proc) {
+        JSONObject mounts = proc != null ? proc.optJSONObject("mountinfo") : null;
+        return mounts != null
+            && mounts.optBoolean("readable", false)
+            && mounts.optInt("suspicious_count", -1) == 0;
+    }
+
+    private static boolean isMapsClean(JSONObject proc) {
+        JSONObject maps = proc != null ? proc.optJSONObject("maps") : null;
+        return maps != null
+            && maps.optBoolean("readable", false)
+            && maps.optInt("suspicious_count", -1) == 0
+            && maps.optInt("anon_rwxp_count", -1) == 0
+            && maps.optInt("memfd_count", -1) == 0;
+    }
+
+    private static boolean isSuHidden(JSONObject proc) {
+        JSONObject suPaths = proc != null ? proc.optJSONObject("su_paths") : null;
+        return suPaths != null
+            && suPaths.has("any_visible")
+            && !suPaths.optBoolean("any_visible", true);
     }
 
     private static void recordScorecardCheck(JSONObject checks, int[] counts, String name, String status) throws Exception {

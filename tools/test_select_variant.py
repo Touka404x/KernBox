@@ -218,6 +218,7 @@ class SelectVariantTests(unittest.TestCase):
                 "bootloader_flash_locked": "0",
                 "build_tags": "release-keys",
                 "adb_enabled": True,
+                "accessibility_services_active": True,
                 "trickystore_detected": False,
                 "pif_detected": False,
                 "root_hider_detected": False,
@@ -230,6 +231,7 @@ class SelectVariantTests(unittest.TestCase):
         self.assertIn("TrickyStore", joined)
         self.assertIn("Shamiko", joined)
         self.assertIn("USB Debugging", joined)
+        self.assertIn("appAccessRiskVerdict", joined)
 
     def test_readiness_clean_with_preset_locked_and_companions_no_warnings(self):
         p = base_profile(
@@ -238,6 +240,7 @@ class SelectVariantTests(unittest.TestCase):
                 "bootloader_flash_locked": "1",
                 "build_tags": "release-keys",
                 "adb_enabled": False,
+                "accessibility_services_active": False,
                 "trickystore_detected": True,
                 "pif_detected": True,
                 "root_hider_detected": True,
@@ -246,6 +249,7 @@ class SelectVariantTests(unittest.TestCase):
         r = sv.select_variant(p, preset="jp-docomo")
         self.assertTrue(r["ok"])
         self.assertEqual(r["warnings"], [])
+        self.assertEqual(r["commands"]["verify_cleanup"], "adb uninstall --user 10 com.sandbox.verify")
 
 
 if __name__ == "__main__":

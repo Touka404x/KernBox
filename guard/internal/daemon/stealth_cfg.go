@@ -47,6 +47,7 @@ type StealthConfig struct {
 	DeviceRegion        string `json:"device_region,omitempty"`
 	MiuiRegion          string `json:"miui_region"`
 	BootHWC             string `json:"boot_hwc"`
+	ActivePreset        string `json:"active_preset,omitempty"`
 }
 
 func DefaultStealthConfig(userID, exemptWorkUID int) StealthConfig {
@@ -327,13 +328,16 @@ func (d *Daemon) ReadStealthStatus() map[string]any {
 		}
 	}
 	return map[string]any{
-		"config_loaded":      loaded,
-		"config_path":        cfgPath,
-		"runtime_path":       runtimePath,
-		"zygisk_disabled":    disabledByFlag,
-		"stealth_boot_tries": tries,
-		"active_on_boot":     loaded && cfg.Enabled && !disabledByFlag,
-		"config":             cfg,
+		"config_loaded":       loaded,
+		"config_path":         cfgPath,
+		"runtime_path":        runtimePath,
+		"zygisk_disabled":     disabledByFlag,
+		"stealth_boot_tries":  tries,
+		"active_on_boot":      loaded && cfg.Enabled && !disabledByFlag,
+		"active_preset":       cfg.ActivePreset,
+		"active_region":       cfg.DeviceRegion,
+		"region_spoof_active": cfg.SpoofCarrier && cfg.SpoofDeviceRegion && strings.TrimSpace(cfg.DeviceRegion) != "",
+		"config":              cfg,
 	}
 }
 
@@ -401,6 +405,27 @@ type RegionPreset struct {
 	BootHWC             *string `json:"boot_hwc,omitempty"`
 }
 
+func normalizeRegionCode(cfg StealthConfig) string {
+	if r := strings.ToUpper(strings.TrimSpace(cfg.DeviceRegion)); r != "" {
+		return r
+	}
+	if r := strings.ToUpper(strings.TrimSpace(cfg.SimCountryISO)); r != "" {
+		return r
+	}
+	return ""
+}
+
+// DetectRegionSwitch warns when a preset change alters an already-set country,
+// which can fracture long-lived device and location trust consistency.
+func DetectRegionSwitch(prev, next StealthConfig) string {
+	p := normalizeRegionCode(prev)
+	n := normalizeRegionCode(next)
+	if p == "" || n == "" || p == n {
+		return ""
+	}
+	return fmt.Sprintf("cross-region preset switch %s -> %s may destabilize device/geo consistency", p, n)
+}
+
 // ApplyPresetFile overlays a bounded preset JSON file onto stealth.json and syncs sandbox policies when pinned.
 func (d *Daemon) ApplyPresetFile(ctx context.Context, presetPath string) (StealthConfig, error) {
 	if strings.TrimSpace(presetPath) == "" || strings.ContainsAny(presetPath, "\x00\r\n") {
@@ -453,6 +478,7 @@ func (d *Daemon) ApplyPresetFile(ctx context.Context, presetPath string) (Stealt
 
 	cfgPath, runtimePath, _ := d.resolvedStealthPaths()
 	cfg := loadExistingOrDefaultStealth(cfgPath, policy.UserID, clientUID)
+	prevCfg := cfg
 	if p.Timezone != nil {
 		cfg.Timezone = strings.TrimSpace(*p.Timezone)
 	}
@@ -510,6 +536,12 @@ func (d *Daemon) ApplyPresetFile(ctx context.Context, presetPath string) (Stealt
 	}
 	if p.BootHWC != nil {
 		cfg.BootHWC = strings.TrimSpace(*p.BootHWC)
+	}
+	if name := strings.TrimSpace(p.Name); name != "" {
+		cfg.ActivePreset = name
+	}
+	if warn := DetectRegionSwitch(prevCfg, cfg); warn != "" && d.log != nil {
+		d.log.Printf("preset-apply warning: %s", warn)
 	}
 	resolved := ResolveExemptUIDsForUser(pkgList, policy.UserID, clientUID, callerPkg)
 	cfg.ExemptUIDs = mergeExemptUIDs(cfg.ExemptUIDs, resolved, policy.UserID)

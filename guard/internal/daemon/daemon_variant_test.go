@@ -287,3 +287,39 @@ func TestToggleStealthResetsBootTriesAndHybridFallbackWithoutCgroup(t *testing.T
 		t.Fatalf("expected hybrid pause mode without cgroup freeze nodes to resolve to deep, got %q", eff)
 	}
 }
+
+func TestPresetStabilityMetadataAndRegionSwitchGuard(t *testing.T) {
+	dir := t.TempDir()
+	d := &Daemon{
+		stealthConfigPath:    filepath.Join(dir, "stealth.json"),
+		stealthRuntimePath:   filepath.Join(dir, "runtime_stealth.json"),
+		zygiskDisabledFlag:   filepath.Join(dir, "zygisk_disabled"),
+		stealthBootTriesPath: filepath.Join(dir, "stealth_boot_tries"),
+	}
+	ctx := context.Background()
+	presetDir := filepath.Join("..", "..", "..", "presets")
+
+	jpCfg, err := d.ApplyPresetFile(ctx, filepath.Join(presetDir, "jp-docomo.json"))
+	if err != nil {
+		t.Fatalf("ApplyPresetFile jp-docomo error: %v", err)
+	}
+	if jpCfg.ActivePreset != "jp-docomo" || jpCfg.DeviceRegion != "JP" {
+		t.Fatalf("unexpected jpCfg metadata: %+v", jpCfg)
+	}
+
+	st := d.ReadStealthStatus()
+	if st["active_preset"] != "jp-docomo" || st["active_region"] != "JP" || st["region_spoof_active"] != true {
+		t.Fatalf("unexpected ReadStealthStatus fields: %+v", st)
+	}
+
+	if warn := DetectRegionSwitch(StealthConfig{}, jpCfg); warn != "" {
+		t.Fatalf("expected no warning on initial neutral -> JP switch, got %q", warn)
+	}
+	if warn := DetectRegionSwitch(jpCfg, jpCfg); warn != "" {
+		t.Fatalf("expected no warning on same-region JP -> JP switch, got %q", warn)
+	}
+	usCfg := StealthConfig{DeviceRegion: "US", SimCountryISO: "us"}
+	if warn := DetectRegionSwitch(jpCfg, usCfg); !strings.Contains(warn, "JP -> US") {
+		t.Fatalf("expected JP -> US cross-region warning, got %q", warn)
+	}
+}

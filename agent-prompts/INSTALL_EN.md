@@ -54,10 +54,13 @@ Follow these steps strictly in order, report findings at each step, and pause fo
 4. If `./dist/KernBoxVerify.apk` exists and Work Profile user `<work_user>` is present, install and run verification:
    `adb install -r --user <work_user> ./dist/KernBoxVerify.apk`
    `adb shell am instrument --user <work_user> -w com.sandbox.verify/com.sandbox.verify.NetworkProbe`
-   Summarize the full `real_device_scorecard` checklist (`work_profile_hidden`, `vpn_footprint_clean`, `ipv6_leak_blocked`, `proc_mounts_clean`, `proc_maps_clean`, `su_paths_hidden`, `boot_props_locked`, `usb_debugging_off`, `keymint_rot_locked`, `carrier_and_geo_configured`):
+   Summarize all 12 items of `real_device_scorecard` (`work_profile_hidden`, `vpn_footprint_clean`, `ipv6_leak_blocked`, `proc_mounts_clean`, `proc_maps_clean`, `su_paths_hidden`, `isolated_proc_clean`, `boot_props_locked`, `usb_debugging_off`, `accessibility_risk_clean`, `keymint_rot_locked`, `carrier_and_geo_configured`):
    - If `keymint_rot_locked` is `warn`, remind me to pair TrickyStore + PlayIntegrityFix for hardware KeyMint attestation on unlocked bootloaders;
-   - If `usb_debugging_off` is `warn`, remind me to **disable USB Debugging (`adb_enabled`)** after verification finishes;
-   - Include concise rollback commands (`./agent-prompts/UPGRADE_AND_ROLLBACK.md`).
+   - If `accessibility_risk_clean` is `warn`, advise disabling non-essential Accessibility Services to satisfy `appAccessRiskVerdict`;
+   - If `usb_debugging_off` is `warn`, remind me to **disable USB Debugging (`adb_enabled`)** and unplug USB after verification finishes;
+5. **Post-verification cleanup (remove self-signed instrumentation probe before daily use)**:
+   `adb uninstall --user <work_user> com.sandbox.verify`
+   Conclude with stability hygiene reminders (keep one fixed region preset per sandbox matching your proxy exit, prefer hot-freeze over repeated data wipes/reinstalls, keep sandbox accounts isolated) and rollback commands (`./agent-prompts/UPGRADE_AND_ROLLBACK.md`).
 
 ### Safety Red Lines
 - Never flash a mismatched OEM/ABI ZIP or bypass a failed SHA-256 check.
