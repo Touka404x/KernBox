@@ -165,14 +165,32 @@ public final class StealthHookHostTest {
 
         d = BinderInterceptionPolicy.decide("user", "isSameProfileGroup", cfg, u10, null, 10, 0);
         check(d.action == BinderInterceptionPolicy.Action.WRITE_BOOL && !d.boolValue, "isSameProfileGroup(10,0) false");
+        d = BinderInterceptionPolicy.decide("user", "getCredentialOwnerProfile", cfg, u10, null);
+        check(d.action == BinderInterceptionPolicy.Action.WRITE_INT && d.intValue == 10, "getCredentialOwnerProfile 10");
+        d = BinderInterceptionPolicy.decide("user", "isDemoUser", cfg, u10, null);
+        check(d.action == BinderInterceptionPolicy.Action.WRITE_BOOL && !d.boolValue, "isDemoUser false");
+        d = BinderInterceptionPolicy.decide("user", "isRestricted", cfg, u10, null);
+        check(d.action == BinderInterceptionPolicy.Action.WRITE_BOOL && !d.boolValue, "isRestricted false");
 
         // DevicePolicyManager
         check(BinderInterceptionPolicy.decide("device_policy", "getProfileOwnerAsUser", cfg, u10, null).action
                 == BinderInterceptionPolicy.Action.WRITE_NULL_PARCELABLE, "dpm getProfileOwnerAsUser null");
+        check(BinderInterceptionPolicy.decide("device_policy", "getDeviceOwnerComponent", cfg, u10, null).action
+                == BinderInterceptionPolicy.Action.WRITE_NULL_PARCELABLE, "dpm getDeviceOwnerComponent null");
+        check(BinderInterceptionPolicy.decide("device_policy", "getDeviceOwnerComponentOnAnyUser", cfg, u10, null).action
+                == BinderInterceptionPolicy.Action.WRITE_NULL_PARCELABLE, "dpm getDeviceOwnerComponentOnAnyUser null");
+        d = BinderInterceptionPolicy.decide("device_policy", "getDeviceOwnerName", cfg, u10, null);
+        check(d.action == BinderInterceptionPolicy.Action.WRITE_STRING && d.stringValue == null, "dpm getDeviceOwnerName null");
+        d = BinderInterceptionPolicy.decide("device_policy", "getDeviceOwnerNameOnAnyUser", cfg, u10, null);
+        check(d.action == BinderInterceptionPolicy.Action.WRITE_STRING && d.stringValue == null, "dpm getDeviceOwnerNameOnAnyUser null");
         check(BinderInterceptionPolicy.decide("device_policy", "getActiveAdmins", cfg, u10, null).action
                 == BinderInterceptionPolicy.Action.WRITE_EMPTY_TYPED_LIST, "dpm getActiveAdmins empty");
         d = BinderInterceptionPolicy.decide("device_policy", "isOrganizationOwnedDeviceWithManagedProfile", cfg, u10, null);
         check(d.action == BinderInterceptionPolicy.Action.WRITE_BOOL && !d.boolValue, "dpm org owned false");
+        d = BinderInterceptionPolicy.decide("device_policy", "hasDeviceOwner", cfg, u10, null);
+        check(d.action == BinderInterceptionPolicy.Action.WRITE_BOOL && !d.boolValue, "dpm hasDeviceOwner false");
+        d = BinderInterceptionPolicy.decide("device_policy", "isDeviceManaged", cfg, u10, null);
+        check(d.action == BinderInterceptionPolicy.Action.WRITE_BOOL && !d.boolValue, "dpm isDeviceManaged false");
 
         // CrossProfileApps
         check(BinderInterceptionPolicy.decide("crossprofileapps", "getTargetUserProfiles", cfg, u10, null).action
@@ -223,6 +241,20 @@ public final class StealthHookHostTest {
                 == BinderInterceptionPolicy.Action.WRITE_NULL_PARCELABLE, "phone cell location null");
         d = BinderInterceptionPolicy.decide("phone", "getNetworkCountryIsoForPhone", cfg, u10, null);
         check(d.action == BinderInterceptionPolicy.Action.WRITE_STRING && "jp".equals(d.stringValue), "phone country jp");
+        d = BinderInterceptionPolicy.decide("phone", "getSimState", cfg, u10, null);
+        check(d.action == BinderInterceptionPolicy.Action.WRITE_INT && d.intValue == 5, "phone getSimState ready");
+        d = BinderInterceptionPolicy.decide("phone", "getSimOperator", cfg, u10, null);
+        check(d.action == BinderInterceptionPolicy.Action.WRITE_STRING && "44010".equals(d.stringValue), "phone getSimOperator 44010");
+        d = BinderInterceptionPolicy.decide("phone", "getNetworkOperator", cfg, u10, null);
+        check(d.action == BinderInterceptionPolicy.Action.WRITE_STRING && "44010".equals(d.stringValue), "phone getNetworkOperator 44010");
+        d = BinderInterceptionPolicy.decide("phone", "getSimCountryIso", cfg, u10, null);
+        check(d.action == BinderInterceptionPolicy.Action.WRITE_STRING && "jp".equals(d.stringValue), "phone getSimCountryIso jp");
+        d = BinderInterceptionPolicy.decide("phone", "getNetworkCountryIso", cfg, u10, null);
+        check(d.action == BinderInterceptionPolicy.Action.WRITE_STRING && "jp".equals(d.stringValue), "phone getNetworkCountryIso jp");
+        d = BinderInterceptionPolicy.decide("phone", "getSimOperatorName", cfg, u10, null);
+        check(d.action == BinderInterceptionPolicy.Action.WRITE_STRING && "NTT DOCOMO".equals(d.stringValue), "phone getSimOperatorName");
+        d = BinderInterceptionPolicy.decide("phone", "getNetworkOperatorName", cfg, u10, null);
+        check(d.action == BinderInterceptionPolicy.Action.WRITE_STRING && "NTT DOCOMO".equals(d.stringValue), "phone getNetworkOperatorName");
 
         check(BinderInterceptionPolicy.carrierIdForOperator("44010") == 850, "carrierId JP NTT DOCOMO");
         check(BinderInterceptionPolicy.carrierIdForOperator("310260") == 1, "carrierId US T-Mobile");

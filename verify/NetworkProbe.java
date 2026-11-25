@@ -172,6 +172,9 @@ public final class NetworkProbe extends Instrumentation {
                 report.put("https_ipv6", networkProbes.getJSONObject("ipv6_blocked"));
             }
             report.put("network_probes", networkProbes);
+            if (!networkFast) {
+                report.put("real_device_scorecard", buildRealDeviceScorecard(report, env, networkProbes));
+            }
             report.put("probe_mono_end_ns", SystemClock.elapsedRealtimeNanos());
 
             result.putString("network", report.toString());
@@ -712,6 +715,115 @@ public final class NetworkProbe extends Instrumentation {
                 buffer.position(end);
             }
             throw new IOException("STUN mapped address");
+        }
+    }
+
+    private static JSONObject buildRealDeviceScorecard(
+            JSONObject report, JSONObject env, JSONObject networkProbes) {
+        JSONObject scorecard = new JSONObject();
+        JSONObject checks = new JSONObject();
+        int[] counts = new int[3]; // [passed, warnings, failed]
+        try {
+            JSONObject id = report.optJSONObject("identity");
+            boolean workHidden = id != null
+                && !id.optBoolean("is_managed_profile", true)
+                && id.optInt("user_profiles_count", 2) <= 1
+                && !id.optBoolean("dpm_is_profile_owner_target", true);
+            recordScorecardCheck(checks, counts, "work_profile_hidden", workHidden ? "pass" : "fail");
+
+            JSONObject conn = env != null ? env.optJSONObject("connectivity") : null;
+            boolean hasTun = false;
+            JSONArray ifaces = conn != null ? conn.optJSONArray("java_net_interfaces") : null;
+            if (ifaces != null) {
+                for (int i = 0; i < ifaces.length(); i++) {
+                    String ifName = ifaces.optString(i, "");
+                    if (ifName.startsWith("tun")) {
+                        hasTun = true;
+                        break;
+                    }
+                }
+            }
+            boolean vpnClean = conn != null
+                && !conn.optBoolean("transport_vpn", false)
+                && !conn.optBoolean("all_networks_has_vpn", false)
+                && !hasTun;
+            recordScorecardCheck(checks, counts, "vpn_footprint_clean", vpnClean ? "pass" : "fail");
+
+            JSONObject ipv6 = networkProbes != null ? networkProbes.optJSONObject("ipv6_blocked") : null;
+            boolean ipv6Blocked = ipv6 != null && ipv6.optBoolean("blocked", false);
+            recordScorecardCheck(checks, counts, "ipv6_leak_blocked", ipv6Blocked ? "pass" : "fail");
+
+            JSONObject proc = report.optJSONObject("proc_hygiene");
+            JSONObject mounts = proc != null ? proc.optJSONObject("mountinfo") : null;
+            boolean mountsClean = mounts != null
+                && mounts.optBoolean("readable", false)
+                && mounts.optInt("suspicious_count", -1) == 0;
+            recordScorecardCheck(checks, counts, "proc_mounts_clean", mountsClean ? "pass" : "fail");
+
+            JSONObject maps = proc != null ? proc.optJSONObject("maps") : null;
+            boolean mapsClean = maps != null
+                && maps.optBoolean("readable", false)
+                && maps.optInt("suspicious_count", -1) == 0
+                && maps.optInt("anon_rwxp_count", -1) == 0
+                && maps.optInt("memfd_count", -1) == 0;
+            recordScorecardCheck(checks, counts, "proc_maps_clean", mapsClean ? "pass" : "fail");
+
+            JSONObject suPaths = proc != null ? proc.optJSONObject("su_paths") : null;
+            boolean suHidden = suPaths != null
+                && suPaths.has("any_visible")
+                && !suPaths.optBoolean("any_visible", true);
+            recordScorecardCheck(checks, counts, "su_paths_hidden", suHidden ? "pass" : "fail");
+
+            JSONObject bp = proc != null ? proc.optJSONObject("boot_props") : null;
+            boolean bootLocked = bp != null
+                && "green".equalsIgnoreCase(bp.optString("ro.boot.verifiedbootstate", ""))
+                && "1".equals(bp.optString("ro.boot.flash.locked", ""))
+                && "locked".equalsIgnoreCase(bp.optString("ro.boot.vbmeta.device_state", ""))
+                && "0".equals(bp.optString("ro.debuggable", ""))
+                && "1".equals(bp.optString("ro.secure", ""));
+            recordScorecardCheck(checks, counts, "boot_props_locked", bootLocked ? "pass" : "fail");
+
+            JSONObject sg = env != null ? env.optJSONObject("settings_global") : null;
+            boolean adbOff = sg != null && sg.optInt("adb_enabled", -1) == 0;
+            recordScorecardCheck(checks, counts, "usb_debugging_off", adbOff ? "pass" : "warn");
+
+            JSONObject integrity = report.optJSONObject("integrity");
+            JSONObject rot = integrity != null ? integrity.optJSONObject("root_of_trust") : null;
+            boolean keymintLocked = integrity != null
+                && "ok".equals(integrity.optString("status", ""))
+                && rot != null
+                && rot.optBoolean("device_locked", false)
+                && rot.optInt("verified_boot_state", -1) == 0;
+            recordScorecardCheck(checks, counts, "keymint_rot_locked", keymintLocked ? "pass" : "warn");
+
+            JSONObject geo = env != null ? env.optJSONObject("geo") : null;
+            boolean geoConfigured = geo != null
+                && !geo.optString("timezone", "").trim().isEmpty()
+                && !geo.optString("locale", "").trim().isEmpty()
+                && !geo.optString("sim_country_iso", "").trim().isEmpty()
+                && !geo.optString("sim_operator", "").trim().isEmpty();
+            recordScorecardCheck(checks, counts, "carrier_and_geo_configured", geoConfigured ? "pass" : "warn");
+
+            scorecard.put("passed", counts[0]);
+            scorecard.put("warnings", counts[1]);
+            scorecard.put("failed", counts[2]);
+            scorecard.put("checks", checks);
+        } catch (Throwable t) {
+            try {
+                scorecard.put("error", t.getClass().getSimpleName() + ":" + safeStr(t.getMessage()));
+            } catch (Exception ignored) {}
+        }
+        return scorecard;
+    }
+
+    private static void recordScorecardCheck(JSONObject checks, int[] counts, String name, String status) throws Exception {
+        checks.put(name, status);
+        if ("pass".equals(status)) {
+            counts[0]++;
+        } else if ("warn".equals(status)) {
+            counts[1]++;
+        } else {
+            counts[2]++;
         }
     }
 

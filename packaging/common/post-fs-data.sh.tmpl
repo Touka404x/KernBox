@@ -52,7 +52,35 @@ if [ ! -e "$MODDIR/zygisk_disabled" ]; then
         "$RESETPROP" -n ro.boot.verifiedbootstate green 2>/dev/null || true
         "$RESETPROP" -n ro.boot.flash.locked 1 2>/dev/null || true
         "$RESETPROP" -n ro.boot.vbmeta.device_state locked 2>/dev/null || true
+        "$RESETPROP" -n ro.boot.veritymode enforcing 2>/dev/null || true
         "$RESETPROP" -n ro.boot.warranty_bit 0 2>/dev/null || true
+        "$RESETPROP" -n sys.oem_unlock_allowed 0 2>/dev/null || true
+
+        for wprop in ro.warranty_bit ro.vendor.boot.warranty_bit ro.vendor.warranty_bit; do
+            wval=$(getprop "$wprop" 2>/dev/null || true)
+            if [ -n "$wval" ] && [ "$wval" != "0" ]; then
+                "$RESETPROP" -n "$wprop" 0 2>/dev/null || true
+            fi
+        done
+
+        if [ "$(getprop ro.debuggable 2>/dev/null || true)" = "1" ]; then
+            "$RESETPROP" -n ro.debuggable 0 2>/dev/null || true
+        fi
+        if [ "$(getprop ro.secure 2>/dev/null || true)" = "0" ]; then
+            "$RESETPROP" -n ro.secure 1 2>/dev/null || true
+        fi
+        if [ "$(getprop ro.adb.secure 2>/dev/null || true)" = "0" ]; then
+            "$RESETPROP" -n ro.adb.secure 1 2>/dev/null || true
+        fi
+
+        btags=$(getprop ro.build.tags 2>/dev/null || true)
+        if [ "$btags" = "test-keys" ] || [ "$btags" = "dev-keys" ]; then
+            "$RESETPROP" -n ro.build.tags release-keys 2>/dev/null || true
+        fi
+        btype=$(getprop ro.build.type 2>/dev/null || true)
+        if [ "$btype" = "userdebug" ] || [ "$btype" = "eng" ]; then
+            "$RESETPROP" -n ro.build.type user 2>/dev/null || true
+        fi
     fi
 fi
 

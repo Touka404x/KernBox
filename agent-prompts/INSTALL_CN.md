@@ -48,13 +48,17 @@
 2. 运行：
    `adb shell su -c "/data/adb/sandbox_guard/sandbox_guard ctl variant-info && /data/adb/sandbox_guard/sandbox_guard ctl status && /data/adb/sandbox_guard/sandbox_guard ctl stealth-status"`
    核对输出里的 `oem`、`kernel`、`transport` 是否与选定变体一致，且 `stealth-status` 中 `stealth_boot_tries` 已归零、`zygisk_disabled` 为 `false`（未触发熔断）。
-3. 询问我是否需要应用区域伪装预设（如 `./presets/jp-docomo.json`、`./presets/us-tmobile.json`、`./presets/neutral.json` 等）；如需要，运行：
-   `adb push "./presets/<preset>.json" "/data/local/tmp/<preset>.json"`
-   `adb shell su -c "/data/adb/sandbox_guard/sandbox_guard ctl preset-apply /data/local/tmp/<preset>.json"`
+3. **主动询问我的代理出口国家/地区并应用对应区域预设**：
+   - 说明默认的 `neutral` 配置会将 `spoof_carrier` 和 `spoof_device_region` 保持关闭；请让我从 `./presets/` 中选择与代理出口一致的预设（`jp-docomo`、`us-tmobile`、`uk-ee`、`sg-singtel`、`de-telekom` 或继续保持 `neutral`）：
+   - `adb push "./presets/<preset>.json" "/data/local/tmp/<preset>.json"`
+   - `adb shell su -c "/data/adb/sandbox_guard/sandbox_guard ctl preset-apply /data/local/tmp/<preset>.json"`
 4. 如 `./dist/KernBoxVerify.apk` 存在且工作资料用户 `<work_user>` 已就绪，安装并运行验证探针：
    `adb install -r --user <work_user> ./dist/KernBoxVerify.apk`
    `adb shell am instrument --user <work_user> -w com.sandbox.verify/com.sandbox.verify.NetworkProbe`
-   结合探针报告（网络隔离、IPv6 阻断、`Mountinfo`/`Maps` 卫生扫描、受控匿名化时区/语言/运营商检查），给我一份清晰的验收结果与回滚备忘（参考 `./agent-prompts/UPGRADE_AND_ROLLBACK.md`）。
+   解析输出的 `real_device_scorecard` 逐项汇报（`work_profile_hidden`、`vpn_footprint_clean`、`ipv6_leak_blocked`、`proc_mounts_clean`、`proc_maps_clean`、`su_paths_hidden`、`boot_props_locked`、`usb_debugging_off`、`keymint_rot_locked`、`carrier_and_geo_configured`）：
+   - 若 `keymint_rot_locked` 为 `warn`，提醒我未锁 BL 机型的硬件密钥认证需搭配 TrickyStore + PlayIntegrityFix 模块；
+   - 若 `usb_debugging_off` 为 `warn`，提醒我在确认验收全部通过后**关闭手机「USB 调试」并拔线**再正式运行目标 App；
+   - 并附带一份简明回滚备忘（参考 `./agent-prompts/UPGRADE_AND_ROLLBACK.md`）。
 
 ### 安全红线（绝对遵守）
 - 禁止修改本机的 `~/.ssh`、系统hosts，或向公网上传任何 `device_profile.json` / 原始日志。

@@ -209,6 +209,44 @@ class SelectVariantTests(unittest.TestCase):
         self.assertTrue(r["ok"])
         self.assertTrue(any("TProxy" in w for w in r["warnings"]))
 
+    def test_readiness_warnings_for_unlocked_bl_magisk_adb_and_neutral_preset(self):
+        p = base_profile(
+            root_manager="magisk",
+            root_version="27.0:MAGISK",
+            real_device_readiness={
+                "bootloader_verified_state": "orange",
+                "bootloader_flash_locked": "0",
+                "build_tags": "release-keys",
+                "adb_enabled": True,
+                "trickystore_detected": False,
+                "pif_detected": False,
+                "root_hider_detected": False,
+            },
+        )
+        r = sv.select_variant(p)
+        self.assertTrue(r["ok"])
+        joined = "\n".join(r["warnings"])
+        self.assertIn("neutral", joined)
+        self.assertIn("TrickyStore", joined)
+        self.assertIn("Shamiko", joined)
+        self.assertIn("USB Debugging", joined)
+
+    def test_readiness_clean_with_preset_locked_and_companions_no_warnings(self):
+        p = base_profile(
+            real_device_readiness={
+                "bootloader_verified_state": "green",
+                "bootloader_flash_locked": "1",
+                "build_tags": "release-keys",
+                "adb_enabled": False,
+                "trickystore_detected": True,
+                "pif_detected": True,
+                "root_hider_detected": True,
+            },
+        )
+        r = sv.select_variant(p, preset="jp-docomo")
+        self.assertTrue(r["ok"])
+        self.assertEqual(r["warnings"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

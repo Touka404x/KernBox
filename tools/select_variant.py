@@ -173,6 +173,33 @@ def select_variant(profile: Dict[str, Any], version: str = "1.0.0", preset: Opti
     if not work_users:
         warnings.append("No active Work Profile user detected yet; provision User 10 via Shelter / TestDPC / your profile controller before activating guard rules.")
 
+    readiness = profile.get("real_device_readiness")
+    if not isinstance(readiness, dict):
+        readiness = {}
+    if not preset:
+        warnings.append(
+            "Default 'neutral' config leaves spoof_carrier=false and spoof_device_region=false; "
+            "pass --preset <name> (e.g. jp-docomo, us-tmobile, uk-ee, sg-singtel, de-telekom) "
+            "or run `ctl preset-apply` to align carrier/locale/timezone with your proxy exit country."
+        )
+    vb_state = str(readiness.get("bootloader_verified_state") or "").strip().lower()
+    flash_locked = str(readiness.get("bootloader_flash_locked") or "").strip()
+    if ((vb_state and vb_state != "green") or flash_locked == "0") and not readiness.get("trickystore_detected"):
+        warnings.append(
+            "Unlocked bootloader detected without TrickyStore: hardware KeyMint RootOfTrust attestation "
+            "will still reveal unlocked state unless paired with TrickyStore (+ PlayIntegrityFix)."
+        )
+    if root == "magisk" and readiness.get("root_hider_detected") is False:
+        warnings.append(
+            "Magisk detected without Shamiko / Zygisk Assistant / SuSFS: enable Enforce DenyList "
+            "(or install Shamiko) so /proc/self/mountinfo and su paths stay hidden."
+        )
+    if readiness.get("adb_enabled") is True:
+        warnings.append(
+            "USB Debugging (adb_enabled=1) is active: turn off USB Debugging after installation and "
+            "verification so apps inspecting Settings.Global.ADB_ENABLED see a retail device."
+        )
+
     artifact = f"KernBox-{oem}-{kernel}-{root}-arm64.zip" if (not errors and root) else None
 
     result: Dict[str, Any] = {

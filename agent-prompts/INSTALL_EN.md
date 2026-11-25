@@ -47,13 +47,17 @@ Follow these steps strictly in order, report findings at each step, and pause fo
 2. Run:
    `adb shell su -c "/data/adb/sandbox_guard/sandbox_guard ctl variant-info && /data/adb/sandbox_guard/sandbox_guard ctl status && /data/adb/sandbox_guard/sandbox_guard ctl stealth-status"`
    Verify `oem`, `kernel`, and `transport` match `<artifact>`, and verify in `stealth-status` that `stealth_boot_tries` is `0` and `zygisk_disabled` is `false` (stealth kill-switch did not trigger).
-3. Ask whether I want to apply a region preset from `./presets/` (e.g. `neutral`, `jp-docomo`, `us-tmobile`, `uk-ee`, `sg-singtel`, `de-telekom`). If yes:
-   `adb push "./presets/<preset>.json" "/data/local/tmp/<preset>.json"`
-   `adb shell su -c "/data/adb/sandbox_guard/sandbox_guard ctl preset-apply /data/local/tmp/<preset>.json"`
+3. **Explicitly ask which proxy exit country/region I use and apply the matching preset**:
+   - Note that the default `neutral` config keeps `spoof_carrier` and `spoof_device_region` disabled; ask me to pick a matching preset under `./presets/` (`jp-docomo`, `us-tmobile`, `uk-ee`, `sg-singtel`, `de-telekom`, or keep `neutral`):
+   - `adb push "./presets/<preset>.json" "/data/local/tmp/<preset>.json"`
+   - `adb shell su -c "/data/adb/sandbox_guard/sandbox_guard ctl preset-apply /data/local/tmp/<preset>.json"`
 4. If `./dist/KernBoxVerify.apk` exists and Work Profile user `<work_user>` is present, install and run verification:
    `adb install -r --user <work_user> ./dist/KernBoxVerify.apk`
    `adb shell am instrument --user <work_user> -w com.sandbox.verify/com.sandbox.verify.NetworkProbe`
-   Summarize the health, network isolation, proc hygiene, and rollback commands (`./agent-prompts/UPGRADE_AND_ROLLBACK.md`).
+   Summarize the full `real_device_scorecard` checklist (`work_profile_hidden`, `vpn_footprint_clean`, `ipv6_leak_blocked`, `proc_mounts_clean`, `proc_maps_clean`, `su_paths_hidden`, `boot_props_locked`, `usb_debugging_off`, `keymint_rot_locked`, `carrier_and_geo_configured`):
+   - If `keymint_rot_locked` is `warn`, remind me to pair TrickyStore + PlayIntegrityFix for hardware KeyMint attestation on unlocked bootloaders;
+   - If `usb_debugging_off` is `warn`, remind me to **disable USB Debugging (`adb_enabled`)** after verification finishes;
+   - Include concise rollback commands (`./agent-prompts/UPGRADE_AND_ROLLBACK.md`).
 
 ### Safety Red Lines
 - Never flash a mismatched OEM/ABI ZIP or bypass a failed SHA-256 check.

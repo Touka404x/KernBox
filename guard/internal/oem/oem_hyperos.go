@@ -7,7 +7,7 @@ var currentProfile = Profile{
 	ExcludedCloneUsers: []int{999},
 	SupportsHideApps:   true,
 	FreezerName:        "millet",
-	DefaultDeviceName:  "Android",
+	DefaultDeviceName:  "Xiaomi",
 	HideProviderURI:    "content://com.miui.home.app.hide",
 	HideSecureListKey:  "miui_home_hide_app_list",
 	ExtraProtectedPackages: []string{

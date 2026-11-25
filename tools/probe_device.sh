@@ -51,6 +51,10 @@ echo "HYPEROS=$(getprop_s ro.mi.os.version.name)"
 echo "OPLUSROM=$(getprop_s ro.build.version.oplusrom)"
 echo "ONEUI=$(getprop_s ro.build.version.oneui)"
 echo "KREL=$(uname -r 2>/dev/null | tr -d "\r\n")"
+echo "VBSTATE=$(getprop_s ro.boot.verifiedbootstate)"
+echo "FLOCKED=$(getprop_s ro.boot.flash.locked)"
+echo "BTAGS=$(getprop_s ro.build.tags)"
+echo "ADB_EN=$(settings get global adb_enabled 2>/dev/null | tr -d "\r\n")"
 echo "USERS_V=$(cmd user list -v 2>/dev/null | tr "\n" "|" | tr -d "\r")"
 echo "USERS_PM=$(pm list users 2>/dev/null | tr "\n" "|" | tr -d "\r")"
 su -c "
@@ -77,7 +81,7 @@ su -c "
   elif [ -d /data/adb/magisk ]; then
     rmgr=magisk
   fi
-  zy=0
+  zy=0; ts=0; pif=0; hider=0
   for p in /data/adb/modules/*; do
     [ -d \"\$p\" ] && [ ! -e \"\$p/disable\" ] && [ ! -e \"\$p/remove\" ] || continue
     mod_id=
@@ -89,9 +93,21 @@ su -c "
     case \"\$mod_id:\$base_low\" in
       *zygisksu*|*rezygisk*|*zygisknext*|*zygisk_next*) zy=1 ;;
     esac
+    case \"\$mod_id:\$base_low\" in
+      *tricky_store*|*trickystore*) ts=1 ;;
+    esac
+    case \"\$mod_id:\$base_low\" in
+      *playintegrityfix*|*playintegrity*|*pif*|*playcurl*) pif=1 ;;
+    esac
+    case \"\$mod_id:\$base_low\" in
+      *shamiko*|*zygisk_assistant*|*susfs*) hider=1 ;;
+    esac
   done
   if [ \"\$zy\" = 0 ] && [ \"\$rmgr\" = magisk ]; then
     magisk --sqlite \"SELECT value FROM settings WHERE key='\''zygisk'\''\" 2>/dev/null | grep -q 1 && zy=1
+  fi
+  if [ \"\$rmgr\" = ksu ] || [ \"\$rmgr\" = apatch ]; then
+    hider=1
   fi
   cg2=0
   if ls /sys/fs/cgroup/uid_*/cgroup.freeze >/dev/null 2>&1 || [ -e /sys/fs/cgroup/uid_0/cgroup.freeze ]; then
@@ -107,7 +123,7 @@ su -c "
   fi
   inst=0
   { [ -d /data/adb/modules/sandbox_guard ] || [ -x /data/adb/sandbox_guard/sandbox_guard ]; } && inst=1
-  printf \"ROOT=%s\nROOTVER=%s\nZYGISK=%s\nCG2=%s\nTPROXY=%s\nINSTALLED=%s\n\" \"\$rmgr\" \"\$rver\" \"\$zy\" \"\$cg2\" \"\$tp\" \"\$inst\"
+  printf \"ROOT=%s\nROOTVER=%s\nZYGISK=%s\nCG2=%s\nTPROXY=%s\nINSTALLED=%s\nTS=%s\nPIF=%s\nHIDER=%s\n\" \"\$rmgr\" \"\$rver\" \"\$zy\" \"\$cg2\" \"\$tp\" \"\$inst\" \"\$ts\" \"\$pif\" \"\$hider\"
 " 2>/dev/null || echo "ROOT=none"
 ')
 
@@ -160,6 +176,15 @@ print(json.dumps({
     "tproxy_capable": kv.get("TPROXY") == "1",
     "work_profile_users": sorted(work),
     "existing_guard_installed": kv.get("INSTALLED") == "1",
+    "real_device_readiness": {
+        "bootloader_verified_state": kv.get("VBSTATE", ""),
+        "bootloader_flash_locked": kv.get("FLOCKED", ""),
+        "build_tags": kv.get("BTAGS", ""),
+        "adb_enabled": kv.get("ADB_EN") == "1",
+        "trickystore_detected": kv.get("TS") == "1",
+        "pif_detected": kv.get("PIF") == "1",
+        "root_hider_detected": kv.get("HIDER") == "1",
+    },
 }, indent=2))
 ')
 

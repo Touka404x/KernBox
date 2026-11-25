@@ -333,6 +333,11 @@ public final class BinderInterceptionPolicy {
                 return Decision.writeNullParcelable();
             case "getProfileParentId":
                 return Decision.writeInt(cfg.sandboxUserId);
+            case "getCredentialOwnerProfile":
+                return Decision.writeInt(cfg.sandboxUserId);
+            case "isDemoUser":
+            case "isRestricted":
+                return Decision.writeBool(false);
             default:
                 return Decision.passthrough();
         }
@@ -346,13 +351,19 @@ public final class BinderInterceptionPolicy {
             case "getProfileOwnerAsUser":
             case "getProfileOwnerComponent":
             case "getProfileOwnerOrDeviceOwnerSupervisionComponent":
+            case "getDeviceOwnerComponent":
+            case "getDeviceOwnerComponentOnAnyUser":
                 return Decision.writeNullParcelable();
             case "getProfileOwnerName":
             case "getProfileOwnerNameAsUser":
+            case "getDeviceOwnerName":
+            case "getDeviceOwnerNameOnAnyUser":
                 return Decision.writeString(null);
             case "isManagedProfile":
             case "isProfileOwnerApp":
             case "isOrganizationOwnedDeviceWithManagedProfile":
+            case "hasDeviceOwner":
+            case "isDeviceManaged":
                 return Decision.writeBool(false);
             case "getActiveAdmins":
             case "getPolicyManagedProfiles":
@@ -548,24 +559,31 @@ public final class BinderInterceptionPolicy {
             case "getCellLocation":
                 return Decision.writeNullParcelable();
             case "getSimStateForSlotIndex":
+            case "getSimState":
                 return Decision.writeInt(5); // TelephonyManager.SIM_STATE_READY
             case "getPhoneType":
                 return Decision.writeInt(1); // TelephonyManager.PHONE_TYPE_GSM
             case "getSimOperatorForPhone":
             case "getSimOperatorNumericForPhone":
+            case "getSimOperator":
                 return Decision.writeString(cfg.simOperator);
             case "getNetworkOperatorForPhone":
+            case "getNetworkOperator":
                 return Decision.writeString(cfg.networkOperator);
             case "getSimCountryIsoForPhone":
+            case "getSimCountryIso":
                 return Decision.writeString(cfg.simCountryIso);
             case "getNetworkCountryIsoForPhone":
             case "getCountryIso":
+            case "getNetworkCountryIso":
                 return Decision.writeString(cfg.networkCountryIso);
             case "getSimOperatorNameForPhone":
             case "getSubscriptionCarrierName":
             case "getSubscriptionSpecificCarrierName":
+            case "getSimOperatorName":
                 return Decision.writeString(cfg.simOperatorName);
             case "getNetworkOperatorNameForPhone":
+            case "getNetworkOperatorName":
                 return Decision.writeString(cfg.networkOperatorName);
             case "getSubscriptionCarrierId":
             case "getSubscriptionSpecificCarrierId":

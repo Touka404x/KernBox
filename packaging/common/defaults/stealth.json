@@ -22,7 +22,7 @@
   "spoof_bluetooth": true,
   "spoof_device_region": false,
   "sandbox_link_ipv4": "10.172.10.2",
-  "device_name": "Android",
+  "device_name": "",
   "device_region": "",
   "boot_hwc": ""
 }

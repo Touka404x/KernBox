@@ -7,7 +7,7 @@ var currentProfile = Profile{
 	ExcludedCloneUsers: []int{999},
 	SupportsHideApps:   false,
 	FreezerName:        "hans",
-	DefaultDeviceName:  "Android",
+	DefaultDeviceName:  "OnePlus",
 	ExtraProtectedPackages: []string{
 		"com.oplus.securitypermission",
 		"com.coloros.securitypermission",
