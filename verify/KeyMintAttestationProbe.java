@@ -28,6 +28,11 @@ final class KeyMintAttestationProbe {
     private static final String ATTESTATION_OID = "1.3.6.1.4.1.11129.2.1.17";
     private static final int TAG_ROOT_OF_TRUST = 704;
 
+    @SuppressWarnings("deprecation")
+    private static boolean isInsideSecureHardwareCompat(KeyInfo keyInfo) {
+        return keyInfo.isInsideSecureHardware();
+    }
+
     private KeyMintAttestationProbe() {}
 
     static JSONObject probe(String aliasSuffix) {
@@ -55,7 +60,7 @@ final class KeyMintAttestationProbe {
                 if (Build.VERSION.SDK_INT >= 31) {
                     out.put("key_security_level", keyInfo.getSecurityLevel());
                 } else {
-                    out.put("inside_secure_hardware", keyInfo.isInsideSecureHardware());
+                    out.put("inside_secure_hardware", isInsideSecureHardwareCompat(keyInfo));
                 }
             } catch (Throwable inner) {
                 out.put("key_info_error", inner.getClass().getSimpleName());

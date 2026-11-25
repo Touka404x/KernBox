@@ -255,7 +255,7 @@ func TestRunProbeInstrumentationParsing(t *testing.T) {
 			"cmd package list packages --user 10 " + probePkg:     "package:" + probePkg + "\n",
 		}}
 		if instrErr == nil {
-			r.out["am instrument -w -r --user 10 "+probePkg+"/.NetworkProbe"] = instrOut
+			r.out["am instrument -w -r --user 10 -e compact true "+probePkg+"/.NetworkProbe"] = instrOut
 		}
 		return &Daemon{
 			runner:       r,

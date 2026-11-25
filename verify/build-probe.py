@@ -163,6 +163,8 @@ def build_apk(args: argparse.Namespace) -> pathlib.Path:
             "8",
             "-encoding",
             "UTF-8",
+            "-Xlint:all,-options",
+            "-Werror",
             "-classpath",
             tc["platform"],
             "-d",
@@ -175,7 +177,7 @@ def build_apk(args: argparse.Namespace) -> pathlib.Path:
             for compiled in sorted(classes.rglob("*.class"), key=lambda p: p.relative_to(classes).as_posix()):
                 archive.writestr(fixed_zipinfo(compiled.relative_to(classes).as_posix()), compiled.read_bytes())
 
-        run_cmd(tc, tc["d8"], "--min-api", "26", "--lib", tc["platform"], "--output", staging, jar)
+        run_cmd(tc, tc["d8"], "--min-api", "26", "--release", "--lib", tc["platform"], "--output", staging, jar)
         res_dir = staging / "res"
         stage_icon_resources(res_dir)
         compiled_res = staging / "compiled-res.zip"
@@ -204,6 +206,7 @@ def build_apk(args: argparse.Namespace) -> pathlib.Path:
 
         aligned = staging / "aligned.apk"
         run_cmd(tc, tc["zipalign"], "-f", "4", unsigned, aligned)
+        ks_pass_arg = f"env:{args.storepass_env}" if args.storepass_env else f"pass:{storepass}"
         run_cmd(
             tc,
             tc["apksigner"],
@@ -213,7 +216,7 @@ def build_apk(args: argparse.Namespace) -> pathlib.Path:
             "--ks-key-alias",
             alias,
             "--ks-pass",
-            f"pass:{storepass}",
+            ks_pass_arg,
             "--out",
             output,
             aligned,
@@ -231,6 +234,7 @@ def main(argv=None) -> int:
     p.add_argument("--keystore", help="Optional PKCS12/JKS release keystore path (ephemeral debug key if omitted)")
     p.add_argument("--alias", default="sandbox-verify-probe", help="Keystore key alias")
     p.add_argument("--storepass", default="android", help="Keystore password")
+    p.add_argument("--storepass-env", default="", help="Env var holding keystore password")
     p.add_argument("--jdk", help="JDK home path (overrides JAVA_HOME)")
     p.add_argument("--sdk", help="Android SDK path (overrides ANDROID_SDK_ROOT)")
     args = p.parse_args(argv)

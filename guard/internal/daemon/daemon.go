@@ -3133,14 +3133,15 @@ func (d *Daemon) runOnDemandProbe(ctx context.Context) (map[string]any, error) {
 	if err == nil && strings.Contains(pkgs, "package:"+contracts.VerifyProbePackage) {
 		res["probe_apk_installed"] = true
 		out, ierr := d.runner.Run(ctx, 20*time.Second, "", "am", "instrument", "-w", "-r", "--user", u,
-			contracts.VerifyProbePackage+"/.NetworkProbe")
-		res["instrument_output"] = strings.TrimSpace(out)
+			"-e", "compact", "true", contracts.VerifyProbePackage+"/.NetworkProbe")
 		if ierr != nil {
+			res["instrument_output"] = strings.TrimSpace(out)
 			res["instrument_ok"] = false
 			return res, fmt.Errorf("am instrument failed: %w", ierr)
 		}
 		parsed, perr := ParseInstrumentationResult(out)
 		if perr != nil {
+			res["instrument_output"] = strings.TrimSpace(out)
 			res["instrument_ok"] = false
 			return res, perr
 		}

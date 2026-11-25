@@ -368,6 +368,10 @@ public final class BinderInterceptionPolicy {
             case "getActiveAdmins":
             case "getPolicyManagedProfiles":
                 return Decision.writeEmptyTypedList();
+            case "getDeviceOwnerUserId":
+                return Decision.writeInt(-1);
+            case "isAdminActiveAsUser":
+                return Decision.writeBool(false);
             default:
                 return Decision.passthrough();
         }
@@ -434,6 +438,9 @@ public final class BinderInterceptionPolicy {
             return Decision.passthrough();
         }
         if (!cfg.blockWifiScan) {
+            if ("getDhcpInfo".equals(m) && cfg.sanitizeNetwork) {
+                return Decision.writeNullParcelable();
+            }
             return Decision.passthrough();
         }
         switch (m) {
@@ -441,6 +448,8 @@ public final class BinderInterceptionPolicy {
                 return Decision.writeEmptyTypedList();
             case "getConnectionInfo":
                 return Decision.writeRedactedWifiInfo();
+            case "getDhcpInfo":
+                return Decision.writeNullParcelable();
             default:
                 return Decision.passthrough();
         }
@@ -555,8 +564,12 @@ public final class BinderInterceptionPolicy {
         }
         switch (m) {
             case "getAllCellInfo":
+            case "getNeighboringCellInfo":
                 return Decision.writeEmptyTypedList();
+            case "requestCellInfoUpdate":
+                return Decision.writeVoid();
             case "getCellLocation":
+            case "getCellLocationForSubscriber":
                 return Decision.writeNullParcelable();
             case "getSimStateForSlotIndex":
             case "getSimState":
@@ -580,6 +593,8 @@ public final class BinderInterceptionPolicy {
             case "getSimOperatorNameForPhone":
             case "getSubscriptionCarrierName":
             case "getSubscriptionSpecificCarrierName":
+            case "getSimCarrierIdName":
+            case "getSimSpecificCarrierIdName":
             case "getSimOperatorName":
                 return Decision.writeString(cfg.simOperatorName);
             case "getNetworkOperatorNameForPhone":

@@ -111,6 +111,11 @@ int main() {
         assert(std::string(res) == "44010,44010");
         assert(res == stack_buf);
 
+        assert(stealth::lookupSpoofedPropertyIntoBuf(baked, "gsm.sim.state", "ABSENT", stack_buf, sizeof(stack_buf), &res));
+        assert(std::string(res) == "READY");
+        assert(stealth::lookupSpoofedPropertyIntoBuf(baked, "gsm.sim.state", "ABSENT,NOT_READY", stack_buf, sizeof(stack_buf), &res));
+        assert(std::string(res) == "READY,READY");
+
         assert(!stealth::lookupSpoofedPropertyIntoBuf(baked, "ro.build.fingerprint", "foo", stack_buf, sizeof(stack_buf), &res));
     }
 
@@ -167,7 +172,7 @@ int main() {
 
 #if defined(OEM_HYPEROS)
         assert(std::string(stealth::kOemProfileName) == "hyperos");
-        assert(stealth::kBakedPropCount == 16);
+        assert(stealth::kBakedPropCount == 17);
         assert(stealth::lookupSpoofedPropertyIntoBuf(baked, "ro.boot.hwc", "CN", stack_buf, sizeof(stack_buf), &res) && std::string(res) == "JP");
         assert(stealth::lookupSpoofedPropertyIntoBuf(baked, "ro.miui.region", "CN", stack_buf, sizeof(stack_buf), &res) && std::string(res) == "JP");
         assert(stealth::lookupSpoofedPropertyIntoBuf(baked, "ro.miui.cust_variant", "cn", stack_buf, sizeof(stack_buf), &res) && std::string(res) == "jp");
@@ -176,7 +181,7 @@ int main() {
         assert(!stealth::lookupSpoofedPropertyIntoBuf(baked, "ro.csc.country_code", "CN", stack_buf, sizeof(stack_buf), &res));
 #elif defined(OEM_OPLUS)
         assert(std::string(stealth::kOemProfileName) == "oplus");
-        assert(stealth::kBakedPropCount == 16);
+        assert(stealth::kBakedPropCount == 17);
         assert(stealth::lookupSpoofedPropertyIntoBuf(baked, "persist.sys.oplus.region", "CN", stack_buf, sizeof(stack_buf), &res) && std::string(res) == "JP");
         assert(stealth::lookupSpoofedPropertyIntoBuf(baked, "ro.oplus.region", "CN", stack_buf, sizeof(stack_buf), &res) && std::string(res) == "JP");
         assert(stealth::lookupSpoofedPropertyIntoBuf(baked, "ro.vendor.oplus.regionmark", "CN", stack_buf, sizeof(stack_buf), &res) && std::string(res) == "JP");
@@ -185,14 +190,16 @@ int main() {
         assert(!stealth::lookupSpoofedPropertyIntoBuf(baked, "ro.csc.country_code", "CN", stack_buf, sizeof(stack_buf), &res));
 #elif defined(OEM_ONEUI)
         assert(std::string(stealth::kOemProfileName) == "oneui");
-        assert(stealth::kBakedPropCount == 15);
+        assert(stealth::kBakedPropCount == 18);
         assert(stealth::lookupSpoofedPropertyIntoBuf(baked, "ro.csc.country_code", "CN", stack_buf, sizeof(stack_buf), &res) && std::string(res) == "JP");
         assert(stealth::lookupSpoofedPropertyIntoBuf(baked, "ro.csc.countryiso_code", "CN", stack_buf, sizeof(stack_buf), &res) && std::string(res) == "JP");
         assert(stealth::lookupSpoofedPropertyIntoBuf(baked, "ro.csc.sales_code", "CHN", stack_buf, sizeof(stack_buf), &res) && std::string(res) == "JP");
+        assert(stealth::lookupSpoofedPropertyIntoBuf(baked, "ro.csc.omcnw_code", "CHN", stack_buf, sizeof(stack_buf), &res) && std::string(res) == "JP");
+        assert(stealth::lookupSpoofedPropertyIntoBuf(baked, "persist.omc.sales_code", "CHN", stack_buf, sizeof(stack_buf), &res) && std::string(res) == "JP");
         assert(!stealth::lookupSpoofedPropertyIntoBuf(baked, "ro.miui.region", "CN", stack_buf, sizeof(stack_buf), &res));
         assert(!stealth::lookupSpoofedPropertyIntoBuf(baked, "ro.oplus.region", "CN", stack_buf, sizeof(stack_buf), &res));
 #else
-        assert(stealth::kBakedPropCount == 12);
+        assert(stealth::kBakedPropCount == 13);
         assert(!stealth::lookupSpoofedPropertyIntoBuf(baked, "ro.miui.region", "CN", stack_buf, sizeof(stack_buf), &res));
         assert(!stealth::lookupSpoofedPropertyIntoBuf(baked, "ro.oplus.region", "CN", stack_buf, sizeof(stack_buf), &res));
         assert(!stealth::lookupSpoofedPropertyIntoBuf(baked, "ro.csc.country_code", "CN", stack_buf, sizeof(stack_buf), &res));

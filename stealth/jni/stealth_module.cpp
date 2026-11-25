@@ -13,14 +13,18 @@
 #include <fcntl.h>
 #include <ifaddrs.h>
 #include <link.h>
+#include <linux/if_packet.h>
 #include <net/if.h>
 #include <netinet/in.h>
 #include <string>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/system_properties.h>
 #include <sys/sysmacros.h>
+#include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
+#include <utility>
 
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "SandboxStealth", __VA_ARGS__)
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN, "SandboxStealth", __VA_ARGS__)
@@ -79,7 +83,7 @@ constexpr size_t kNetSuffixCount = 1;
 const char* const kNetTargetSuffixes[kNetSuffixCount] = {
     "/libjavacore.so",
 };
-constexpr size_t kMaxPropHookSlots = 12;
+constexpr size_t kMaxPropHookSlots = 24;
 constexpr size_t kMaxNetHookSlots = 2;
 
 using FnGetIfAddrs = int (*)(struct ifaddrs** ifap);
@@ -88,12 +92,23 @@ using FnPropReadCb = void (*)(
     const prop_info* pi,
     void (*callback)(void* cookie, const char* name, const char* value, uint32_t serial),
     void* cookie);
+using FnPropRead = int (*)(const prop_info* pi, char* name, char* value);
 using FnPropGet = int (*)(const char* name, char* value);
 
 FnGetIfAddrs g_orig_getifaddrs[kMaxNetHookSlots] = {};
 FnPropFind g_orig_prop_find[kMaxPropHookSlots] = {};
 FnPropReadCb g_orig_prop_cb[kMaxPropHookSlots] = {};
+FnPropRead g_orig_prop_read[kMaxPropHookSlots] = {};
 FnPropGet g_orig_prop_get[kMaxPropHookSlots] = {};
+
+bool isTunnelIfaceName(const char* name) {
+    if (!name) return false;
+    return std::strncmp(name, "tun", 3) == 0 ||
+           std::strncmp(name, "wg", 2) == 0 ||
+           std::strncmp(name, "utun", 4) == 0 ||
+           std::strncmp(name, "ppp", 3) == 0 ||
+           std::strncmp(name, "tailscale", 9) == 0;
+}
 
 int hookGetifaddrsImpl(FnGetIfAddrs orig, struct ifaddrs** ifap) {
     if (!orig) {
@@ -106,8 +121,8 @@ int hookGetifaddrsImpl(FnGetIfAddrs orig, struct ifaddrs** ifap) {
     }
     const uint32_t mask_nbo = htonl(0xFFFFFF00u);
     for (struct ifaddrs* cur = *ifap; cur != nullptr; cur = cur->ifa_next) {
-        if (cur->ifa_name && std::strncmp(cur->ifa_name, "tun", 3) == 0) {
-            // Coalesce tun* into "lo" with null addrs so NetworkInterface skips it while freeifaddrs() frees cleanly.
+        if (isTunnelIfaceName(cur->ifa_name)) {
+            // Coalesce tunnel interfaces into "lo" with null addrs so NetworkInterface skips them while freeifaddrs() frees cleanly.
             cur->ifa_name[0] = 'l';
             cur->ifa_name[1] = 'o';
             cur->ifa_name[2] = '\0';
@@ -124,7 +139,11 @@ int hookGetifaddrsImpl(FnGetIfAddrs orig, struct ifaddrs** ifap) {
             continue;
         }
         const int fam = cur->ifa_addr->sa_family;
-        if (fam == AF_INET6) {
+        if (fam == AF_PACKET) {
+            auto* sll = reinterpret_cast<struct sockaddr_ll*>(cur->ifa_addr);
+            sll->sll_halen = 0;
+            std::memset(sll->sll_addr, 0, sizeof(sll->sll_addr));
+        } else if (fam == AF_INET6) {
             // Preserve node pointer so freeifaddrs() releases every node without leaking memory.
             cur->ifa_addr = nullptr;
             cur->ifa_netmask = nullptr;
@@ -190,7 +209,7 @@ void wrappedPropReadCallback(void* raw_ctx, const char* name, const char* value,
 
 const prop_info* hookPropFindImpl(FnPropFind orig, const char* name) {
     const int idx = stealth::spoofablePropIndex(name);
-    if (idx >= 0 && g_baked_props.active[idx] && (idx == 0 || idx >= 7)) {
+    if (idx >= 0 && g_baked_props.active[idx] && !stealth::isMultiSimCarrierSlot(idx)) {
         return reinterpret_cast<const prop_info*>(&g_fake_props[idx]);
     }
     const prop_info* pi = orig ? orig(name) : nullptr;
@@ -239,13 +258,64 @@ void hook_prop_read_cb_slot(
     hookPropReadCbImpl(g_orig_prop_cb[Slot], pi, callback, cookie);
 }
 
+int hookPropReadImpl(FnPropRead orig, const prop_info* pi, char* name, char* value) {
+    if (pi != nullptr) {
+        const uintptr_t ptr = reinterpret_cast<uintptr_t>(pi);
+        const uintptr_t begin = reinterpret_cast<uintptr_t>(&g_fake_props[0]);
+        const uintptr_t end = reinterpret_cast<uintptr_t>(&g_fake_props[stealth::kBakedPropCount]);
+        if (ptr >= begin && ptr < end && ((ptr - begin) % sizeof(FakePropInfo)) == 0) {
+            const size_t idx = static_cast<size_t>((ptr - begin) / sizeof(FakePropInfo));
+            if (g_baked_props.active[idx] && g_fake_props[idx].name[0] != '\0') {
+                if (name) {
+                    const size_t nlen = std::strlen(g_fake_props[idx].name);
+                    std::memcpy(name, g_fake_props[idx].name, nlen + 1);
+                }
+                const size_t vlen = std::strlen(g_fake_props[idx].value);
+                if (value && vlen < PROP_VALUE_MAX) {
+                    std::memcpy(value, g_fake_props[idx].value, vlen + 1);
+                    return static_cast<int>(vlen);
+                }
+                if (value) value[0] = '\0';
+                return 0;
+            }
+        }
+    }
+    if (!orig) {
+        if (name) name[0] = '\0';
+        if (value) value[0] = '\0';
+        return 0;
+    }
+    char local_name[128] = {};
+    char local_val[PROP_VALUE_MAX] = {};
+    int len = orig(pi, name ? name : local_name, value ? value : local_val);
+    const char* resolved_name = name ? name : local_name;
+    const char* resolved_val = value ? value : local_val;
+    char stack_buf[PROP_VALUE_MAX];
+    const char* spoofed = nullptr;
+    if (stealth::lookupSpoofedPropertyIntoBuf(g_baked_props, resolved_name, resolved_val, stack_buf, sizeof(stack_buf), &spoofed) && spoofed) {
+        const size_t slen = std::strlen(spoofed);
+        if (slen < PROP_VALUE_MAX) {
+            if (value) {
+                std::memcpy(value, spoofed, slen + 1);
+            }
+            return static_cast<int>(slen);
+        }
+    }
+    return len;
+}
+
+template <size_t Slot>
+int hook_prop_read_slot(const prop_info* pi, char* name, char* value) {
+    return hookPropReadImpl(g_orig_prop_read[Slot], pi, name, value);
+}
+
 int hookPropGetImpl(FnPropGet orig, const char* name, char* value) {
     if (!name || !value) {
         return orig ? orig(name, value) : 0;
     }
     const int idx = stealth::spoofablePropIndex(name);
     if (idx >= 0 && g_baked_props.active[idx]) {
-        if (idx >= 1 && idx <= 6) {
+        if (stealth::isMultiSimCarrierSlot(idx)) {
             char orig_val[PROP_VALUE_MAX] = {};
             if (orig) {
                 orig(name, orig_val);
@@ -275,6 +345,19 @@ int hookPropGetImpl(FnPropGet orig, const char* name, char* value) {
 template <size_t Slot>
 int hook_prop_get_slot(const char* name, char* value) {
     return hookPropGetImpl(g_orig_prop_get[Slot], name, value);
+}
+
+template <size_t... Is>
+void fillPropHookTables(
+    FnPropFind (&find_hooks)[kMaxPropHookSlots],
+    FnPropReadCb (&cb_hooks)[kMaxPropHookSlots],
+    FnPropRead (&read_hooks)[kMaxPropHookSlots],
+    FnPropGet (&get_hooks)[kMaxPropHookSlots],
+    std::index_sequence<Is...>) {
+    ((find_hooks[Is] = hook_prop_find_slot<Is>,
+      cb_hooks[Is] = hook_prop_read_cb_slot<Is>,
+      read_hooks[Is] = hook_prop_read_slot<Is>,
+      get_hooks[Is] = hook_prop_get_slot<Is>), ...);
 }
 
 bool writeExact(int fd, const void* buf, size_t len) {
@@ -354,6 +437,10 @@ bool fetchConfigFromCompanion(zygisk::Api* api, std::string& out_json) {
     if (fd < 0) {
         return false;
     }
+    struct timeval tv{};
+    tv.tv_sec = 2;
+    tv.tv_usec = 0;
+    (void)setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     uint32_t len = 0;
     if (!readExact(fd, &len, sizeof(len)) || len == 0 || len > kMaxConfigBytes) {
         close(fd);
@@ -402,9 +489,27 @@ void appendUniqueTarget(TargetList& list, dev_t dev, ino_t inode) {
     list.items[list.count++] = ResolvedTarget{dev, inode};
 }
 
+void insertPriorityTarget(TargetList& list, dev_t dev, ino_t inode) {
+    for (size_t i = 0; i < list.count; i++) {
+        if (list.items[i].dev == dev && list.items[i].inode == inode) {
+            return;
+        }
+    }
+    if (list.cap == 0) return;
+    size_t move_end = list.count < list.cap ? list.count : list.cap - 1;
+    for (size_t i = move_end; i > 0; i--) {
+        list.items[i] = list.items[i - 1];
+    }
+    list.items[0] = ResolvedTarget{dev, inode};
+    if (list.count < list.cap) {
+        list.count++;
+    }
+}
+
 struct PhdrMultiCtx {
     TargetList* prop_list;
     bool want_props;
+    bool have_android_runtime;
     TargetList* net_list;
     bool want_net;
 };
@@ -415,8 +520,9 @@ int phdrMultiMatchCallback(struct dl_phdr_info* info, [[maybe_unused]] size_t si
         return 0;
     }
     const size_t plen = std::strlen(info->dlpi_name);
-    const bool match_prop = ctx->want_props && ctx->prop_list->count < ctx->prop_list->cap &&
-        endsWithAnySuffix(info->dlpi_name, plen, kPropTargetSuffixes, kPropSuffixCount);
+    const bool is_runtime = ctx->want_props && endsWithAnySuffix(info->dlpi_name, plen, &kPropTargetSuffixes[0], 1);
+    const bool match_prop = is_runtime || (ctx->want_props && ctx->prop_list->count < ctx->prop_list->cap &&
+        endsWithAnySuffix(info->dlpi_name, plen, kPropTargetSuffixes, kPropSuffixCount));
     const bool match_net = ctx->want_net && ctx->net_list->count < ctx->net_list->cap &&
         endsWithAnySuffix(info->dlpi_name, plen, kNetTargetSuffixes, kNetSuffixCount);
     if (!match_prop && !match_net) {
@@ -424,22 +530,28 @@ int phdrMultiMatchCallback(struct dl_phdr_info* info, [[maybe_unused]] size_t si
     }
     struct stat st{};
     if (stat(info->dlpi_name, &st) == 0 && S_ISREG(st.st_mode)) {
-        if (match_prop) appendUniqueTarget(*ctx->prop_list, st.st_dev, st.st_ino);
+        if (is_runtime) {
+            insertPriorityTarget(*ctx->prop_list, st.st_dev, st.st_ino);
+            ctx->have_android_runtime = true;
+        } else if (match_prop) {
+            appendUniqueTarget(*ctx->prop_list, st.st_dev, st.st_ino);
+        }
         if (match_net) appendUniqueTarget(*ctx->net_list, st.st_dev, st.st_ino);
     }
-    const bool props_full = !ctx->want_props || ctx->prop_list->count >= ctx->prop_list->cap;
+    const bool props_full = !ctx->want_props || (ctx->prop_list->count >= ctx->prop_list->cap && ctx->have_android_runtime);
     const bool net_full = !ctx->want_net || ctx->net_list->count >= ctx->net_list->cap;
     return (props_full && net_full) ? 1 : 0;
 }
 
 // Single-pass /proc/self/maps resolution collects up to kMaxPropHookSlots unique (dev, ino)
-// prop library mappings (handling APEX + system namespace duplicates like libbase.so).
+// prop library mappings (always prioritizing libandroid_runtime.so ahead of APEX libbase/libcutils duplicates).
 void findLibrariesFromMaps(bool want_props, TargetList& prop_list, bool want_net, TargetList& net_list) {
     prop_list.count = 0;
     prop_list.cap = kMaxPropHookSlots;
     net_list.count = 0;
     net_list.cap = kMaxNetHookSlots;
     if (!want_props && !want_net) return;
+    bool have_android_runtime = false;
 
     FILE* fp = std::fopen("/proc/self/maps", "re");
     if (fp) {
@@ -463,15 +575,18 @@ void findLibrariesFromMaps(bool want_props, TargetList& prop_list, bool want_net
                 while (plen > 0 && (path[plen - 1] == '\n' || path[plen - 1] == '\r')) plen--;
                 const dev_t dev = makedev(major_id, minor_id);
                 const ino_t ino = static_cast<ino_t>(inode);
-                if (want_props && prop_list.count < prop_list.cap &&
-                    endsWithAnySuffix(path, plen, kPropTargetSuffixes, kPropSuffixCount)) {
+                if (want_props && endsWithAnySuffix(path, plen, &kPropTargetSuffixes[0], 1)) {
+                    insertPriorityTarget(prop_list, dev, ino);
+                    have_android_runtime = true;
+                } else if (want_props && prop_list.count < prop_list.cap &&
+                           endsWithAnySuffix(path, plen, kPropTargetSuffixes, kPropSuffixCount)) {
                     appendUniqueTarget(prop_list, dev, ino);
                 }
                 if (want_net && net_list.count < net_list.cap &&
                     endsWithAnySuffix(path, plen, kNetTargetSuffixes, kNetSuffixCount)) {
                     appendUniqueTarget(net_list, dev, ino);
                 }
-                const bool props_full = !want_props || prop_list.count >= prop_list.cap;
+                const bool props_full = !want_props || (prop_list.count >= prop_list.cap && have_android_runtime);
                 const bool net_full = !want_net || net_list.count >= net_list.cap;
                 if (props_full && net_full) {
                     break;
@@ -481,8 +596,8 @@ void findLibrariesFromMaps(bool want_props, TargetList& prop_list, bool want_net
         std::fclose(fp);
     }
 
-    if ((want_props && prop_list.count == 0) || (want_net && net_list.count == 0)) {
-        PhdrMultiCtx ctx{&prop_list, want_props, &net_list, want_net};
+    if ((want_props && (!have_android_runtime || prop_list.count == 0)) || (want_net && net_list.count == 0)) {
+        PhdrMultiCtx ctx{&prop_list, want_props, have_android_runtime, &net_list, want_net};
         dl_iterate_phdr(phdrMultiMatchCallback, &ctx);
     }
 }
@@ -570,6 +685,20 @@ void applyJavaTimezoneAndLocale(JNIEnv* env, const stealth::StealthConfig& cfg) 
             }
         }
         clearJniException(env);
+
+        jclass icu_tz_cls = env->FindClass("android/icu/util/TimeZone");
+        if (icu_tz_cls) {
+            jmethodID get_icu_tz = env->GetStaticMethodID(icu_tz_cls, "getTimeZone", "(Ljava/lang/String;)Landroid/icu/util/TimeZone;");
+            jmethodID set_icu_tz = env->GetStaticMethodID(icu_tz_cls, "setDefault", "(Landroid/icu/util/TimeZone;)V");
+            if (get_icu_tz && set_icu_tz) {
+                jstring tz_id = env->NewStringUTF(cfg.timezone.c_str());
+                jobject tz_obj = env->CallStaticObjectMethod(icu_tz_cls, get_icu_tz, tz_id);
+                if (!env->ExceptionCheck() && tz_obj) {
+                    env->CallStaticVoidMethod(icu_tz_cls, set_icu_tz, tz_obj);
+                }
+            }
+        }
+        clearJniException(env);
     }
 
     if (cfg.spoof_locale && !cfg.locale.empty()) {
@@ -582,6 +711,20 @@ void applyJavaTimezoneAndLocale(JNIEnv* env, const stealth::StealthConfig& cfg) 
                 jobject loc_obj = env->CallStaticObjectMethod(loc_cls, for_tag, tag);
                 if (!env->ExceptionCheck() && loc_obj) {
                     env->CallStaticVoidMethod(loc_cls, set_def, loc_obj);
+                }
+            }
+        }
+        clearJniException(env);
+
+        jclass uloc_cls = env->FindClass("android/icu/util/ULocale");
+        if (uloc_cls) {
+            jmethodID for_utag = env->GetStaticMethodID(uloc_cls, "forLanguageTag", "(Ljava/lang/String;)Landroid/icu/util/ULocale;");
+            jmethodID set_udef = env->GetStaticMethodID(uloc_cls, "setDefault", "(Landroid/icu/util/ULocale;)V");
+            if (for_utag && set_udef) {
+                jstring tag = env->NewStringUTF(cfg.locale.c_str());
+                jobject uloc_obj = env->CallStaticObjectMethod(uloc_cls, for_utag, tag);
+                if (!env->ExceptionCheck() && uloc_obj) {
+                    env->CallStaticVoidMethod(uloc_cls, set_udef, uloc_obj);
                 }
             }
         }
@@ -736,21 +879,12 @@ public:
             findLibrariesFromMaps(want_props, prop_hits, want_net, net_hits);
 
             bool has_registered = false;
-            FnPropFind propFindHooks[kMaxPropHookSlots] = {
-                hook_prop_find_slot<0>, hook_prop_find_slot<1>, hook_prop_find_slot<2>, hook_prop_find_slot<3>,
-                hook_prop_find_slot<4>, hook_prop_find_slot<5>, hook_prop_find_slot<6>, hook_prop_find_slot<7>,
-                hook_prop_find_slot<8>, hook_prop_find_slot<9>, hook_prop_find_slot<10>, hook_prop_find_slot<11>,
-            };
-            FnPropReadCb propCbHooks[kMaxPropHookSlots] = {
-                hook_prop_read_cb_slot<0>, hook_prop_read_cb_slot<1>, hook_prop_read_cb_slot<2>, hook_prop_read_cb_slot<3>,
-                hook_prop_read_cb_slot<4>, hook_prop_read_cb_slot<5>, hook_prop_read_cb_slot<6>, hook_prop_read_cb_slot<7>,
-                hook_prop_read_cb_slot<8>, hook_prop_read_cb_slot<9>, hook_prop_read_cb_slot<10>, hook_prop_read_cb_slot<11>,
-            };
-            FnPropGet propGetHooks[kMaxPropHookSlots] = {
-                hook_prop_get_slot<0>, hook_prop_get_slot<1>, hook_prop_get_slot<2>, hook_prop_get_slot<3>,
-                hook_prop_get_slot<4>, hook_prop_get_slot<5>, hook_prop_get_slot<6>, hook_prop_get_slot<7>,
-                hook_prop_get_slot<8>, hook_prop_get_slot<9>, hook_prop_get_slot<10>, hook_prop_get_slot<11>,
-            };
+            FnPropFind propFindHooks[kMaxPropHookSlots] = {};
+            FnPropReadCb propCbHooks[kMaxPropHookSlots] = {};
+            FnPropRead propReadHooks[kMaxPropHookSlots] = {};
+            FnPropGet propGetHooks[kMaxPropHookSlots] = {};
+            fillPropHookTables(propFindHooks, propCbHooks, propReadHooks, propGetHooks,
+                               std::make_index_sequence<kMaxPropHookSlots>{});
             FnGetIfAddrs netHooks[kMaxNetHookSlots] = {
                 hook_getifaddrs_slot<0>, hook_getifaddrs_slot<1>,
             };
@@ -764,6 +898,9 @@ public:
                 api_->pltHookRegister(pt.dev, pt.inode, "__system_property_read_callback",
                                       reinterpret_cast<void*>(propCbHooks[i]),
                                       reinterpret_cast<void**>(&g_orig_prop_cb[i]));
+                api_->pltHookRegister(pt.dev, pt.inode, "__system_property_read",
+                                      reinterpret_cast<void*>(propReadHooks[i]),
+                                      reinterpret_cast<void**>(&g_orig_prop_read[i]));
                 api_->pltHookRegister(pt.dev, pt.inode, "__system_property_get",
                                       reinterpret_cast<void*>(propGetHooks[i]),
                                       reinterpret_cast<void**>(&g_orig_prop_get[i]));
@@ -781,7 +918,7 @@ public:
                 bool committed = api_->pltHookCommit();
                 bool any_orig = false;
                 for (size_t i = 0; i < prop_libs_registered; i++) {
-                    if (g_orig_prop_find[i] || g_orig_prop_cb[i] || g_orig_prop_get[i]) any_orig = true;
+                    if (g_orig_prop_find[i] || g_orig_prop_cb[i] || g_orig_prop_read[i] || g_orig_prop_get[i]) any_orig = true;
                 }
                 for (size_t i = 0; i < net_libs_registered; i++) {
                     if (g_orig_getifaddrs[i]) any_orig = true;

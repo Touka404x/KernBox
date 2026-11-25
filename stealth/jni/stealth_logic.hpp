@@ -20,19 +20,19 @@ inline constexpr size_t kMaxBakedValueBytes = 92;
 
 #if defined(OEM_HYPEROS)
 inline constexpr const char* kOemProfileName = "hyperos";
-inline constexpr size_t kBakedPropCount = 16;
+inline constexpr size_t kBakedPropCount = 17;
 #elif defined(OEM_OPLUS)
 inline constexpr const char* kOemProfileName = "oplus";
-inline constexpr size_t kBakedPropCount = 16;
+inline constexpr size_t kBakedPropCount = 17;
 #elif defined(OEM_ONEUI)
 inline constexpr const char* kOemProfileName = "oneui";
-inline constexpr size_t kBakedPropCount = 15;
+inline constexpr size_t kBakedPropCount = 18;
 #elif defined(OEM_AOSP)
 inline constexpr const char* kOemProfileName = "aosp";
-inline constexpr size_t kBakedPropCount = 12;
+inline constexpr size_t kBakedPropCount = 13;
 #else
 inline constexpr const char* kOemProfileName = "generic";
-inline constexpr size_t kBakedPropCount = 12;
+inline constexpr size_t kBakedPropCount = 13;
 #endif
 
 struct StealthConfig {
@@ -484,7 +484,11 @@ inline bool formatMultiSimIntoBuf(const char* orig, const char* spoof, char* out
 }
 
 // O(1) first-byte dispatch rejects non-target system property keys in 1 comparison.
-// Slots 0..10 are universal across all OEMs; slots 11+ are compiled per OEM profile.
+// Slots 0..12 are universal across all OEMs; slots 13+ are compiled per OEM profile.
+inline bool isMultiSimCarrierSlot(int idx) {
+    return (idx >= 1 && idx <= 6) || idx == 11;
+}
+
 inline int spoofablePropIndex(const char* name) {
     if (!name) return -1;
     switch (name[0]) {
@@ -494,8 +498,10 @@ inline int spoofablePropIndex(const char* name) {
             if (std::strcmp(name, "persist.sys.country") == 0) return 9;
             if (std::strcmp(name, "persist.sys.language") == 0) return 10;
 #if defined(OEM_OPLUS)
-            if (std::strcmp(name, "persist.sys.oplus.region") == 0) return 12;
-            if (std::strcmp(name, "persist.sys.oppo.region") == 0) return 15;
+            if (std::strcmp(name, "persist.sys.oplus.region") == 0) return 13;
+            if (std::strcmp(name, "persist.sys.oppo.region") == 0) return 16;
+#elif defined(OEM_ONEUI)
+            if (std::strcmp(name, "persist.omc.sales_code") == 0) return 17;
 #endif
             return -1;
         case 'g':
@@ -506,22 +512,24 @@ inline int spoofablePropIndex(const char* name) {
             if (std::strcmp(name, "gsm.operator.numeric") == 0) return 4;
             if (std::strcmp(name, "gsm.operator.iso-country") == 0) return 5;
             if (std::strcmp(name, "gsm.operator.alpha") == 0) return 6;
+            if (std::strcmp(name, "gsm.sim.state") == 0) return 11;
             return -1;
         case 'r':
             if (std::strcmp(name, "ro.product.locale") == 0) return 8;
-            if (std::strcmp(name, "ro.boot.hwcountry") == 0) return 11;
+            if (std::strcmp(name, "ro.boot.hwcountry") == 0) return 12;
 #if defined(OEM_HYPEROS)
-            if (std::strcmp(name, "ro.boot.hwc") == 0) return 12;
-            if (std::strcmp(name, "ro.miui.region") == 0) return 13;
-            if (std::strcmp(name, "ro.miui.cust_variant") == 0) return 14;
-            if (std::strcmp(name, "ro.miui.build.region") == 0) return 15;
+            if (std::strcmp(name, "ro.boot.hwc") == 0) return 13;
+            if (std::strcmp(name, "ro.miui.region") == 0) return 14;
+            if (std::strcmp(name, "ro.miui.cust_variant") == 0) return 15;
+            if (std::strcmp(name, "ro.miui.build.region") == 0) return 16;
 #elif defined(OEM_OPLUS)
-            if (std::strcmp(name, "ro.oplus.region") == 0) return 13;
-            if (std::strcmp(name, "ro.vendor.oplus.regionmark") == 0) return 14;
+            if (std::strcmp(name, "ro.oplus.region") == 0) return 14;
+            if (std::strcmp(name, "ro.vendor.oplus.regionmark") == 0) return 15;
 #elif defined(OEM_ONEUI)
-            if (std::strcmp(name, "ro.csc.country_code") == 0) return 12;
-            if (std::strcmp(name, "ro.csc.countryiso_code") == 0) return 13;
-            if (std::strcmp(name, "ro.csc.sales_code") == 0) return 14;
+            if (std::strcmp(name, "ro.csc.country_code") == 0) return 13;
+            if (std::strcmp(name, "ro.csc.countryiso_code") == 0) return 14;
+            if (std::strcmp(name, "ro.csc.sales_code") == 0) return 15;
+            if (std::strcmp(name, "ro.csc.omcnw_code") == 0) return 16;
 #endif
             return -1;
         default:
@@ -542,21 +550,24 @@ inline const char* spoofablePropNameByIndex(int idx) {
         case 8: return "ro.product.locale";
         case 9: return "persist.sys.country";
         case 10: return "persist.sys.language";
-        case 11: return "ro.boot.hwcountry";
+        case 11: return "gsm.sim.state";
+        case 12: return "ro.boot.hwcountry";
 #if defined(OEM_HYPEROS)
-        case 12: return "ro.boot.hwc";
-        case 13: return "ro.miui.region";
-        case 14: return "ro.miui.cust_variant";
-        case 15: return "ro.miui.build.region";
+        case 13: return "ro.boot.hwc";
+        case 14: return "ro.miui.region";
+        case 15: return "ro.miui.cust_variant";
+        case 16: return "ro.miui.build.region";
 #elif defined(OEM_OPLUS)
-        case 12: return "persist.sys.oplus.region";
-        case 13: return "ro.oplus.region";
-        case 14: return "ro.vendor.oplus.regionmark";
-        case 15: return "persist.sys.oppo.region";
+        case 13: return "persist.sys.oplus.region";
+        case 14: return "ro.oplus.region";
+        case 15: return "ro.vendor.oplus.regionmark";
+        case 16: return "persist.sys.oppo.region";
 #elif defined(OEM_ONEUI)
-        case 12: return "ro.csc.country_code";
-        case 13: return "ro.csc.countryiso_code";
-        case 14: return "ro.csc.sales_code";
+        case 13: return "ro.csc.country_code";
+        case 14: return "ro.csc.countryiso_code";
+        case 15: return "ro.csc.sales_code";
+        case 16: return "ro.csc.omcnw_code";
+        case 17: return "persist.omc.sales_code";
 #endif
         default: return nullptr;
     }
@@ -644,22 +655,25 @@ inline BakedProps bakeSpoofedProps(const StealthConfig& cfg) {
     setSlot(8, cfg.spoof_locale, cfg.locale);
     setSlot(9, cfg.spoof_locale, country);
     setSlot(10, cfg.spoof_locale, lang);
+    setSlot(11, cfg.spoof_carrier, std::string("READY"));
 
-    setSlot(11, cfg.spoof_device_region, effective_hwc);
-#if defined(OEM_HYPEROS)
     setSlot(12, cfg.spoof_device_region, effective_hwc);
-    setSlot(13, cfg.spoof_device_region, region_upper);
-    setSlot(14, cfg.spoof_device_region, region_lower);
+#if defined(OEM_HYPEROS)
+    setSlot(13, cfg.spoof_device_region, effective_hwc);
+    setSlot(14, cfg.spoof_device_region, region_upper);
     setSlot(15, cfg.spoof_device_region, region_lower);
+    setSlot(16, cfg.spoof_device_region, region_lower);
 #elif defined(OEM_OPLUS)
-    setSlot(12, cfg.spoof_device_region, region_upper);
     setSlot(13, cfg.spoof_device_region, region_upper);
     setSlot(14, cfg.spoof_device_region, region_upper);
     setSlot(15, cfg.spoof_device_region, region_upper);
+    setSlot(16, cfg.spoof_device_region, region_upper);
 #elif defined(OEM_ONEUI)
-    setSlot(12, cfg.spoof_device_region, region_upper);
     setSlot(13, cfg.spoof_device_region, region_upper);
     setSlot(14, cfg.spoof_device_region, region_upper);
+    setSlot(15, cfg.spoof_device_region, region_upper);
+    setSlot(16, cfg.spoof_device_region, region_upper);
+    setSlot(17, cfg.spoof_device_region, region_upper);
 #endif
     return baked;
 }
@@ -677,7 +691,7 @@ inline bool lookupSpoofedPropertyIntoBuf(
     if (idx < 0 || static_cast<size_t>(idx) >= kBakedPropCount || !baked.active[idx]) {
         return false;
     }
-    if (idx == 0 || idx >= 7) {
+    if (!isMultiSimCarrierSlot(idx)) {
         *out_ptr = baked.values[idx];
         return true;
     }

@@ -9,6 +9,8 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
 import android.content.pm.ApplicationInfo;
+import android.content.pm.CrossProfileApps;
+import android.location.LocationManager;
 import android.media.MediaDrm;
 import android.net.ConnectivityManager;
 import android.net.LinkAddress;
@@ -36,11 +38,14 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
+import java.net.Inet4Address;
+import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.NetworkInterface;
 import java.net.Proxy;
 import java.net.Socket;
+import java.net.URI;
 import java.net.URL;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
@@ -89,6 +94,10 @@ public final class NetworkProbe extends Instrumentation {
         long monoStartNs = SystemClock.elapsedRealtimeNanos();
         String mode = "full";
         String targetWorkPkg = DEFAULT_TARGET_WORK_PKG;
+        boolean compact = false;
+        boolean pretty = false;
+        boolean strict = false;
+        boolean summary = false;
         if (launchArgs != null) {
             String argMode = launchArgs.getString("mode");
             if (argMode != null && !argMode.trim().isEmpty()) {
@@ -98,6 +107,10 @@ public final class NetworkProbe extends Instrumentation {
             if (argTarget != null && !argTarget.trim().isEmpty()) {
                 targetWorkPkg = argTarget.trim();
             }
+            compact = "true".equalsIgnoreCase(launchArgs.getString("compact"));
+            pretty = "true".equalsIgnoreCase(launchArgs.getString("pretty"));
+            strict = "true".equalsIgnoreCase(launchArgs.getString("strict"));
+            summary = "true".equalsIgnoreCase(launchArgs.getString("summary"));
         }
         boolean networkFast = "network_fast".equalsIgnoreCase(mode);
         ExecutorService workers = Executors.newFixedThreadPool(networkFast ? 3 : 8, task -> {
@@ -166,19 +179,35 @@ public final class NetworkProbe extends Instrumentation {
                     probeRes = new JSONObject().put("error", error.getClass().getSimpleName());
                 }
                 networkProbes.put(entry.getKey(), probeRes);
-                report.put(entry.getKey(), probeRes);
+                if (!compact) {
+                    report.put(entry.getKey(), probeRes);
+                }
             }
-            if (networkProbes.has("ipv6_blocked")) {
+            if (!compact && networkProbes.has("ipv6_blocked")) {
                 report.put("https_ipv6", networkProbes.getJSONObject("ipv6_blocked"));
             }
             report.put("network_probes", networkProbes);
+            JSONObject scorecard = null;
             if (!networkFast) {
-                report.put("real_device_scorecard", buildRealDeviceScorecard(report, env, networkProbes));
+                scorecard = buildRealDeviceScorecard(report, env, networkProbes);
+                report.put("real_device_scorecard", scorecard);
             }
             report.put("probe_mono_end_ns", SystemClock.elapsedRealtimeNanos());
 
-            result.putString("network", report.toString());
-            finish(Activity.RESULT_OK, result);
+            result.putString("network", pretty ? report.toString(2) : report.toString());
+            if (summary && scorecard != null) {
+                result.putString("summary", String.format(Locale.US,
+                        "scorecard passed=%d warn=%d failed=%d total=%d exit_geo_match=%s",
+                        scorecard.optInt("passed", 0),
+                        scorecard.optInt("warn", 0),
+                        scorecard.optInt("failed", 0),
+                        scorecard.optInt("total", 0),
+                        scorecard.optString("exit_geo_match", "unknown")));
+            }
+            int finishCode = (strict && scorecard != null && scorecard.optInt("failed", 0) > 0)
+                    ? Activity.RESULT_CANCELED
+                    : Activity.RESULT_OK;
+            finish(finishCode, result);
         } catch (Exception error) {
             try {
                 result.putString("error", error.getClass().getSimpleName() + ":" + error.getMessage());
@@ -267,11 +296,21 @@ public final class NetworkProbe extends Instrumentation {
                     if (Build.VERSION.SDK_INT >= 28) {
                         drm.close();
                     } else {
-                        drm.release();
+                        releaseDrmCompat(drm);
                     }
                 } catch (Throwable ignored) {}
             }
         }
+    }
+
+    @SuppressWarnings("deprecation")
+    private static void releaseDrmCompat(MediaDrm drm) {
+        drm.release();
+    }
+
+    @SuppressWarnings("deprecation")
+    private static Network[] getAllNetworksCompat(ConnectivityManager cm) {
+        return cm.getAllNetworks();
     }
 
     private static JSONObject collectEnvironment(Context context) {
@@ -310,7 +349,7 @@ public final class NetworkProbe extends Instrumentation {
                     }
                 }
                 boolean anyVpn = false;
-                Network[] all = cm.getAllNetworks();
+                Network[] all = getAllNetworksCompat(cm);
                 if (all != null) {
                     for (Network net : all) {
                         NetworkCapabilities cap = cm.getNetworkCapabilities(net);
@@ -323,12 +362,28 @@ public final class NetworkProbe extends Instrumentation {
                 conn.put("all_networks_has_vpn", anyVpn);
             }
             JSONArray ifaces = new JSONArray();
+            boolean nonSandboxLanIp = false;
             try {
                 Enumeration<NetworkInterface> en = NetworkInterface.getNetworkInterfaces();
                 if (en != null) {
                     for (NetworkInterface ni : Collections.list(en)) {
                         if (ni.isUp()) {
-                            ifaces.put(ni.getName());
+                            String niName = safeStr(ni.getName());
+                            ifaces.put(niName);
+                            if (!"lo".equals(niName)) {
+                                Enumeration<InetAddress> addrs = ni.getInetAddresses();
+                                while (addrs.hasMoreElements()) {
+                                    InetAddress addr = addrs.nextElement();
+                                    if (addr instanceof Inet4Address) {
+                                        String host = safeStr(addr.getHostAddress());
+                                        if (!host.startsWith("10.172.") && !addr.isLoopbackAddress()) {
+                                            nonSandboxLanIp = true;
+                                        }
+                                    } else if (addr instanceof Inet6Address && !addr.isLoopbackAddress()) {
+                                        nonSandboxLanIp = true;
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -336,6 +391,7 @@ public final class NetworkProbe extends Instrumentation {
                 conn.put("java_net_interfaces_error", t.getClass().getSimpleName());
             }
             conn.put("java_net_interfaces", ifaces);
+            conn.put("java_net_non_sandbox_lan_ip", nonSandboxLanIp);
         } catch (Throwable t) {
             try {
                 conn.put("error", t.getClass().getSimpleName());
@@ -376,11 +432,33 @@ public final class NetworkProbe extends Instrumentation {
             ss.put("accessibility_services_active", accActive);
         } catch (Throwable ignored) {}
 
+        JSONObject stealthSurfaces = new JSONObject();
+        try {
+            if (Build.VERSION.SDK_INT >= 28) {
+                LocationManager lm = context.getSystemService(LocationManager.class);
+                if (lm != null) {
+                    stealthSurfaces.put("location_enabled", lm.isLocationEnabled());
+                }
+            }
+            if (Build.VERSION.SDK_INT >= 28) {
+                CrossProfileApps cpa = context.getSystemService(CrossProfileApps.class);
+                if (cpa != null) {
+                    stealthSurfaces.put("cross_profile_count", cpa.getTargetUserProfiles().size());
+                }
+            }
+            DevicePolicyManager dpm = context.getSystemService(DevicePolicyManager.class);
+            if (dpm != null) {
+                java.util.List<ComponentName> admins = dpm.getActiveAdmins();
+                stealthSurfaces.put("dpm_active_admins_count", admins != null ? admins.size() : 0);
+            }
+        } catch (Throwable ignored) {}
+
         try {
             env.put("connectivity", conn);
             env.put("geo", geo);
             env.put("settings_global", sg);
             env.put("settings_secure", ss);
+            env.put("stealth_surfaces", stealthSurfaces);
         } catch (Exception ignored) {}
         return env;
     }
@@ -484,7 +562,7 @@ public final class NetworkProbe extends Instrumentation {
     }
 
     private static JSONObject httpsTrace(String host, int timeoutMs) throws Exception {
-        URL endpoint = new URL("https://" + host + "/cdn-cgi/trace?probe=" + SystemClock.elapsedRealtimeNanos());
+        URL endpoint = URI.create("https://" + host + "/cdn-cgi/trace?probe=" + SystemClock.elapsedRealtimeNanos()).toURL();
         HttpsURLConnection connection = (HttpsURLConnection) endpoint.openConnection(Proxy.NO_PROXY);
         connection.setConnectTimeout(timeoutMs);
         connection.setReadTimeout(timeoutMs);
@@ -513,7 +591,7 @@ public final class NetworkProbe extends Instrumentation {
     }
 
     private static JSONObject httpsStatus(String urlStr) throws Exception {
-        URL endpoint = new URL(urlStr);
+        URL endpoint = URI.create(urlStr).toURL();
         HttpsURLConnection connection = (HttpsURLConnection) endpoint.openConnection(Proxy.NO_PROXY);
         connection.setConnectTimeout(SOCKET_TIMEOUT_MS);
         connection.setReadTimeout(SOCKET_TIMEOUT_MS);
@@ -528,7 +606,7 @@ public final class NetworkProbe extends Instrumentation {
     }
 
     private static JSONObject httpsIpEcho() throws Exception {
-        URL endpoint = new URL("https://api.ipify.org?format=text&probe=" + SystemClock.elapsedRealtimeNanos());
+        URL endpoint = URI.create("https://api.ipify.org?format=text&probe=" + SystemClock.elapsedRealtimeNanos()).toURL();
         HttpsURLConnection connection = (HttpsURLConnection) endpoint.openConnection(Proxy.NO_PROXY);
         connection.setConnectTimeout(SOCKET_TIMEOUT_MS);
         connection.setReadTimeout(SOCKET_TIMEOUT_MS);
@@ -624,7 +702,13 @@ public final class NetworkProbe extends Instrumentation {
         JSONObject out = new JSONObject();
         JSONArray targets = new JSONArray();
         boolean allRejected = true;
-        String[][] ips = { {"10.0.0.1", "80"}, {"100.64.0.1", "80"} };
+        String[][] ips = {
+            {"10.0.0.1", "80"},
+            {"100.64.0.1", "80"},
+            {"192.168.1.1", "80"},
+            {"172.16.0.1", "80"},
+            {"127.0.0.1", "1537"}
+        };
         for (String[] target : ips) {
             JSONObject item;
             try {
@@ -747,16 +831,20 @@ public final class NetworkProbe extends Instrumentation {
             if (ifaces != null) {
                 for (int i = 0; i < ifaces.length(); i++) {
                     String ifName = ifaces.optString(i, "");
-                    if (ifName.startsWith("tun")) {
+                    if (ifName.startsWith("tun") || ifName.startsWith("wg")
+                            || ifName.startsWith("utun") || ifName.startsWith("ppp")
+                            || ifName.startsWith("tailscale")) {
                         hasTun = true;
                         break;
                     }
                 }
             }
+            boolean lanLeak = conn != null && conn.optBoolean("java_net_non_sandbox_lan_ip", false);
             boolean vpnClean = conn != null
                 && !conn.optBoolean("transport_vpn", false)
                 && !conn.optBoolean("all_networks_has_vpn", false)
-                && !hasTun;
+                && !hasTun
+                && !lanLeak;
             recordScorecardCheck(checks, counts, "vpn_footprint_clean", vpnClean ? "pass" : "fail");
 
             JSONObject ipv6 = networkProbes != null ? networkProbes.optJSONObject("ipv6_blocked") : null;
@@ -808,9 +896,18 @@ public final class NetworkProbe extends Instrumentation {
                 && !geo.optString("sim_operator", "").trim().isEmpty();
             recordScorecardCheck(checks, counts, "carrier_and_geo_configured", geoConfigured ? "pass" : "warn");
 
+            JSONObject ipv4Trace = networkProbes != null ? networkProbes.optJSONObject("https_ipv4") : null;
+            String exitLoc = ipv4Trace != null ? ipv4Trace.optString("loc", "").trim() : "";
+            String simCountry = geo != null ? geo.optString("sim_country_iso", "").trim() : "";
+            String exitGeoMatch = (!exitLoc.isEmpty() && !simCountry.isEmpty())
+                    ? (exitLoc.equalsIgnoreCase(simCountry) ? "match" : "mismatch")
+                    : "unknown";
+            scorecard.put("exit_geo_match", exitGeoMatch);
             scorecard.put("passed", counts[0]);
             scorecard.put("warnings", counts[1]);
+            scorecard.put("warn", counts[1]);
             scorecard.put("failed", counts[2]);
+            scorecard.put("total", counts[0] + counts[1] + counts[2]);
             scorecard.put("checks", checks);
         } catch (Throwable t) {
             try {

@@ -147,6 +147,12 @@ public final class BrokerProtocolHostTest {
                 "withPreservedProbeFrom retains live probe results");
         assertEquals(12, merged.scorecardTotal, "withPreservedProbeFrom retains scorecardTotal");
 
+        BrokerProtocol.RpcResponse scWarnings = BrokerProtocol.parseResponse(
+                "{\"id\":\"kb-1c\",\"ok\":true,\"data\":{\"probe_apk_installed\":true,\"instrument_ok\":true,"
+                + "\"probe_result\":{\"real_device_scorecard\":{\"passed\":10,\"warnings\":2,\"failed\":0}}}}");
+        assertEquals(2, scWarnings.snapshot.scorecardWarn, "scorecard 'warnings' alias parsed");
+        assertEquals(12, scWarnings.snapshot.scorecardTotal, "scorecard computed total=12");
+
         String redacted = merged.toRedactedDiagnosticJson();
         assertTrue(!redacted.contains("198.51.100.2"), "redacted report omits exit_ip");
         assertTrue(!redacted.contains("com.android.chrome"), "redacted report omits app package names");

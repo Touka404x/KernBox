@@ -19,15 +19,18 @@ final class ProcHygieneScanner {
     private static final int MAX_LINE_LEN = 180;
 
     private static final String[] MOUNT_TOKENS = {
-        "/data/adb", "overlay", "ksu", "magisk", "zygisk", "riru", "lsposed", "lspd"
+        "/data/adb", "overlay", "ksu", "kernelsu", "apatch", "susfs", "shamiko", "debug_ramdisk",
+        "magisk", "zygisk", "riru", "lsposed", "lspd"
     };
 
     private static final String[] MAPS_TOKENS = {
-        "zygisk", "lspd", "lsposed", "frida", "xposed", "riru", "edxposed", "/data/adb"
+        "zygisk", "lspd", "lsposed", "frida", "xposed", "riru", "edxposed", "kernelsu", "apatch",
+        "susfs", "shamiko", "debug_ramdisk", "/data/adb"
     };
 
     private static final String[] SU_PATHS = {
-        "/system/bin/su", "/system/xbin/su", "/sbin/su", "/su/bin/su", "/vendor/bin/su"
+        "/system/bin/su", "/system/xbin/su", "/sbin/su", "/su/bin/su", "/vendor/bin/su",
+        "/data/adb/ksu/bin/su", "/data/adb/ap/bin/su", "/debug_ramdisk/su"
     };
 
     private static final String[] BOOT_PROPS = {
@@ -36,6 +39,13 @@ final class ProcHygieneScanner {
         "ro.boot.vbmeta.device_state",
         "ro.debuggable",
         "ro.secure"
+    };
+
+    private static final String[] STEALTH_PROPS = {
+        "persist.sys.timezone",
+        "persist.sys.locale",
+        "gsm.sim.operator.numeric",
+        "gsm.sim.state"
     };
 
     private static final String[] STOCK_OVERLAY_PREFIXES = {
@@ -57,7 +67,8 @@ final class ProcHygieneScanner {
             out.put("maps", scanMaps());
             out.put("su_paths", scanSuPaths());
             out.put("selinux_current", readSmallFile("/proc/self/attr/current"));
-            out.put("boot_props", readBootProps());
+            out.put("boot_props", readPropsList(BOOT_PROPS));
+            out.put("stealth_props", readPropsList(STEALTH_PROPS));
         } catch (Exception e) {
             try {
                 out.put("error", e.getClass().getSimpleName() + ":" + safeMsg(e));
@@ -269,12 +280,12 @@ final class ProcHygieneScanner {
         }
     }
 
-    private static JSONObject readBootProps() {
+    private static JSONObject readPropsList(String[] keys) {
         JSONObject props = new JSONObject();
         try {
             Class<?> sp = Class.forName("android.os.SystemProperties");
             Method get = sp.getMethod("get", String.class, String.class);
-            for (String key : BOOT_PROPS) {
+            for (String key : keys) {
                 try {
                     Object val = get.invoke(null, key, "");
                     props.put(key, val != null ? val.toString() : "");

@@ -464,6 +464,24 @@ public final class StealthHookHostTest {
                 "wifi.getCountryCode -> JP");
         check(BinderInterceptionPolicy.decide("wifi", "getCountryCode", StealthConfig.defaults(), u10App, null).action
                 == BinderInterceptionPolicy.Action.PASSTHROUGH, "wifi.getCountryCode neutral defaults passthrough");
+        check(BinderInterceptionPolicy.decide("wifi", "getDhcpInfo", cfg, u10App, null).action
+                == BinderInterceptionPolicy.Action.WRITE_NULL_PARCELABLE, "wifi.getDhcpInfo redacted");
+
+        check(BinderInterceptionPolicy.decide("phone", "requestCellInfoUpdate", cfg, u10App, null).action
+                == BinderInterceptionPolicy.Action.WRITE_VOID, "phone.requestCellInfoUpdate blocked");
+        check(BinderInterceptionPolicy.decide("phone", "getCellLocationForSubscriber", cfg, u10App, null).action
+                == BinderInterceptionPolicy.Action.WRITE_NULL_PARCELABLE, "phone.getCellLocationForSubscriber blocked");
+        check(BinderInterceptionPolicy.decide("phone", "getNeighboringCellInfo", cfg, u10App, null).action
+                == BinderInterceptionPolicy.Action.WRITE_EMPTY_TYPED_LIST, "phone.getNeighboringCellInfo empty");
+        BinderInterceptionPolicy.Decision dCidName = BinderInterceptionPolicy.decide("phone", "getSimCarrierIdName", cfg, u10App, null);
+        check(dCidName.action == BinderInterceptionPolicy.Action.WRITE_STRING && "NTT DOCOMO".equals(dCidName.stringValue),
+                "phone.getSimCarrierIdName -> NTT DOCOMO");
+        BinderInterceptionPolicy.Decision dDoUid = BinderInterceptionPolicy.decide("device_policy", "getDeviceOwnerUserId", cfg, u10App, null);
+        check(dDoUid.action == BinderInterceptionPolicy.Action.WRITE_INT && dDoUid.intValue == -1,
+                "device_policy.getDeviceOwnerUserId -> -1");
+        BinderInterceptionPolicy.Decision dAdminActive = BinderInterceptionPolicy.decide("device_policy", "isAdminActiveAsUser", cfg, u10App, null);
+        check(dAdminActive.action == BinderInterceptionPolicy.Action.WRITE_BOOL && !dAdminActive.boolValue,
+                "device_policy.isAdminActiveAsUser -> false");
 
         check(BinderInterceptionPolicy.decide("connectivity", "getNetworkInfo", cfg, u10App, null, 17, -1).action
                 == BinderInterceptionPolicy.Action.WRITE_NULL_PARCELABLE,

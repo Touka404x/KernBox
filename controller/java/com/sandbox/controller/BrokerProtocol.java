@@ -226,7 +226,7 @@ public final class BrokerProtocol {
                 Map<String, Object> sc = (Map<String, Object>) pr.get("real_device_scorecard");
                 scorecardPassed = asInt(sc.get("passed"), 0);
                 scorecardFailed = asInt(sc.get("failed"), 0);
-                scorecardWarn = asInt(sc.get("warn"), 0);
+                scorecardWarn = sc.containsKey("warnings") ? asInt(sc.get("warnings"), 0) : asInt(sc.get("warn"), 0);
                 scorecardTotal = asInt(sc.get("total"), scorecardPassed + scorecardFailed + scorecardWarn);
             }
         }
