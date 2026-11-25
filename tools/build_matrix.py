@@ -36,7 +36,7 @@ def resolve_go(explicit: str = "") -> str:
     return found
 
 
-def build_go_pair(go_exe: str, oem: str, kernel: str, stage_dir: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
+def build_go_pair(go_exe: str, oem: str, kernel: str, version: str, stage_dir: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
     tags = f"oem_{oem}" if kernel == "k510" else f"oem_{oem},kernel_compat"
     out_dir = stage_dir / "go" / f"{oem}-{kernel}"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -48,16 +48,17 @@ def build_go_pair(go_exe: str, oem: str, kernel: str, stage_dir: pathlib.Path) -
     env["GOOS"] = "linux"
     env["GOARCH"] = "arm64"
     env.setdefault("GOTOOLCHAIN", "local")
+    ldflags = f"-s -w -X sandbox_guard/internal/buildinfo.Version={version}"
 
-    print(f"[go build] oem={oem} kernel={kernel} tags={tags}")
+    print(f"[go build] oem={oem} kernel={kernel} version={version} tags={tags}")
     subprocess.run(
-        [go_exe, "build", "-trimpath", "-ldflags=-s -w", "-tags", tags, "-o", str(guard_bin), "./cmd/guard"],
+        [go_exe, "build", "-trimpath", f"-ldflags={ldflags}", "-tags", tags, "-o", str(guard_bin), "./cmd/guard"],
         cwd=REPO_ROOT / "guard",
         env=env,
         check=True,
     )
     subprocess.run(
-        [go_exe, "build", "-trimpath", "-ldflags=-s -w", "-tags", tags, "-o", str(broker_bin), "./cmd/broker"],
+        [go_exe, "build", "-trimpath", f"-ldflags={ldflags}", "-tags", tags, "-o", str(broker_bin), "./cmd/broker"],
         cwd=REPO_ROOT / "guard",
         env=env,
         check=True,
@@ -155,7 +156,7 @@ def main(argv=None) -> int:
         variants = []
         for oem in args.oems:
             for kernel, roots in KERNEL_ROOT_PAIRS:
-                guard_bin, broker_bin = build_go_pair(go_exe, oem, kernel, stage_dir)
+                guard_bin, broker_bin = build_go_pair(go_exe, oem, kernel, args.version, stage_dir)
                 for root in roots:
                     zip_name = f"KernBox-{oem}-{kernel}-{root}-arm64.zip"
                     meta = pack_variant.pack_variant(

@@ -251,6 +251,34 @@ class SelectVariantTests(unittest.TestCase):
         self.assertEqual(r["warnings"], [])
         self.assertEqual(r["commands"]["verify_cleanup"], "adb uninstall --user 10 com.sandbox.verify")
 
+    def test_android16_pixel_magisk_k510_and_generic_k419_apatch(self):
+        p_pixel = base_profile(
+            brand="Google",
+            manufacturer="Google",
+            android_sdk=36,
+            android_release="16",
+            root_manager="magisk",
+            root_version="28.1:MAGISK",
+            cgroup_v2_freeze=True,
+        )
+        r_pixel = sv.select_variant(p_pixel)
+        self.assertTrue(r_pixel["ok"])
+        self.assertEqual(r_pixel["artifact"], "KernBox-aosp-k510-magisk-arm64.zip")
+
+        p_gen = base_profile(
+            brand="Sony",
+            manufacturer="Sony",
+            oem_signals={"build_flavor": "xq_dq72-user"},
+            android_sdk=35,
+            android_release="15",
+            root_manager="apatch",
+            root_version="10888",
+            cgroup_v2_freeze=False,
+        )
+        r_gen = sv.select_variant(p_gen)
+        self.assertTrue(r_gen["ok"])
+        self.assertEqual(r_gen["artifact"], "KernBox-generic-k419-apatch-arm64.zip")
+
 
 if __name__ == "__main__":
     unittest.main()

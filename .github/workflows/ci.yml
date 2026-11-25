@@ -10,8 +10,8 @@ jobs:
   hygiene-and-python:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Privacy & CRLF Gatekeeper
@@ -32,8 +32,8 @@ jobs:
           - oem_generic
           - "oem_generic,kernel_compat,transport_vpn"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: guard/go.mod
           cache-dependency-path: guard/go.sum
@@ -51,8 +51,8 @@ jobs:
   stealth-host-tests:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "21"

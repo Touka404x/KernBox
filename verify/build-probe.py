@@ -8,11 +8,18 @@ import shutil
 import subprocess
 import sys
 from tempfile import TemporaryDirectory
-from zipfile import ZipFile
+from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 SOURCE = pathlib.Path(__file__).resolve().parent
 REPO_ROOT = SOURCE.parent
 IS_WIN = os.name == "nt"
+FIXED_DATE = (2026, 11, 25, 0, 0, 0)
+
+
+def fixed_zipinfo(arcname: str) -> ZipInfo:
+    zi = ZipInfo(filename=arcname, date_time=FIXED_DATE)
+    zi.compress_type = ZIP_DEFLATED
+    return zi
 
 
 def exe_name(base: str, win_ext: str = ".exe") -> str:
@@ -165,8 +172,8 @@ def build_apk(args: argparse.Namespace) -> pathlib.Path:
 
         jar = staging / "classes.jar"
         with ZipFile(jar, "w") as archive:
-            for compiled in classes.rglob("*.class"):
-                archive.write(compiled, compiled.relative_to(classes).as_posix())
+            for compiled in sorted(classes.rglob("*.class"), key=lambda p: p.relative_to(classes).as_posix()):
+                archive.writestr(fixed_zipinfo(compiled.relative_to(classes).as_posix()), compiled.read_bytes())
 
         run_cmd(tc, tc["d8"], "--min-api", "26", "--lib", tc["platform"], "--output", staging, jar)
         res_dir = staging / "res"
@@ -193,7 +200,7 @@ def build_apk(args: argparse.Namespace) -> pathlib.Path:
             compiled_res,
         )
         with ZipFile(unsigned, "a") as archive:
-            archive.write(staging / "classes.dex", "classes.dex")
+            archive.writestr(fixed_zipinfo("classes.dex"), (staging / "classes.dex").read_bytes())
 
         aligned = staging / "aligned.apk"
         run_cmd(tc, tc["zipalign"], "-f", "4", unsigned, aligned)
