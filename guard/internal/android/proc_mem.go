@@ -2,6 +2,7 @@ package android
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -198,6 +199,45 @@ func PrewarmSandboxAppFiles(packagesListPath, pkg string) {
 	}
 	_ = f.Close()
 	if codePath == "" || !strings.HasPrefix(codePath, "/data/app/") {
+		return
+	}
+	appDir := codePath
+	if strings.HasSuffix(appDir, ".apk") {
+		appDir = filepath.Dir(appDir)
+	}
+	PrewarmFiles([]string{
+		filepath.Join(appDir, "base.apk"),
+		filepath.Join(appDir, "oat", "arm64", "base.odex"),
+		filepath.Join(appDir, "oat", "arm64", "base.vdex"),
+	})
+}
+
+// PrewarmSandboxAppCodePath queries Android PackageManager for the true /data/app/... code path
+// and hints the kernel page cache with FADV_WILLNEED (best-effort, non-blocking).
+func PrewarmSandboxAppCodePath(ctx context.Context, r Runner, userID int, pkg string) {
+	if r == nil || oem.IsForbiddenUser(userID) || !contracts.ValidPackageName(pkg) {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	out, err := r.Run(ctx, 3*time.Second, "", "cmd", "package", "path", "--user", strconv.Itoa(userID), pkg)
+	if err != nil {
+		return
+	}
+	var codePath string
+	for _, line := range strings.Split(out, "\n") {
+		l := strings.TrimSpace(line)
+		if !strings.HasPrefix(l, "package:") {
+			continue
+		}
+		cand := strings.TrimSpace(strings.TrimPrefix(l, "package:"))
+		if strings.HasPrefix(cand, "/data/app/") {
+			codePath = cand
+			break
+		}
+	}
+	if codePath == "" {
 		return
 	}
 	appDir := codePath

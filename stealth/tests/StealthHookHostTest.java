@@ -18,6 +18,29 @@ public final class StealthHookHostTest {
         void addService(String name, Object service, boolean allowIsolated, int dumpPriority);
         Object getService(String name);
         Object checkService(String name);
+        Object getService2(String name);
+        Object checkService2(String name);
+    }
+
+    public static final class FakeServiceWithMetadata {
+        public Object service;
+        public FakeServiceWithMetadata(Object service) {
+            this.service = service;
+        }
+    }
+
+    public static final class FakeNestedService {
+        public Object binder;
+        public FakeNestedService(Object binder) {
+            this.binder = binder;
+        }
+    }
+
+    public static final class FakeNestedServiceWithMetadata {
+        public FakeNestedService service;
+        public FakeNestedServiceWithMetadata(Object binder) {
+            this.service = new FakeNestedService(binder);
+        }
     }
 
     public static class MockStubBase {
@@ -283,6 +306,16 @@ public final class StealthHookHostTest {
             public Object checkService(String name) {
                 return stored.get(name);
             }
+            @Override
+            public Object getService2(String name) {
+                Object v = stored.get(name);
+                return v == null ? null : new FakeServiceWithMetadata(v);
+            }
+            @Override
+            public Object checkService2(String name) {
+                Object v = stored.get(name);
+                return v == null ? null : new FakeNestedServiceWithMetadata(v);
+            }
         };
 
         Set<String> targets = SystemServerHook.targetServicesForProcess("system_server");
@@ -324,6 +357,11 @@ public final class StealthHookHostTest {
         check(proxy.getService("user") == rawUser, "default proxy getService must return rawUser");
         check(proxy.checkService("user") == rawUser, "default proxy checkService must return rawUser");
         check(proxy.getService("connectivity") == rawConn, "default proxy getService(connectivity) must return rawConn");
+        FakeServiceWithMetadata meta2 = (FakeServiceWithMetadata) proxy.getService2("user");
+        check(meta2 != null && meta2.service == rawUser, "default proxy getService2(user) must unwrap ServiceWithMetadata.service");
+        FakeNestedServiceWithMetadata nestedMeta2 = (FakeNestedServiceWithMetadata) proxy.checkService2("connectivity");
+        check(nestedMeta2 != null && nestedMeta2.service.binder == rawConn,
+                "default proxy checkService2(connectivity) must unwrap nested service.binder");
 
         FakeIServiceManager exportProxy = (FakeIServiceManager) SystemServerHook.createProxy(
                 real, FakeIServiceManager.class, new HashSet<>(targets), japanSampleConfig(), testFactory,
@@ -334,6 +372,10 @@ public final class StealthHookHostTest {
         exportProxy.addService("connectivity", rawConn, false, 0);
         exportProxy.addService("bluetooth_manager", rawBt, false, 0);
         check(exportProxy.getService("user") instanceof FakeWrapper, "export proxy getService(user) must return wrapped");
+        check(((FakeServiceWithMetadata) exportProxy.getService2("user")).service instanceof FakeWrapper,
+                "export proxy getService2(user) must keep wrapped binder");
+        check(((FakeNestedServiceWithMetadata) exportProxy.checkService2("connectivity")).service.binder instanceof FakeWrapper,
+                "export proxy checkService2(connectivity) must keep wrapped binder");
         check(exportProxy.getService("connectivity") instanceof FakeWrapper, "export proxy getService(connectivity) wrapped");
         check(exportProxy.getService("wifi") instanceof FakeWrapper, "export proxy getService(wifi) wrapped");
         check(exportProxy.getService("bluetooth_manager") instanceof FakeWrapper, "export proxy getService(bt) wrapped");

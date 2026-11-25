@@ -136,15 +136,19 @@ type WatchChannels struct {
 }
 
 type InotifyWatcher struct {
-	fd        int
-	stopR     int
-	stopW     int
-	done      chan struct{}
-	mu        sync.Mutex
-	kinds     map[int]string
-	workFD    int
-	workWd    int
-	closeOnce sync.Once
+	fd           int
+	stopR        int
+	stopW        int
+	done         chan struct{}
+	mu           sync.Mutex
+	kinds        map[int]string
+	proxyDirs    map[string]int
+	workFD       int
+	workWd       int
+	workUserID   int
+	workClientID int
+	workPkg      string
+	closeOnce    sync.Once
 }
 
 func StartInotifyWatcher(ch WatchChannels) (*InotifyWatcher, error) {
@@ -158,13 +162,14 @@ func StartInotifyWatcher(ch WatchChannels) (*InotifyWatcher, error) {
 		return nil, err
 	}
 	w := &InotifyWatcher{
-		fd:     fd,
-		stopR:  pipeFds[0],
-		stopW:  pipeFds[1],
-		done:   make(chan struct{}),
-		kinds:  make(map[int]string),
-		workFD: -1,
-		workWd: -1,
+		fd:        fd,
+		stopR:     pipeFds[0],
+		stopW:     pipeFds[1],
+		done:      make(chan struct{}),
+		kinds:     make(map[int]string),
+		proxyDirs: make(map[string]int),
+		workFD:    -1,
+		workWd:    -1,
 	}
 
 	add := func(path string, mask uint32, kind string, required bool) error {
@@ -190,12 +195,51 @@ func StartInotifyWatcher(ch WatchChannels) (*InotifyWatcher, error) {
 	}
 	_ = os.MkdirAll(contracts.MainBase, 0700)
 	_ = add(contracts.MainBase, unix.IN_CREATE|unix.IN_MOVED_TO|unix.IN_CLOSE_WRITE|unix.IN_DELETE|unix.IN_MOVED_FROM, "mainbase", false)
+	w.mu.Lock()
+	for wd, k := range w.kinds {
+		if k == "mainbase" {
+			w.proxyDirs[contracts.MainBase] = wd
+		}
+	}
+	w.mu.Unlock()
 	_ = add(filepath.Dir(contracts.PackagesListPath), unix.IN_MOVED_TO, "system", false)
 	_ = add(contracts.UsersSystemDir, unix.IN_MOVED_TO|unix.IN_CLOSE_WRITE|unix.IN_CREATE|unix.IN_DELETE, "users", false)
 	_ = add(contracts.NetdMiscDir, unix.IN_MOVED_TO|unix.IN_CLOSE_WRITE|unix.IN_CREATE|unix.IN_DELETE, "netd", false)
 
 	go w.loop(ch)
 	return w, nil
+}
+
+// EnsureProxyBaseWatch dynamically attaches an inotify watch on a custom proxy base directory
+// so sandbox_ack.v1.json updates trigger AckWake immediately without waiting for the 3s fallback timer.
+func (w *InotifyWatcher) EnsureProxyBaseWatch(dir string) {
+	if w == nil {
+		return
+	}
+	clean := filepath.Clean(strings.TrimSpace(dir))
+	if clean == "" || clean == "." {
+		return
+	}
+	w.mu.Lock()
+	_, exists := w.proxyDirs[clean]
+	w.mu.Unlock()
+	if exists {
+		return
+	}
+	_ = os.MkdirAll(clean, 0700)
+	mask := uint32(unix.IN_CREATE|unix.IN_MOVED_TO|unix.IN_CLOSE_WRITE|unix.IN_DELETE|unix.IN_MOVED_FROM|unix.IN_DONT_FOLLOW)
+	wd, err := unix.InotifyAddWatch(w.fd, clean, mask)
+	if err != nil {
+		return
+	}
+	w.mu.Lock()
+	if _, dup := w.proxyDirs[clean]; dup {
+		_, _ = unix.InotifyRmWatch(w.fd, uint32(wd))
+	} else {
+		w.proxyDirs[clean] = wd
+		w.kinds[wd] = "mainbase"
+	}
+	w.mu.Unlock()
 }
 
 // EnsureWorkFilesWatch attaches an inotify watch on /data/user/<u>/<workPkg>/files
@@ -209,10 +253,14 @@ func (w *InotifyWatcher) EnsureWorkFilesWatch(userID, clientUID int, workPkg ...
 		pkg = workPkg[0]
 	}
 	w.mu.Lock()
-	already := w.workWd >= 0
+	sameTarget := w.workWd >= 0 && w.workUserID == userID && w.workClientID == clientUID && w.workPkg == pkg
+	needReset := w.workWd >= 0 && !sameTarget
 	w.mu.Unlock()
-	if already {
+	if sameTarget {
 		return
+	}
+	if needReset {
+		w.resetWorkFilesWatch()
 	}
 
 	resolver := sysio.DefaultResolver()
@@ -251,6 +299,9 @@ func (w *InotifyWatcher) EnsureWorkFilesWatch(userID, clientUID int, workPkg ...
 	} else {
 		w.workFD = filesFD
 		w.workWd = wd
+		w.workUserID = userID
+		w.workClientID = clientUID
+		w.workPkg = pkg
 		w.kinds[wd] = "workfiles"
 	}
 	w.mu.Unlock()
@@ -267,6 +318,9 @@ func (w *InotifyWatcher) resetWorkFilesWatch() {
 		_ = unix.Close(w.workFD)
 		w.workFD = -1
 	}
+	w.workUserID = 0
+	w.workClientID = 0
+	w.workPkg = ""
 	w.mu.Unlock()
 }
 

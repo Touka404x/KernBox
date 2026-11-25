@@ -401,7 +401,9 @@ func SyncSandboxAppPoliciesWithOpts(ctx context.Context, r Runner, userID int, o
 		}
 	}
 	if btName := strings.TrimSpace(opts.BluetoothDeviceName); btName != "" && !strings.ContainsAny(btName, "\r\n\t\x00") {
-		_, _ = r.Run(ctx, 3*time.Second, "", "settings", "put", "--user", u, "secure", "bluetooth_name", btName)
+		if _, err := r.Run(ctx, 3*time.Second, "", "settings", "--user", u, "put", "secure", "bluetooth_name", btName); err != nil {
+			res.Errors = append(res.Errors, "settings bluetooth_name: "+err.Error())
+		}
 	}
 
 	if len(res.Errors) > 0 && res.LocaleApps == 0 && res.LocalePreserved == 0 && res.LocationApps == 0 {

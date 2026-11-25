@@ -31,5 +31,6 @@ func StartInotifyWatcher(ch WatchChannels) (*InotifyWatcher, error) {
 	return nil, errors.New("inotify only supported on linux")
 }
 
+func (w *InotifyWatcher) EnsureProxyBaseWatch(dir string)                         {}
 func (w *InotifyWatcher) EnsureWorkFilesWatch(userID, clientUID int, workPkg ...string) {}
 func (w *InotifyWatcher) Close()                                     {}

@@ -217,8 +217,8 @@ func tproxyRulesFor(family int, hook GateHook, spec GateSpec) ([]string, error) 
 		return []string{
 			"! -i lo -j RETURN",
 			"-m conntrack --ctdir REPLY -j RETURN",
-			fmt.Sprintf("-i lo -p tcp -m mark --mark %s -j TPROXY --on-port %d --on-ip 0.0.0.0 --tproxy-mark %s", mk, port, mk),
-			fmt.Sprintf("-i lo -p udp -m mark --mark %s -j TPROXY --on-port %d --on-ip 0.0.0.0 --tproxy-mark %s", mk, port, mk),
+			fmt.Sprintf("-i lo -p tcp -m mark --mark %s -j TPROXY --on-port %d --on-ip 127.0.0.1 --tproxy-mark %s", mk, port, mk),
+			fmt.Sprintf("-i lo -p udp -m mark --mark %s -j TPROXY --on-port %d --on-ip 127.0.0.1 --tproxy-mark %s", mk, port, mk),
 		}, nil
 
 	case contracts.ChainOutput:

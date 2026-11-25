@@ -163,7 +163,7 @@ func TestHandleCtlPresetApplyAndValidation(t *testing.T) {
 	if _, err := os.Stat(d.stealthRuntimePath); !os.IsNotExist(err) {
 		t.Fatalf("expected runtime_stealth.json purged, got err=%v", err)
 	}
-	if !runner.hasCallPrefix("cmd locale set-app-locales ") || !runner.hasCallPrefix("settings put --user 10 secure bluetooth_name Pixel 9") {
+	if !runner.hasCallPrefix("cmd locale set-app-locales ") || !runner.hasCallPrefix("settings --user 10 put secure bluetooth_name Pixel 9") {
 		t.Fatalf("expected policy sync locale & settings calls after preset-apply while policyLoaded=true, calls=%v", runner.calls)
 	}
 

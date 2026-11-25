@@ -196,6 +196,8 @@ def build_apk(args: argparse.Namespace) -> pathlib.Path:
             "8",
             "-encoding",
             "UTF-8",
+            "-Xlint:all,-options",
+            "-Werror",
             "-classpath",
             tc["platform"],
             "-d",
@@ -209,12 +211,13 @@ def build_apk(args: argparse.Namespace) -> pathlib.Path:
             for compiled in sorted(classes.rglob("*.class"), key=lambda p: p.relative_to(classes).as_posix()):
                 archive.writestr(fixed_zipinfo(compiled.relative_to(classes).as_posix()), compiled.read_bytes())
 
-        run_cmd(tc, tc["d8"], "--min-api", "26", "--lib", tc["platform"], "--output", staging, jar)
+        run_cmd(tc, tc["d8"], "--min-api", "26", "--release", "--lib", tc["platform"], "--output", staging, jar)
         with ZipFile(unsigned, "a") as archive:
             archive.writestr(fixed_zipinfo("classes.dex"), (staging / "classes.dex").read_bytes())
 
         aligned = staging / "aligned.apk"
         run_cmd(tc, tc["zipalign"], "-f", "4", unsigned, aligned)
+        ks_pass_arg = f"env:{args.storepass_env}" if args.storepass_env else f"pass:{storepass}"
         run_cmd(
             tc,
             tc["apksigner"],
@@ -224,13 +227,22 @@ def build_apk(args: argparse.Namespace) -> pathlib.Path:
             "--ks-key-alias",
             alias,
             "--ks-pass",
-            f"pass:{storepass}",
+            ks_pass_arg,
             "--out",
             output,
             aligned,
         )
 
-    run_cmd(tc, tc["apksigner"], "verify", "--print-certs", output)
+    verify_cmd = [str(tc["apksigner"]), "verify", "--print-certs", str(output)]
+    if IS_WIN and verify_cmd[0].lower().endswith(".bat"):
+        verify_cmd = ["cmd", "/c", *verify_cmd]
+    verify_res = subprocess.run(verify_cmd, env=tc["env"], check=True, capture_output=True, text=True)
+    sys.stdout.write(verify_res.stdout)
+    for line in verify_res.stdout.splitlines():
+        if "SHA-256 digest:" in line:
+            digest = line.split("SHA-256 digest:", 1)[1].strip().lower()
+            print(f"CERT_SHA256={digest}")
+            break
     run_cmd(tc, tc["aapt"], "dump", "badging", output)
     print(f"BUILT_APK={output} SIZE={output.stat().st_size}")
     return output
@@ -242,6 +254,7 @@ def main(argv=None) -> int:
     p.add_argument("--keystore", help="Optional PKCS12/JKS release keystore path")
     p.add_argument("--alias", default="kernbox-controller", help="Keystore key alias")
     p.add_argument("--storepass", default="android", help="Keystore password")
+    p.add_argument("--storepass-env", default="", help="Env var name holding keystore password (passed via env:VAR)")
     p.add_argument("--jdk", help="JDK home path (overrides JAVA_HOME)")
     p.add_argument("--sdk", help="Android SDK path (overrides ANDROID_SDK_ROOT)")
     args = p.parse_args(argv)

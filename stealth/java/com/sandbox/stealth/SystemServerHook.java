@@ -191,6 +191,26 @@ public final class SystemServerHook {
                             return raw;
                         }
                     }
+                } else if (("getService2".equals(name) || "checkService2".equals(name))
+                        && args != null && args.length >= 1 && args[0] instanceof String) {
+                    String svcName = (String) args[0];
+                    Object raw = rawServices.get(svcName);
+                    if (raw != null) {
+                        Object res;
+                        try {
+                            res = method.invoke(realSm, args);
+                        } catch (InvocationTargetException e) {
+                            throw e.getTargetException() != null ? e.getTargetException() : e;
+                        }
+                        if (exportWrappedPredicate != null && exportWrappedPredicate.getAsBoolean()) {
+                            logInfo("exporting wrapped service2 " + svcName + " to AMS commonServices");
+                            return res;
+                        }
+                        if (res != null) {
+                            replaceServiceWithMetadataBinder(res, raw);
+                        }
+                        return res;
+                    }
                 }
                 try {
                     return method.invoke(realSm, args);
@@ -200,5 +220,51 @@ public final class SystemServerHook {
             }
         };
         return Proxy.newProxyInstance(ismInterface.getClassLoader(), new Class<?>[]{ismInterface}, handler);
+    }
+
+    /**
+     * Android 15/16 ServiceManager.rawGetService() queries IServiceManager.getService2()/checkService2(),
+     * returning a ServiceWithMetadata/Service carrier whose binder field must be unwrapped for internal callers.
+     */
+    private static void replaceServiceWithMetadataBinder(Object holder, Object rawBinder) {
+        if (holder == null || rawBinder == null) {
+            return;
+        }
+        try {
+            Field svcField = findField(holder.getClass(), "service");
+            if (svcField == null) {
+                svcField = findField(holder.getClass(), "binder");
+            }
+            if (svcField == null) {
+                return;
+            }
+            svcField.setAccessible(true);
+            Object current = svcField.get(holder);
+            if (svcField.getType().isInstance(rawBinder)) {
+                svcField.set(holder, rawBinder);
+                return;
+            }
+            if (current != null && current != holder) {
+                Field nested = findField(current.getClass(), "binder");
+                if (nested == null) {
+                    nested = findField(current.getClass(), "service");
+                }
+                if (nested != null && nested.getType().isInstance(rawBinder)) {
+                    nested.setAccessible(true);
+                    nested.set(current, rawBinder);
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static Field findField(Class<?> cls, String name) {
+        for (Class<?> c = cls; c != null && c != Object.class; c = c.getSuperclass()) {
+            try {
+                return c.getDeclaredField(name);
+            } catch (NoSuchFieldException ignored) {
+            }
+        }
+        return null;
     }
 }

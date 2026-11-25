@@ -70,7 +70,12 @@ def resolve_toolchain(args: argparse.Namespace) -> dict:
     if not prebuilt_candidates:
         raise FileNotFoundError(f"LLVM toolchain bin dir not found under {ndk}")
     ndk_bin = prebuilt_candidates[0]
-    clang_name = "aarch64-linux-android33-clang++.cmd" if IS_WIN else "aarch64-linux-android33-clang++"
+    min_sdk = int(getattr(args, "min_sdk", 31) or 31)
+    clang_name = (
+        f"aarch64-linux-android{min_sdk}-clang++.cmd"
+        if IS_WIN
+        else f"aarch64-linux-android{min_sdk}-clang++"
+    )
     clangxx = ndk_bin / clang_name
     if not clangxx.is_file():
         clang_hits = sorted(ndk_bin.glob("aarch64-linux-android*-clang++" + (".cmd" if IS_WIN else "")), reverse=True)
@@ -239,6 +244,7 @@ def verify_elf(tc: dict, so_path: pathlib.Path):
 def parse_args(argv=None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Build OEM-specialized Zygisk stealth module library")
     p.add_argument("--oem", choices=OEMS, default="generic", help="OEM property specialization profile")
+    p.add_argument("--min-sdk", type=int, default=31, help="NDK target API level for ARM64 clang++ (default: 31 / Android 12+)")
     p.add_argument("--out", help="Output path for compiled arm64-v8a .so")
     p.add_argument("--build-dir", help="Intermediate build directory (defaults to stealth/build)")
     p.add_argument("--skip-dex-if-exists", action="store_true", help="Reuse existing stealth_agent_dex.h in build-dir")

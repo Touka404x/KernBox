@@ -59,8 +59,24 @@ jobs:
           echo "version=${RAW}" >> "$GITHUB_OUTPUT"
 
       - name: Build & verify 30 KernBox variants + KernBox.apk + KernBoxVerify.apk
+        env:
+          CONTROLLER_KEYSTORE_B64: ${{ secrets.CONTROLLER_KEYSTORE_B64 }}
+          CONTROLLER_KEYSTORE_PASS: ${{ secrets.CONTROLLER_KEYSTORE_PASS }}
+          CONTROLLER_KEY_ALIAS: ${{ secrets.CONTROLLER_KEY_ALIAS }}
         run: |
-          python tools/build_matrix.py --out dist --version "${{ steps.ver.outputs.version }}"
+          EXTRA_CTRL_ARGS=""
+          if [ -n "$CONTROLLER_KEYSTORE_B64" ]; then
+            KEYSTORE_FILE="$RUNNER_TEMP/controller-release.p12"
+            printf '%s' "$CONTROLLER_KEYSTORE_B64" | base64 -d > "$KEYSTORE_FILE"
+            EXTRA_CTRL_ARGS="--controller-keystore $KEYSTORE_FILE"
+            if [ -n "$CONTROLLER_KEY_ALIAS" ]; then
+              EXTRA_CTRL_ARGS="$EXTRA_CTRL_ARGS --controller-alias $CONTROLLER_KEY_ALIAS"
+            fi
+            if [ -n "$CONTROLLER_KEYSTORE_PASS" ]; then
+              EXTRA_CTRL_ARGS="$EXTRA_CTRL_ARGS --controller-storepass-env CONTROLLER_KEYSTORE_PASS"
+            fi
+          fi
+          python tools/build_matrix.py --out dist --version "${{ steps.ver.outputs.version }}" $EXTRA_CTRL_ARGS
           python - <<'PY'
           import hashlib, json, pathlib, zipfile
           dist = pathlib.Path("dist")
@@ -83,6 +99,10 @@ jobs:
                   assert zf.testzip() is None
           print("RELEASE_MATRIX_VERIFIED", len(zips), len(sums))
           PY
+
+      - name: Cleanup decoded keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/controller-release.p12"
 
       - name: Upload workflow build artifact
         uses: actions/upload-artifact@v7

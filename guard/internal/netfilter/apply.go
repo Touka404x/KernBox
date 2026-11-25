@@ -46,6 +46,34 @@ func resolveHostIPTablesBins() (string, string) {
 	return ipt4Bin, ipt6Bin
 }
 
+func resolveIPTablesCompanionBin(name, v4, v6 string, lookPath func(string) (string, error)) string {
+	switch {
+	case name == "iptables":
+		return v4
+	case strings.HasPrefix(name, "iptables-") && v4 != "iptables":
+		suf := strings.TrimPrefix(name, "iptables")
+		if p, err := lookPath(v4 + suf); err == nil {
+			return p
+		}
+		base := strings.TrimSuffix(strings.TrimSuffix(v4, "-nft"), "-legacy")
+		if p, err := lookPath(base + suf); err == nil {
+			return p
+		}
+	case name == "ip6tables":
+		return v6
+	case strings.HasPrefix(name, "ip6tables-") && v6 != "ip6tables":
+		suf := strings.TrimPrefix(name, "ip6tables")
+		if p, err := lookPath(v6 + suf); err == nil {
+			return p
+		}
+		base := strings.TrimSuffix(strings.TrimSuffix(v6, "-nft"), "-legacy")
+		if p, err := lookPath(base + suf); err == nil {
+			return p
+		}
+	}
+	return name
+}
+
 type ExecRunner struct{}
 
 func (ExecRunner) Run(ctx context.Context, timeout time.Duration, stdin string, name string, args ...string) (string, error) {
@@ -54,23 +82,7 @@ func (ExecRunner) Run(ctx context.Context, timeout time.Duration, stdin string, 
 	bin := name
 	if strings.HasPrefix(name, "iptables") || strings.HasPrefix(name, "ip6tables") {
 		v4, v6 := resolveHostIPTablesBins()
-		if name == "iptables" {
-			bin = v4
-		} else if strings.HasPrefix(name, "iptables-") && v4 != "iptables" {
-			base := strings.TrimSuffix(strings.TrimSuffix(v4, "-nft"), "-legacy")
-			suf := strings.TrimPrefix(name, "iptables")
-			if p, err := exec.LookPath(base + suf); err == nil {
-				bin = p
-			}
-		} else if name == "ip6tables" {
-			bin = v6
-		} else if strings.HasPrefix(name, "ip6tables-") && v6 != "ip6tables" {
-			base := strings.TrimSuffix(strings.TrimSuffix(v6, "-nft"), "-legacy")
-			suf := strings.TrimPrefix(name, "ip6tables")
-			if p, err := exec.LookPath(base + suf); err == nil {
-				bin = p
-			}
-		}
+		bin = resolveIPTablesCompanionBin(name, v4, v6, exec.LookPath)
 	}
 	cmd := exec.CommandContext(cctx, bin, args...)
 	if stdin != "" {
@@ -224,10 +236,20 @@ func (c *Controller) ensureTProxyRouting(ctx context.Context, spec GateSpec) err
 		return err
 	}
 	haveRule := false
+	staleRules := 0
 	for _, line := range strings.Split(rulesOut, "\n") {
 		l := strings.TrimSpace(line)
-		if strings.HasPrefix(l, pref+":") && strings.Contains(l, wantFw) && strings.Contains(l, "lookup "+table) {
+		if !strings.HasPrefix(l, pref+":") {
+			continue
+		}
+		if strings.Contains(l, wantFw) && strings.Contains(l, "lookup "+table) {
 			haveRule = true
+		} else {
+			staleRules++
+		}
+	}
+	for i := 0; i < staleRules && i < 4; i++ {
+		if _, derr := c.Runner.Run(ctx, 4*time.Second, "", "ip", "-4", "rule", "del", "pref", pref); derr != nil {
 			break
 		}
 	}

@@ -14,9 +14,13 @@ type sandbox_broker_exec file_type
 typeattribute sandbox_broker_exec exec_type
 allow ksu sandbox_broker_exec file { read getattr map execute open }
 allow ksu sandbox_broker process transition
+allow su sandbox_broker_exec file { read getattr map execute open }
+allow su sandbox_broker process transition
 allow sandbox_broker sandbox_broker_exec file { read getattr map execute open entrypoint }
 type_transition ksu sandbox_broker_exec process sandbox_broker
+type_transition su sandbox_broker_exec process sandbox_broker
 allow sandbox_broker ksu fd use
+allow sandbox_broker su fd use
 allow sandbox_broker sandbox_broker fd use
 allow sandbox_broker sandbox_broker fifo_file { read write getattr ioctl }
 allow sandbox_broker sandbox_broker dir { search getattr read open }
@@ -51,7 +55,11 @@ allow sandbox_broker sandbox_priv_dir dir { search getattr }
 allow sandbox_broker sandbox_priv_file file { read open getattr }
 allow sandbox_broker sandbox_priv_sock sock_file { write getattr }
 allow sandbox_broker ksu unix_stream_socket { connectto read write getattr getopt setopt shutdown }
+allow sandbox_broker su unix_stream_socket { connectto read write getattr getopt setopt shutdown }
 type_transition sandbox_broker sandbox_ctrl_sock_dir sock_file sandbox_ctrl_sock
 type_transition ksu sandbox_priv_dir file sandbox_priv_file
 type_transition ksu sandbox_priv_dir sock_file sandbox_priv_sock
 type_transition ksu sandbox_cfg_dir file sandbox_cfg_file
+type_transition su sandbox_priv_dir file sandbox_priv_file
+type_transition su sandbox_priv_dir sock_file sandbox_priv_sock
+type_transition su sandbox_cfg_dir file sandbox_cfg_file

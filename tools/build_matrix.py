@@ -112,6 +112,12 @@ def build_verify_apk(out_dir: pathlib.Path, args: argparse.Namespace) -> dict:
 def build_controller_apk(out_dir: pathlib.Path, args: argparse.Namespace) -> dict:
     apk_path = out_dir / "KernBox.apk"
     cmd = [sys.executable, str(REPO_ROOT / "controller" / "build-controller.py"), "--out", str(apk_path)]
+    if args.controller_keystore:
+        cmd.extend(["--keystore", args.controller_keystore])
+    if args.controller_alias:
+        cmd.extend(["--alias", args.controller_alias])
+    if args.controller_storepass_env:
+        cmd.extend(["--storepass-env", args.controller_storepass_env])
     if args.jdk:
         cmd.extend(["--jdk", args.jdk])
     if args.sdk:
@@ -129,8 +135,11 @@ def build_controller_apk(out_dir: pathlib.Path, args: argparse.Namespace) -> dic
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description="Build 30-variant KernBox release matrix")
     p.add_argument("--out", type=pathlib.Path, default=REPO_ROOT / "dist", help="Output distribution directory")
-    p.add_argument("--version", default="1.0.0", help="Release version string")
+    p.add_argument("--version", default="1.1.0", help="Release version string")
     p.add_argument("--oems", nargs="+", choices=OEMS, default=list(OEMS), help="Subset of OEMs to build")
+    p.add_argument("--controller-keystore", default="", help="Optional release keystore for KernBox.apk")
+    p.add_argument("--controller-alias", default="kernbox-controller", help="Optional keystore alias for KernBox.apk")
+    p.add_argument("--controller-storepass-env", default="", help="Optional env var holding keystore password")
     p.add_argument("--go", default="", help="Path to go executable")
     p.add_argument("--jdk", default="", help="Optional JDK home")
     p.add_argument("--sdk", default="", help="Optional Android SDK root")

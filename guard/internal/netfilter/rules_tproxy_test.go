@@ -121,6 +121,9 @@ func TestTProxyRulesQuicKernelRejectAndPreBypass(t *testing.T) {
 	if len(preRules) != 4 || preRules[0] != "! -i lo -j RETURN" {
 		t.Fatalf("expected ! -i lo -j RETURN as rule 0 in SBW_TPROXY_PRE, got %v", preRules)
 	}
+	if !strings.Contains(preRules[2], "--on-ip 127.0.0.1") || !strings.Contains(preRules[3], "--on-ip 127.0.0.1") {
+		t.Fatalf("expected SBW_TPROXY_PRE TCP/UDP rules to target --on-ip 127.0.0.1, got %v", preRules)
+	}
 
 	spec.KernelRejectQuicUDP443 = false
 	outNoReject, err := RulesFor(4, GateHooks[3], spec)

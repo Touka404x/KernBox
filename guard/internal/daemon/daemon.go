@@ -205,7 +205,6 @@ func NewDaemon() (*Daemon, error) {
 		workCfgDir:         contracts.WorkCfgDir,
 		desiredStatePath:   contracts.DesiredStatePath,
 		exemptionPath:      contracts.ExemptionPath,
-		sandboxAckPath:     contracts.SandboxAckPath,
 		upgradeFencePath:   contracts.UpgradeFencePath,
 		stealthConfigPath:    contracts.StealthConfigPath,
 		stealthRuntimePath:   contracts.StealthRuntimePath,
@@ -213,9 +212,7 @@ func NewDaemon() (*Daemon, error) {
 		stealthBootTriesPath: contracts.StealthBootTriesPath,
 		perfConfigPath:     contracts.PerfConfigPath,
 		prunedPkgsPath:     contracts.PrunedPkgsPath,
-		mainConfigPath:     contracts.MainConfigPath,
 		packagesListPath:   contracts.PackagesListPath,
-		proxyCtlScript:     contracts.MainCtlScript,
 		reconcileCh:        make(chan reconcileReq, 16),
 		timerRefreshCh:     make(chan struct{}, 1),
 		quitCh:             make(chan struct{}),
@@ -1079,6 +1076,9 @@ func (d *Daemon) reconcileOnce(ctx context.Context, req reconcileReq) error {
 		d.lastError = "policy.json not pinned"
 		d.mu.Unlock()
 		return nil
+	}
+	if d.watchers != nil && d.sandboxAckPath == "" {
+		d.watchers.EnsureProxyBaseWatch(filepath.Dir(policy.EffectiveProxyAckPath()))
 	}
 
 	if req.syncHide {
@@ -2488,8 +2488,8 @@ func (d *Daemon) HandleRPC(ctx context.Context, req contracts.RPCRequest) contra
 				_ = android.BoostUIDLaunch(d.cgroupRoot, targetUID, time.Duration(perf.LaunchBoostMs)*time.Millisecond)
 			}
 		}
-		if !fastPath && req.Pkg != "" {
-			go android.PrewarmSandboxAppFiles(pkgList, req.Pkg)
+		if !fastPath && req.Pkg != "" && d.runner != nil {
+			go android.PrewarmSandboxAppCodePath(context.Background(), d.runner, policy.UserID, req.Pkg)
 		}
 
 		tLaunch := time.Now()
@@ -2603,7 +2603,14 @@ func (d *Daemon) HandleCtl(ctx context.Context, cmd string, args []string) (stri
 		}
 		ackPath := d.sandboxAckPath
 		if ackPath == "" {
-			ackPath = contracts.SandboxAckPath
+			d.mu.Lock()
+			hasPol, pol := d.policyLoaded, d.policy
+			d.mu.Unlock()
+			if hasPol {
+				ackPath = pol.EffectiveProxyAckPath()
+			} else {
+				ackPath = contracts.SandboxAckPath
+			}
 		}
 		b, _ := json.Marshal(fence)
 		_ = sysio.WriteAtomic(fencePath, append(b, '\n'), sysio.WriteAtomicOptions{Perm: 0600, UID: 0, GID: 0})
@@ -2631,14 +2638,21 @@ func (d *Daemon) HandleCtl(ctx context.Context, cmd string, args []string) (stri
 		return "upgrading fence cleared", nil
 
 	case "reload-policy":
-		if p, err := ReadPolicy(); err == nil {
-			d.mu.Lock()
-			d.policy = p
-			d.policyLoaded = true
-			d.cachedID = nil
-			d.mu.Unlock()
+		p, err := ReadPolicy()
+		if err != nil {
+			return "", fmt.Errorf("reload-policy: %w", err)
 		}
-		_ = d.requestReconcile(ctx, reconcileReq{clearAckBlock: true, invalidateID: true, refreshCert: true, syncHide: true})
+		d.mu.Lock()
+		d.policy = p
+		d.policyLoaded = true
+		d.cachedID = nil
+		d.mu.Unlock()
+		if d.watchers != nil && d.sandboxAckPath == "" {
+			d.watchers.EnsureProxyBaseWatch(filepath.Dir(p.EffectiveProxyAckPath()))
+		}
+		if err := d.requestReconcile(ctx, reconcileReq{clearAckBlock: true, invalidateID: true, refreshCert: true, syncHide: true}); err != nil {
+			return "", err
+		}
 		return "reloaded", nil
 
 	case "status":
@@ -3242,6 +3256,7 @@ func RunCtl(args []string) error {
 			fmt.Println("unpinned")
 			return nil
 		}
+		_ = removeIfExist(p.EffectiveProxyAckPath())
 		var gen uint64 = 1
 		prevClientUID := 0
 		if prev, err := ReadExemption(contracts.ExemptionPath); err == nil {
@@ -3297,6 +3312,7 @@ func RunCtl(args []string) error {
 		_ = sysio.WriteAtomic(contracts.UpgradeFencePath, append(b, '\n'), sysio.WriteAtomicOptions{Perm: 0600, UID: 0, GID: 0})
 		_ = removeIfExist(contracts.SandboxAckPath)
 		if p, err := ReadPolicy(); err == nil {
+			_ = removeIfExist(p.EffectiveProxyAckPath())
 			spec := closedGateSpec(p, true)
 			if err := nf.ApplyOrVerify(ctx, spec, false); err != nil {
 				return err
@@ -3440,13 +3456,25 @@ func RunCtl(args []string) error {
 		fmt.Println(string(b))
 		return nil
 
+	case "reload-policy":
+		out, err := rpc.SendRootCtl(contracts.CtlSockPath, "reload-policy")
+		if err != nil {
+			return err
+		}
+		fmt.Println(out)
+		return nil
+
 	case "preset-apply":
 		if len(rest) != 1 {
 			return errors.New("usage: preset-apply <preset.json>")
 		}
-		if out, err := rpc.SendRootCtl(contracts.CtlSockPath, "preset-apply", rest[0]); err == nil {
+		out, err := rpc.SendRootCtl(contracts.CtlSockPath, "preset-apply", rest[0])
+		if err == nil {
 			fmt.Println(out)
 			return nil
+		}
+		if !isCtlDaemonUnavailable(err) {
+			return err
 		}
 		dOff := &Daemon{
 			runner:               runner,
@@ -3471,9 +3499,13 @@ func RunCtl(args []string) error {
 		return nil
 
 	case "status":
-		if out, err := rpc.SendRootCtl(contracts.CtlSockPath, "status"); err == nil {
+		out, err := rpc.SendRootCtl(contracts.CtlSockPath, "status")
+		if err == nil {
 			fmt.Println(out)
 			return nil
+		}
+		if !isCtlDaemonUnavailable(err) {
+			return err
 		}
 		p, err := ReadPolicy()
 		if err != nil {
@@ -3506,9 +3538,13 @@ func RunCtl(args []string) error {
 		return nil
 
 	case "sync-hide":
-		if out, err := rpc.SendRootCtl(contracts.CtlSockPath, "sync-hide"); err == nil {
+		out, err := rpc.SendRootCtl(contracts.CtlSockPath, "sync-hide")
+		if err == nil {
 			fmt.Println(out)
 			return nil
+		}
+		if !isCtlDaemonUnavailable(err) {
+			return err
 		}
 		p, err := ReadPolicy()
 		if err != nil {
@@ -3538,9 +3574,13 @@ func RunCtl(args []string) error {
 		return nil
 
 	case "sync-policies":
-		if out, err := rpc.SendRootCtl(contracts.CtlSockPath, "sync-policies"); err == nil {
+		out, err := rpc.SendRootCtl(contracts.CtlSockPath, "sync-policies")
+		if err == nil {
 			fmt.Println(out)
 			return nil
+		}
+		if !isCtlDaemonUnavailable(err) {
+			return err
 		}
 		p, err := ReadPolicy()
 		if err != nil {
@@ -3556,9 +3596,13 @@ func RunCtl(args []string) error {
 		return nil
 
 	case "perf-status":
-		if out, err := rpc.SendRootCtl(contracts.CtlSockPath, "perf-status"); err == nil {
+		out, err := rpc.SendRootCtl(contracts.CtlSockPath, "perf-status")
+		if err == nil {
 			fmt.Println(out)
 			return nil
+		}
+		if !isCtlDaemonUnavailable(err) {
+			return err
 		}
 		perf := LoadPerfConfig(contracts.PerfConfigPath)
 		b, _ := json.MarshalIndent(perf, "", "  ")
@@ -3566,9 +3610,13 @@ func RunCtl(args []string) error {
 		return nil
 
 	case "perf-trace":
-		if out, err := rpc.SendRootCtl(contracts.CtlSockPath, "perf-trace"); err == nil {
+		out, err := rpc.SendRootCtl(contracts.CtlSockPath, "perf-trace")
+		if err == nil {
 			fmt.Println(out)
 			return nil
+		}
+		if !isCtlDaemonUnavailable(err) {
+			return err
 		}
 		fmt.Println("[]")
 		return nil
@@ -3581,9 +3629,13 @@ func RunCtl(args []string) error {
 		return errors.New("sandbox_guard daemon not running")
 
 	case "prune-bloat":
-		if out, err := rpc.SendRootCtl(contracts.CtlSockPath, "prune-bloat"); err == nil {
+		out, err := rpc.SendRootCtl(contracts.CtlSockPath, "prune-bloat")
+		if err == nil {
 			fmt.Println(out)
 			return nil
+		}
+		if !isCtlDaemonUnavailable(err) {
+			return err
 		}
 		p, err := ReadPolicy()
 		if err != nil {
@@ -3598,9 +3650,13 @@ func RunCtl(args []string) error {
 		return nil
 
 	case "restore-bloat":
-		if out, err := rpc.SendRootCtl(contracts.CtlSockPath, "restore-bloat"); err == nil {
+		out, err := rpc.SendRootCtl(contracts.CtlSockPath, "restore-bloat")
+		if err == nil {
 			fmt.Println(out)
 			return nil
+		}
+		if !isCtlDaemonUnavailable(err) {
+			return err
 		}
 		p, err := ReadPolicy()
 		if err != nil {
@@ -3615,16 +3671,28 @@ func RunCtl(args []string) error {
 		return nil
 
 	case "flush-sandbox-conns":
-		if out, err := rpc.SendRootCtl(contracts.CtlSockPath, "flush-sandbox-conns"); err == nil {
+		out, err := rpc.SendRootCtl(contracts.CtlSockPath, "flush-sandbox-conns")
+		if err == nil {
 			fmt.Println(out)
 			return nil
 		}
+		if !isCtlDaemonUnavailable(err) {
+			return err
+		}
 		perf := LoadPerfConfig(contracts.PerfConfigPath)
-		n, err := FlushSandboxConnections(ctx, contracts.MainConfigPath, perf.SandboxInboundName)
+		cfgPath := contracts.MainConfigPath
+		inbound := perf.SandboxInboundName
+		if p, perr := ReadPolicy(); perr == nil {
+			cfgPath = p.EffectiveProxyConfigPath()
+			if p.ProxyInboundName != "" {
+				inbound = p.ProxyInboundName
+			}
+		}
+		n, err := FlushSandboxConnections(ctx, cfgPath, inbound)
 		if err != nil {
 			return err
 		}
-		b, _ := json.Marshal(map[string]any{"inbound": perf.SandboxInboundName, "closed": n})
+		b, _ := json.Marshal(map[string]any{"inbound": inbound, "closed": n})
 		fmt.Println(string(b))
 		return nil
 
@@ -3632,9 +3700,13 @@ func RunCtl(args []string) error {
 		if len(rest) != 2 {
 			return errors.New("usage: set-app-locale <package> <locale|clear>")
 		}
-		if out, err := rpc.SendRootCtl(contracts.CtlSockPath, "set-app-locale", rest...); err == nil {
+		out, err := rpc.SendRootCtl(contracts.CtlSockPath, "set-app-locale", rest...)
+		if err == nil {
 			fmt.Println(out)
 			return nil
+		}
+		if !isCtlDaemonUnavailable(err) {
+			return err
 		}
 		p, err := ReadPolicy()
 		if err != nil {
@@ -3661,9 +3733,18 @@ func RunCtl(args []string) error {
 		if len(rest) == 0 {
 			return errors.New("install-apk requires at least 1 apk path")
 		}
-		if out, err := rpc.SendRootCtl(contracts.CtlSockPath, "install-apk", rest...); err == nil {
+		out, err := rpc.SendRootCtl(contracts.CtlSockPath, "install-apk", rest...)
+		if err == nil {
 			fmt.Println(out)
 			return nil
+		}
+		if !isCtlDaemonUnavailable(err) {
+			return err
+		}
+		for _, apkPath := range rest {
+			if !rpc.IsSafeAPKPath(apkPath) {
+				return fmt.Errorf("unsafe apk path rejected: %q", apkPath)
+			}
 		}
 		p, err := ReadPolicy()
 		if err != nil {
@@ -3681,9 +3762,13 @@ func RunCtl(args []string) error {
 		return nil
 
 	case "stealth-status":
-		if out, err := rpc.SendRootCtl(contracts.CtlSockPath, "stealth-status"); err == nil {
+		out, err := rpc.SendRootCtl(contracts.CtlSockPath, "stealth-status")
+		if err == nil {
 			fmt.Println(out)
 			return nil
+		}
+		if !isCtlDaemonUnavailable(err) {
+			return err
 		}
 		d := &Daemon{
 			stealthConfigPath:    contracts.StealthConfigPath,
@@ -3699,9 +3784,13 @@ func RunCtl(args []string) error {
 		if len(rest) != 1 || (rest[0] != "on" && rest[0] != "off") {
 			return errors.New("usage: stealth-toggle on|off")
 		}
-		if out, err := rpc.SendRootCtl(contracts.CtlSockPath, "stealth-toggle", rest[0]); err == nil {
+		out, err := rpc.SendRootCtl(contracts.CtlSockPath, "stealth-toggle", rest[0])
+		if err == nil {
 			fmt.Println(out)
 			return nil
+		}
+		if !isCtlDaemonUnavailable(err) {
+			return err
 		}
 		d := &Daemon{
 			stealthConfigPath:    contracts.StealthConfigPath,
