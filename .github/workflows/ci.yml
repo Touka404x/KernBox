@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [oss-main, main]
 
+permissions:
+  contents: read
+
 jobs:
   hygiene-and-python:
     runs-on: ubuntu-latest
@@ -18,6 +21,16 @@ jobs:
         run: python tools/verify_privacy_leak.py
       - name: Python Variant Selector & Packaging Unit Tests
         run: python -m unittest discover -s tools -p "test_*.py" -v
+      - name: Shellcheck on rendered packaging & tool scripts
+        run: |
+          mkdir -p /tmp/sc-stage/out
+          printf '\177ELFdummy' > /tmp/sc-stage/dummy
+          python packaging/pack_variant.py --oem hyperos --kernel k510 --root ksu \
+            --guard-bin /tmp/sc-stage/dummy --broker-bin /tmp/sc-stage/dummy --zygisk-so /tmp/sc-stage/dummy \
+            --out /tmp/sc-stage/KernBox-sc.zip --quiet
+          python -c "import zipfile; zipfile.ZipFile('/tmp/sc-stage/KernBox-sc.zip').extractall('/tmp/sc-stage/out')"
+          shellcheck -s sh -S warning -e SC3043,SC2034,SC2154 /tmp/sc-stage/out/*.sh
+          shellcheck -s sh -S warning tools/probe_device.sh
 
   go-multi-variant:
     runs-on: ubuntu-latest
@@ -44,6 +57,10 @@ jobs:
           GOOS=linux GOARCH=arm64 go vet -tags "${{ matrix.tags }}" ./...
           GOOS=linux GOARCH=arm64 go build -tags "${{ matrix.tags }}" -o /tmp/guard ./cmd/guard
           GOOS=linux GOARCH=arm64 go build -tags "${{ matrix.tags }}" -o /tmp/broker ./cmd/broker
+          if GOOS=linux GOARCH=arm64 go list -tags "${{ matrix.tags }}" -deps ./cmd/guard ./cmd/broker | grep -qx testing; then
+            echo "ERROR: testing package linked into production binary"
+            exit 1
+          fi
       - name: Go test (-race)
         working-directory: guard
         run: go test -race -count=1 -timeout 120s -tags "${{ matrix.tags }}" ./...
@@ -56,11 +73,11 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
-      - name: Install Android 35 SDK platform
+      - name: Install Android 35 SDK platform & build-tools
         run: |
           SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           yes | "$SDKM" --licenses >/dev/null || true
-          "$SDKM" "platforms;android-35"
+          "$SDKM" "platforms;android-35" "build-tools;35.0.0"
       - name: C++ 5-OEM stealth logic tests
         run: |
           for oem in OEM_HYPEROS OEM_OPLUS OEM_ONEUI OEM_AOSP OEM_GENERIC; do
@@ -83,3 +100,8 @@ jobs:
             controller/java/com/sandbox/controller/Strings.java \
             controller/tests/BrokerProtocolHostTest.java
           java -cp /tmp/ctrl_classes com.sandbox.controller.BrokerProtocolHostTest
+      - name: Build Controller & Verify APKs
+        run: |
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
+          python3 controller/build-controller.py --out /tmp/KernBox.apk
+          python3 verify/build-probe.py --out /tmp/KernBoxVerify.apk

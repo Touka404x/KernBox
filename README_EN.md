@@ -22,8 +22,8 @@
   <strong>English</strong> ·
   <a href="https://github.com/Touka404x/KernBox/releases/latest">Download Latest</a> ·
   <a href="ARCHITECTURE.md">Architecture</a> ·
-  <a href="docs/TPROXY_INTEGRATION.md">TProxy Guide</a> ·
-  <a href="docs/FAQ.md">FAQ</a> ·
+  <a href="docs/TPROXY_INTEGRATION_EN.md">TProxy Guide</a> ·
+  <a href="docs/FAQ_EN.md">FAQ</a> ·
   <a href="agent-prompts/INSTALL_EN.md">AI Install Playbook</a>
 </p>
 
@@ -97,10 +97,10 @@ Every release ships `5 OEMs × 2 Kernel Tiers × 3 Root Managers per tier = 30 A
 | Document | Topic |
 | :--- | :--- |
 | [**Architecture & Trust Boundaries**](ARCHITECTURE.md) | Component topology, UDS broker separation, state machine, two-layer stealth, and boundary matrix |
-| [**TProxy Integration Guide**](docs/TPROXY_INTEGRATION.md) | Wiring local Mihomo / Sing-box cores via `policy.json`, `sandbox_ack.v1.json`, and zero-leak upgrade fence |
-| [**Troubleshooting & FAQ**](docs/FAQ.md) | Work Profile setup, signing cert binding, `neutral` vs regional presets, 12-item scorecard warnings, bootloop recovery |
+| [**TProxy Integration Guide**](docs/TPROXY_INTEGRATION_EN.md) | Wiring local Mihomo / Sing-box cores via `policy.json`, `sandbox_ack.v1.json`, and zero-leak upgrade fence |
+| [**Troubleshooting & FAQ**](docs/FAQ_EN.md) | Work Profile setup, signing cert binding, `neutral` vs regional presets, 12-item scorecard warnings, bootloop recovery |
 | [**30-Variant Matrix**](VARIANT_MATRIX.md) | Full list of all 30 release ZIPs and compile flags |
-| [**AI Operations Playbooks**](agent-prompts/INSTALL_EN.md) | [English Install](agent-prompts/INSTALL_EN.md) · [中文安装](agent-prompts/INSTALL_CN.md) · [Diagnose](agent-prompts/DIAGNOSE.md) · [Upgrade & Rollback](agent-prompts/UPGRADE_AND_ROLLBACK.md) |
+| [**AI Operations Playbooks**](agent-prompts/INSTALL_EN.md) | [English Install](agent-prompts/INSTALL_EN.md) · [中文安装](agent-prompts/INSTALL_CN.md) · [Diagnose](agent-prompts/DIAGNOSE_EN.md) · [Upgrade & Rollback](agent-prompts/UPGRADE_AND_ROLLBACK_EN.md) |
 | [**Security / Contributing / Changelog**](SECURITY.md) | [Security Policy](SECURITY.md) · [Contributing & Local Checks](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) |
 
 ---

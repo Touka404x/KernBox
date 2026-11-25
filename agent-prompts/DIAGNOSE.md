@@ -19,8 +19,8 @@
 4. 检查 SELinux Broker 与 UDS 套接字（排查 IPC / 权限问题）：
    - `adb shell su -c "ls -lZ /dev/socket/sandbox_ctrl /dev/socket/sandbox_priv /data/adb/sandbox_guard/sandbox_broker"`
    - `adb shell su -c "dmesg | grep -E 'sandbox_broker|sandbox_ctrl|sandbox_priv|avc: denied' | tail -n 30 || true"`
-5. 如 Work Profile 内已安装 `com.sandbox.verify`，运行一次轻量探针检查：
-   - `adb shell am instrument --user 10 -w -e mode network_fast com.sandbox.verify/com.sandbox.verify.NetworkProbe`
+5. 如 Work Profile `<work_user>` 内已安装 `com.sandbox.verify`，运行一次轻量探针检查：
+   - `adb shell am instrument --user <work_user> -w -e compact true com.sandbox.verify/com.sandbox.verify.NetworkProbe`
 
 根据以上输出，明确告诉我故障发生在：
 [A] 选错变体 / 内核不兼容 | [B] Zygisk 未开启或被熔断 | [C] 外部代理核 (`sandbox_proxy`) 未就绪 | [D] SELinux / Root 管理器策略拦截 | [E] 工作资料网络规则阻断，并给出安全恢复步骤。

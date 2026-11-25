@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security Vulnerability Disclosure
+    url: https://github.com/Touka404x/KernBox/blob/main/SECURITY.md
+    about: Please read SECURITY.md before reporting security vulnerabilities or SELinux escapes.

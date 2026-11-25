@@ -13,8 +13,25 @@
 ### 2. 如何创建工作资料（Work Profile）并绑定 `KernBox.apk` 控制端？
 
 1. 若设备尚无工作资料用户（常见 UID 起始 `user_id = 10`），可通过设备支持的 Work Profile 管理工具（如 Shelter、Insular 或设备策略控制器）预先创建好 Work Profile。
-2. 安装发布包里的 [`KernBox.apk`](../controller/) 到主空间（User 0），用 `apksigner verify --print-certs KernBox.apk` 查看其 SHA-256 签名证书摘要，写入 `/data/adb/sandbox_guard/policy.json` 的 `caller_cert_sha256`（见 [`docs/TPROXY_INTEGRATION.md`](TPROXY_INTEGRATION.md)）。
-3. 绑定完成后，主空间打开 **KernBox** 即可一键启停沙盒、点击 `+` 从主空间热导入应用或安装 APK，完全无需连电脑。
+2. 安装发布包里的 [`KernBox.apk`](../controller/) 到主空间（User 0）。未绑定前直接打开 `KernBox.apk`，顶部的 **Offline Cert Helper** 会自动展示本包签名 **SHA-256 指纹** 与一键复制 `policy.json` 片段（或用 `apksigner verify --print-certs KernBox.apk` 读取），写入 `/data/adb/sandbox_guard/policy.json` 的 `caller_cert_sha256`（见 [`docs/TPROXY_INTEGRATION.md`](TPROXY_INTEGRATION.md)）。
+3. 绑定完成后，主空间打开 **KernBox** 即可一键启停沙盒、点击 `+` 从主空间热导入应用或安装 APK，并支持在 Root 管理器模块列表通过 Action 按钮（`action.sh`）快速切换暂停/恢复、卸载时通过 `uninstall.sh` 自动还原休眠应用与清理防火墙规则。
+
+---
+
+### 故障排查决策树
+
+```mermaid
+flowchart TD
+    Q["遇到无法上网 / 控制端离线 / 体检告警"] --> A{"KernBox 首页显示离线?"}
+    A -- "控制端提示 Guard Offline" --> A1["检查 Root 管理器模块是否启用并重启<br/>执行 sandbox_guard ctl status / service.sh"]
+    A -- "提示 Cert SHA-256 Unpinned" --> A2["在 KernBox 离线卡片一键复制 policy.json<br/>补全 caller_cert_sha256 后 ctl reload-policy"]
+    A -- "提示 SELinux Denied" --> A3["检查 dmesg avc 拒绝与 sandbox_broker_exec 标签<br/>确认刷新匹配 Root 管理器的专版 ZIP"]
+    A -- "守护在线但 State!=Open" --> B{"ctl status 为 AckWait / Blocked?"}
+    B -- "是" --> B1["核对外部代理核 TProxy 端口(1537) 与 sandbox_ack.v1.json generation"]
+    B -- "Open 但工作区 App 仍异常" --> C{"Run Probe / KernBoxVerify 体检有 warn?"}
+    C -- "zygisk_disabled=true" --> C1["触发了 2 次开机熔断，检查 ZygiskNext/ReZygisk 并执行 ctl stealth-toggle on"]
+    C -- "keymint_rot / adb / accessibility" --> C2["按 FAQ #4 配合 TrickyStore/PIF，验收完关闭 USB 调试与无障碍并卸载 Verify APK"]
+```
 
 ---
 

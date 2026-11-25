@@ -6,13 +6,13 @@ body:
   - type: markdown
     attributes:
       value: |
-        Before reporting, consider running the read-only diagnostic prompt in `agent-prompts/DIAGNOSE.md`.
+        Before reporting, consider running the read-only diagnostic prompt in `agent-prompts/DIAGNOSE.md` ([English](agent-prompts/DIAGNOSE_EN.md)).
         **Never post hardware serials, IMEIs, MAC addresses, private IPs, or personal app lists.**
   - type: input
     id: variant
     attributes:
       label: Exact KernBox Variant & Version
-      placeholder: e.g. v1.0.0 / KernBox-hyperos-k510-ksu-arm64.zip
+      placeholder: e.g. v1.2.0 / KernBox-hyperos-k510-ksu-arm64.zip
     validations:
       required: true
   - type: dropdown

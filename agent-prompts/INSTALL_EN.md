@@ -40,7 +40,7 @@ Follow these steps strictly in order, report findings at each step, and pause fo
    - Magisk: `adb shell su -c "magisk --install-module /data/local/tmp/<artifact>"`
    - APatch: `adb shell su -c "apd module install /data/local/tmp/<artifact>"`
 3. Remove `/data/local/tmp/<artifact>`.
-4. (Optional) If `./dist/KernBox.apk` exists and the user agrees, install the companion controller APK into User 0 and bind its SHA-256 signing digest (`apksigner verify --print-certs ./dist/KernBox.apk`) in `/data/adb/sandbox_guard/policy.json`:
+4. (Optional) If `./dist/KernBox.apk` exists and the user agrees, install the companion controller APK into User 0 and bind its SHA-256 signing digest in `/data/adb/sandbox_guard/policy.json` using the in-app **Offline Cert Helper** (one-tap copy) or `apksigner verify --print-certs ./dist/KernBox.apk`:
    `adb install -r ./dist/KernBox.apk`
 5. **Ask my explicit confirmation before running `adb reboot`** (note that bootloop protection automatically disarms Zygisk stealth after 2 failed boots).
 
@@ -53,6 +53,7 @@ Follow these steps strictly in order, report findings at each step, and pause fo
    - Note that the default `neutral` config keeps `spoof_carrier` and `spoof_device_region` disabled; ask me to pick a matching preset under `./presets/` (`jp-docomo`, `us-tmobile`, `uk-ee`, `sg-singtel`, `de-telekom`, or keep `neutral`):
    - `adb push "./presets/<preset>.json" "/data/local/tmp/<preset>.json"`
    - `adb shell su -c "/data/adb/sandbox_guard/sandbox_guard ctl preset-apply /data/local/tmp/<preset>.json"`
+   - `adb shell rm -f "/data/local/tmp/<preset>.json"`
 4. If `./dist/KernBoxVerify.apk` exists and Work Profile user `<work_user>` is present, install and run verification:
    `adb install -r --user <work_user> ./dist/KernBoxVerify.apk`
    `adb shell am instrument --user <work_user> -w com.sandbox.verify/com.sandbox.verify.NetworkProbe`

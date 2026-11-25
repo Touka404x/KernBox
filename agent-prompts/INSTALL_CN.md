@@ -41,7 +41,7 @@
    - Magisk: `adb shell su -c "magisk --install-module /data/local/tmp/<artifact>"`
    - APatch: `adb shell su -c "apd module install /data/local/tmp/<artifact>"`
 4. 清理手机 `/data/local/tmp/<artifact>`。
-5. （可选）如果 `./dist/KernBox.apk` 存在，向用户确认后安装配套控制端到主空间，并用 `apksigner verify --print-certs ./dist/KernBox.apk` 获取签名 SHA-256 绑定至 `/data/adb/sandbox_guard/policy.json`：
+5. （可选）如果 `./dist/KernBox.apk` 存在，向用户确认后安装配套控制端到主空间；可直接在 `KernBox.apk` 首页 Offline Cert Helper 一键复制签名 SHA-256 或 `policy.json` 片段（也可用 `apksigner verify --print-certs ./dist/KernBox.apk` 读取）绑定至 `/data/adb/sandbox_guard/policy.json`：
    `adb install -r ./dist/KernBox.apk`
 6. **在执行 `adb reboot` 前必须征求我口头/文字确认**（说明重启后会自动激活 Zygisk 隐身并带有 2 次失败自动熔断防变砖保护）。
 
@@ -54,6 +54,7 @@
    - 说明默认的 `neutral` 配置会将 `spoof_carrier` 和 `spoof_device_region` 保持关闭；请让我从 `./presets/` 中选择与代理出口一致的预设（`jp-docomo`、`us-tmobile`、`uk-ee`、`sg-singtel`、`de-telekom` 或继续保持 `neutral`）：
    - `adb push "./presets/<preset>.json" "/data/local/tmp/<preset>.json"`
    - `adb shell su -c "/data/adb/sandbox_guard/sandbox_guard ctl preset-apply /data/local/tmp/<preset>.json"`
+   - `adb shell rm -f "/data/local/tmp/<preset>.json"`
 4. 如 `./dist/KernBoxVerify.apk` 存在且工作资料用户 `<work_user>` 已就绪，安装并运行验证探针：
    `adb install -r --user <work_user> ./dist/KernBoxVerify.apk`
    `adb shell am instrument --user <work_user> -w com.sandbox.verify/com.sandbox.verify.NetworkProbe`

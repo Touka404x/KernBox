@@ -33,6 +33,14 @@ for oem in OEM_HYPEROS OEM_OPLUS OEM_ONEUI OEM_AOSP OEM_GENERIC; do
   g++ -std=c++17 -O2 -Wall -Wextra -Werror "-D$oem" stealth/tests/stealth_logic_test.cpp -o /tmp/stealth_test && /tmp/stealth_test
 done
 
-# 4. Python selector & privacy unit tests
+# 4. Java Host Unit Tests & APK Compilation
+javac --release 11 -encoding UTF-8 -Xlint:all,-options -Werror -cp "$ANDROID_HOME/platforms/android-35/android.jar" -d /tmp/stealth_classes stealth/java/com/sandbox/stealth/*.java stealth/tests/StealthHookHostTest.java
+java -cp "/tmp/stealth_classes:$ANDROID_HOME/platforms/android-35/android.jar" com.sandbox.stealth.StealthHookHostTest
+javac --release 11 -encoding UTF-8 -Xlint:all,-options -Werror -d /tmp/ctrl_classes controller/java/com/sandbox/controller/BrokerProtocol.java controller/java/com/sandbox/controller/Strings.java controller/tests/BrokerProtocolHostTest.java
+java -cp /tmp/ctrl_classes com.sandbox.controller.BrokerProtocolHostTest
+python controller/build-controller.py --out /tmp/KernBox.apk
+python verify/build-probe.py --out /tmp/KernBoxVerify.apk
+
+# 5. Python selector, packaging & privacy unit tests
 python -m unittest discover -s tools -p "test_*.py" -v
 ```
