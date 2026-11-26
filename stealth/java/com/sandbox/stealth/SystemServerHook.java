@@ -11,8 +11,10 @@ import java.lang.reflect.Proxy;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 
 /**
@@ -26,6 +28,9 @@ import java.util.function.BooleanSupplier;
 public final class SystemServerHook {
     private static final String TAG = "SandboxStealthHook";
     private static volatile boolean installed = false;
+    private static final AtomicBoolean settingsWrapped = new AtomicBoolean(false);
+    private static final AtomicBoolean settingsRetryStarted = new AtomicBoolean(false);
+    private static volatile Object activityServiceRef = null;
 
     private static final Set<String> SYSTEM_SERVER_SERVICES = Collections.unmodifiableSet(
             new HashSet<>(Arrays.asList(
@@ -176,6 +181,15 @@ public final class SystemServerHook {
                 if ("addService".equals(name) && args != null && args.length >= 2 && args[0] instanceof String) {
                     String svcName = (String) args[0];
                     Object svcBinder = args[1];
+                    if ("activity".equals(svcName) && svcBinder != null) {
+                        activityServiceRef = svcBinder;
+                        if (config.hideAdb && !tryWrapSettingsProvider(svcBinder, config)) {
+                            startSettingsRetryThread(config);
+                        }
+                    } else if (config.hideAdb && !settingsWrapped.get() && activityServiceRef != null
+                            && ("device_policy".equals(svcName) || "usb".equals(svcName) || "adb".equals(svcName))) {
+                        tryWrapSettingsProvider(activityServiceRef, config);
+                    }
                     if (factory.isWrappable(svcBinder) && targetServices.contains(svcName) && !factory.isAlreadyWrapped(svcBinder)) {
                         rawServices.put(svcName, svcBinder);
                         args[1] = factory.wrap(svcBinder, svcName, config);
@@ -257,6 +271,169 @@ public final class SystemServerHook {
             }
         } catch (Throwable ignored) {
         }
+    }
+
+    public interface SettingsProviderWrapperFactory {
+        Class<?> providerInterface(Object provider) throws ClassNotFoundException;
+        Object asBinder(Object provider);
+        Object wrapBinder(Object delegateBinder, StealthConfig config);
+    }
+
+    private static final SettingsProviderWrapperFactory SETTINGS_FACTORY = new SettingsProviderWrapperFactory() {
+        @Override
+        public Class<?> providerInterface(Object provider) throws ClassNotFoundException {
+            Class<?> icp = Class.forName("android.content.IContentProvider");
+            if (icp.isInstance(provider)) {
+                return icp;
+            }
+            for (Class<?> iface : provider.getClass().getInterfaces()) {
+                if ("android.content.IContentProvider".equals(iface.getName())) {
+                    return iface;
+                }
+            }
+            return icp;
+        }
+
+        @Override
+        public Object asBinder(Object provider) {
+            return provider instanceof android.os.IInterface
+                    ? ((android.os.IInterface) provider).asBinder()
+                    : null;
+        }
+
+        @Override
+        public Object wrapBinder(Object delegateBinder, StealthConfig config) {
+            return delegateBinder instanceof IBinder
+                    ? new SandboxSettingsBinder((IBinder) delegateBinder, config)
+                    : delegateBinder;
+        }
+    };
+
+    private static final class SettingsProviderHandler implements InvocationHandler {
+        private final Object realProvider;
+        private final Object wrappedBinder;
+
+        SettingsProviderHandler(Object realProvider, Object wrappedBinder) {
+            this.realProvider = realProvider;
+            this.wrappedBinder = wrappedBinder;
+        }
+
+        @Override
+        public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+            String mname = method.getName();
+            if ("asBinder".equals(mname) && (args == null || args.length == 0)) {
+                return wrappedBinder;
+            }
+            if (Object.class.equals(method.getDeclaringClass())) {
+                if ("equals".equals(mname) && args != null && args.length == 1) {
+                    return proxy == args[0];
+                }
+                if ("hashCode".equals(mname)) {
+                    return System.identityHashCode(proxy);
+                }
+                if ("toString".equals(mname)) {
+                    return "SandboxSettingsProviderProxy(" + realProvider + ")";
+                }
+            }
+            try {
+                return method.invoke(realProvider, args);
+            } catch (InvocationTargetException e) {
+                throw e.getTargetException() != null ? e.getTargetException() : e;
+            }
+        }
+    }
+
+    public static boolean tryWrapSettingsProvider(Object ams, StealthConfig config) {
+        return tryWrapSettingsProvider(ams, config, SETTINGS_FACTORY);
+    }
+
+    static boolean tryWrapSettingsProvider(
+            Object ams, StealthConfig config, SettingsProviderWrapperFactory factory) {
+        if (ams == null || config == null || !config.enabled || !config.hideAdb || factory == null) {
+            return false;
+        }
+        if (settingsWrapped.get()) {
+            return true;
+        }
+        try {
+            Field providerMapField = findField(ams.getClass(), "mProviderMap");
+            if (providerMapField == null) {
+                return false;
+            }
+            providerMapField.setAccessible(true);
+            Object providerMap = providerMapField.get(ams);
+            if (providerMap == null) {
+                return false;
+            }
+            Field singletonField = findField(providerMap.getClass(), "mSingletonByName");
+            if (singletonField == null) {
+                return false;
+            }
+            singletonField.setAccessible(true);
+            Object rawMap = singletonField.get(providerMap);
+            if (!(rawMap instanceof Map<?, ?>)) {
+                return false;
+            }
+            Object cpr = ((Map<?, ?>) rawMap).get("settings");
+            if (cpr == null) {
+                return false;
+            }
+            Field providerField = findField(cpr.getClass(), "provider");
+            if (providerField == null) {
+                return false;
+            }
+            providerField.setAccessible(true);
+            Object realProvider = providerField.get(cpr);
+            if (realProvider == null) {
+                return false;
+            }
+            if (Proxy.isProxyClass(realProvider.getClass())
+                    && Proxy.getInvocationHandler(realProvider) instanceof SettingsProviderHandler) {
+                settingsWrapped.set(true);
+                return true;
+            }
+            Object realBinder = factory.asBinder(realProvider);
+            if (realBinder == null) {
+                return false;
+            }
+            Class<?> iface = factory.providerInterface(realProvider);
+            if (iface == null) {
+                return false;
+            }
+            Object wrappedBinder = factory.wrapBinder(realBinder, config);
+            Object proxy = Proxy.newProxyInstance(
+                    iface.getClassLoader(),
+                    new Class<?>[]{iface},
+                    new SettingsProviderHandler(realProvider, wrappedBinder));
+            providerField.set(cpr, proxy);
+            settingsWrapped.set(true);
+            logInfo("wrapped settings ContentProvider for sandbox user " + config.sandboxUserId);
+            return true;
+        } catch (Throwable t) {
+            logWarn("tryWrapSettingsProvider failed: " + t);
+            return false;
+        }
+    }
+
+    private static void startSettingsRetryThread(final StealthConfig config) {
+        if (!config.hideAdb || settingsWrapped.get() || !settingsRetryStarted.compareAndSet(false, true)) {
+            return;
+        }
+        Thread t = new Thread(() -> {
+            for (int attempt = 0; attempt < 40 && !settingsWrapped.get(); attempt++) {
+                try {
+                    Thread.sleep(500);
+                } catch (InterruptedException ignored) {
+                    return;
+                }
+                Object ams = activityServiceRef;
+                if (ams != null && tryWrapSettingsProvider(ams, config)) {
+                    return;
+                }
+            }
+        }, "SandboxSettingsWrap");
+        t.setDaemon(true);
+        t.start();
     }
 
     private static Field findField(Class<?> cls, String name) {

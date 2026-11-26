@@ -55,3 +55,5 @@ type_transition sandbox_broker sandbox_ctrl_sock_dir sock_file sandbox_ctrl_sock
 type_transition magisk sandbox_priv_dir file sandbox_priv_file
 type_transition magisk sandbox_priv_dir sock_file sandbox_priv_sock
 type_transition magisk sandbox_cfg_dir file sandbox_cfg_file
+dontaudit sandbox_broker default_prop file read
+dontaudit sandbox_broker sandbox_broker unix_dgram_socket create

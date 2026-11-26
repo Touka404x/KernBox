@@ -6,6 +6,7 @@
 #include <android/log.h>
 #include <arpa/inet.h>
 #include <cerrno>
+#include <cstdarg>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -19,12 +20,25 @@
 #include <string>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <sys/system_properties.h>
 #include <sys/sysmacros.h>
 #include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
 #include <utility>
+
+#ifndef __NR_memfd_create
+#define __NR_memfd_create 279
+#endif
+#ifndef MFD_CLOEXEC
+#define MFD_CLOEXEC 0x0001U
+#endif
+#ifdef O_TMPFILE
+constexpr int kOpenNeedsModeMask = O_CREAT | O_TMPFILE;
+#else
+constexpr int kOpenNeedsModeMask = O_CREAT;
+#endif
 
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "SandboxStealth", __VA_ARGS__)
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN, "SandboxStealth", __VA_ARGS__)
@@ -98,10 +112,22 @@ const char* const kNetTargetSuffixes[kNetSuffixCount] = {
     "/libbase.so",
     "/libcutils.so",
 };
+constexpr size_t kProcSuffixCount = 5;
+const char* const kProcTargetSuffixes[kProcSuffixCount] = {
+    "/libjavacore.so",
+    "/libopenjdk.so",
+    "/libandroid_runtime.so",
+    "/libbase.so",
+    "/libcutils.so",
+};
 constexpr size_t kMaxPropHookSlots = 48;
 constexpr size_t kMaxNetHookSlots = 12;
+constexpr size_t kMaxProcHookSlots = 16;
 
 using FnGetIfAddrs = int (*)(struct ifaddrs** ifap);
+using FnOpen = int (*)(const char* path, int flags, ...);
+using FnOpen2 = int (*)(const char* path, int flags);
+using FnFopen = FILE* (*)(const char* path, const char* mode);
 using FnPropFind = const prop_info* (*)(const char* name);
 using FnPropReadCb = void (*)(
     const prop_info* pi,
@@ -111,6 +137,9 @@ using FnPropRead = int (*)(const prop_info* pi, char* name, char* value);
 using FnPropGet = int (*)(const char* name, char* value);
 
 FnGetIfAddrs g_orig_getifaddrs[kMaxNetHookSlots] = {};
+FnOpen g_orig_open[kMaxProcHookSlots] = {};
+FnOpen2 g_orig_open2[kMaxProcHookSlots] = {};
+FnFopen g_orig_fopen[kMaxProcHookSlots] = {};
 FnPropFind g_orig_prop_find[kMaxPropHookSlots] = {};
 FnPropReadCb g_orig_prop_cb[kMaxPropHookSlots] = {};
 FnPropRead g_orig_prop_read[kMaxPropHookSlots] = {};
@@ -206,6 +235,204 @@ int hookGetifaddrsImpl(FnGetIfAddrs orig, struct ifaddrs** ifap) {
 template <size_t Slot>
 int hook_getifaddrs_slot(struct ifaddrs** ifap) {
     return hookGetifaddrsImpl(g_orig_getifaddrs[Slot], ifap);
+}
+
+bool writeExact(int fd, const void* buf, size_t len);
+
+int filterProcMapsFd(int raw_fd, int flags, bool is_smaps) {
+    const int mfd = static_cast<int>(
+        syscall(__NR_memfd_create, "", (flags & O_CLOEXEC) ? MFD_CLOEXEC : 0));
+    if (mfd < 0) {
+        return raw_fd;
+    }
+
+    char rbuf[4096];
+    char line[4096];
+    char wbuf[4096];
+    size_t line_len = 0;
+    bool line_overflow = false;
+    size_t wlen = 0;
+    bool skip_smaps_block = false;
+    bool write_ok = true;
+
+    auto flushWbuf = [&]() -> bool {
+        if (wlen == 0) return true;
+        const bool ok = writeExact(mfd, wbuf, wlen);
+        wlen = 0;
+        return ok;
+    };
+
+    auto emitLine = [&](const char* data, size_t len) -> bool {
+        if (len == 0) return true;
+        bool drop = false;
+        if (is_smaps) {
+            if (stealth::isSmapsHeaderLine(data, len)) {
+                skip_smaps_block = stealth::shouldHideProcMapsLine(data, len);
+            }
+            drop = skip_smaps_block;
+        } else {
+            drop = stealth::shouldHideProcMapsLine(data, len);
+        }
+        if (drop) return true;
+        if (len > sizeof(wbuf) - wlen) {
+            if (!flushWbuf()) return false;
+        }
+        if (len > sizeof(wbuf)) {
+            return writeExact(mfd, data, len);
+        }
+        std::memcpy(wbuf + wlen, data, len);
+        wlen += len;
+        return true;
+    };
+
+    while (write_ok) {
+        ssize_t r = read(raw_fd, rbuf, sizeof(rbuf));
+        if (r < 0) {
+            if (errno == EINTR) continue;
+            write_ok = false;
+            break;
+        }
+        if (r == 0) break;
+
+        for (ssize_t i = 0; i < r; i++) {
+            const char c = rbuf[i];
+            if (line_overflow) {
+                if (c == '\n') {
+                    line[sizeof(line) - 1] = '\n';
+                    if (!emitLine(line, sizeof(line))) {
+                        write_ok = false;
+                        break;
+                    }
+                    line_len = 0;
+                    line_overflow = false;
+                }
+                continue;
+            }
+            if (line_len < sizeof(line) - 1) {
+                line[line_len++] = c;
+            } else if (c == '\n') {
+                line[line_len++] = '\n';
+            } else {
+                line_overflow = true;
+                continue;
+            }
+            if (c == '\n') {
+                if (!emitLine(line, line_len)) {
+                    write_ok = false;
+                    break;
+                }
+                line_len = 0;
+            }
+        }
+    }
+
+    if (write_ok && line_len > 0) {
+        if (!emitLine(line, line_len)) {
+            write_ok = false;
+        }
+    }
+    if (write_ok && !flushWbuf()) {
+        write_ok = false;
+    }
+
+    if (!write_ok) {
+        close(mfd);
+        (void)lseek(raw_fd, 0, SEEK_SET);
+        return raw_fd;
+    }
+    close(raw_fd);
+    if (lseek(mfd, 0, SEEK_SET) < 0) {
+        // Impossible on empty memfd unless kernel fault; memfd still usable from offset 0.
+    }
+    return mfd;
+}
+
+int hookOpenImpl(FnOpen orig, const char* path, int flags, mode_t mode) {
+    if (!orig) {
+        errno = ENOSYS;
+        return -1;
+    }
+    const int fd = (flags & kOpenNeedsModeMask) ? orig(path, flags, mode) : orig(path, flags);
+    if (fd < 0 || (flags & O_ACCMODE) != O_RDONLY) {
+        return fd;
+    }
+#ifdef O_PATH
+    if ((flags & O_PATH) != 0) {
+        return fd;
+    }
+#endif
+    bool is_smaps = false;
+    if (!stealth::isSanitizedProcMapsPath(path, &is_smaps)) {
+        return fd;
+    }
+    return filterProcMapsFd(fd, flags, is_smaps);
+}
+
+int hookOpen2Impl(FnOpen2 orig, const char* path, int flags) {
+    if (!orig) {
+        errno = ENOSYS;
+        return -1;
+    }
+    const int fd = orig(path, flags);
+    if (fd < 0 || (flags & O_ACCMODE) != O_RDONLY) {
+        return fd;
+    }
+#ifdef O_PATH
+    if ((flags & O_PATH) != 0) {
+        return fd;
+    }
+#endif
+    bool is_smaps = false;
+    if (!stealth::isSanitizedProcMapsPath(path, &is_smaps)) {
+        return fd;
+    }
+    return filterProcMapsFd(fd, flags, is_smaps);
+}
+
+FILE* hookFopenImpl(FnFopen orig, const char* path, const char* mode) {
+    if (!orig) {
+        errno = ENOSYS;
+        return nullptr;
+    }
+    bool is_smaps = false;
+    if (!mode || mode[0] != 'r' || std::strchr(mode, '+') != nullptr ||
+        !stealth::isSanitizedProcMapsPath(path, &is_smaps)) {
+        return orig(path, mode);
+    }
+    const int open_flags = O_RDONLY | (std::strchr(mode, 'e') != nullptr ? O_CLOEXEC : 0);
+    const int raw_fd = ::open(path, open_flags);
+    if (raw_fd < 0) {
+        return orig(path, mode);
+    }
+    const int mfd = filterProcMapsFd(raw_fd, open_flags, is_smaps);
+    FILE* fp = ::fdopen(mfd, mode);
+    if (!fp) {
+        close(mfd);
+        return orig(path, mode);
+    }
+    return fp;
+}
+
+template <size_t Slot>
+int hook_open_slot(const char* path, int flags, ...) {
+    mode_t mode = 0;
+    if (flags & kOpenNeedsModeMask) {
+        va_list ap;
+        va_start(ap, flags);
+        mode = static_cast<mode_t>(va_arg(ap, unsigned int));
+        va_end(ap);
+    }
+    return hookOpenImpl(g_orig_open[Slot], path, flags, mode);
+}
+
+template <size_t Slot>
+int hook_open2_slot(const char* path, int flags) {
+    return hookOpen2Impl(g_orig_open2[Slot], path, flags);
+}
+
+template <size_t Slot>
+FILE* hook_fopen_slot(const char* path, const char* mode) {
+    return hookFopenImpl(g_orig_fopen[Slot], path, mode);
 }
 
 struct PropCbCtx {
@@ -382,6 +609,17 @@ void fillNetHookTable(FnGetIfAddrs (&net_hooks)[kMaxNetHookSlots], std::index_se
     ((net_hooks[Is] = hook_getifaddrs_slot<Is>), ...);
 }
 
+template <size_t... Is>
+void fillProcHookTables(
+    FnOpen (&open_hooks)[kMaxProcHookSlots],
+    FnOpen2 (&open2_hooks)[kMaxProcHookSlots],
+    FnFopen (&fopen_hooks)[kMaxProcHookSlots],
+    std::index_sequence<Is...>) {
+    ((open_hooks[Is] = hook_open_slot<Is>,
+      open2_hooks[Is] = hook_open2_slot<Is>,
+      fopen_hooks[Is] = hook_fopen_slot<Is>), ...);
+}
+
 bool writeExact(int fd, const void* buf, size_t len) {
     const auto* p = static_cast<const uint8_t*>(buf);
     size_t sent = 0;
@@ -534,6 +772,8 @@ struct PhdrMultiCtx {
     bool have_android_runtime;
     TargetList* net_list;
     bool want_net;
+    TargetList* proc_list;
+    bool want_proc;
 };
 
 int phdrMultiMatchCallback(struct dl_phdr_info* info, [[maybe_unused]] size_t size, void* raw_ctx) {
@@ -547,7 +787,9 @@ int phdrMultiMatchCallback(struct dl_phdr_info* info, [[maybe_unused]] size_t si
         endsWithAnySuffix(info->dlpi_name, plen, kPropTargetSuffixes, kPropSuffixCount));
     const bool match_net = ctx->want_net && ctx->net_list->count < ctx->net_list->cap &&
         endsWithAnySuffix(info->dlpi_name, plen, kNetTargetSuffixes, kNetSuffixCount);
-    if (!match_prop && !match_net) {
+    const bool match_proc = ctx->want_proc && ctx->proc_list->count < ctx->proc_list->cap &&
+        endsWithAnySuffix(info->dlpi_name, plen, kProcTargetSuffixes, kProcSuffixCount);
+    if (!match_prop && !match_net && !match_proc) {
         return 0;
     }
     struct stat st{};
@@ -559,20 +801,27 @@ int phdrMultiMatchCallback(struct dl_phdr_info* info, [[maybe_unused]] size_t si
             appendUniqueTarget(*ctx->prop_list, st.st_dev, st.st_ino);
         }
         if (match_net) appendUniqueTarget(*ctx->net_list, st.st_dev, st.st_ino);
+        if (match_proc) appendUniqueTarget(*ctx->proc_list, st.st_dev, st.st_ino);
     }
     const bool props_full = !ctx->want_props || (ctx->prop_list->count >= ctx->prop_list->cap && ctx->have_android_runtime);
     const bool net_full = !ctx->want_net || ctx->net_list->count >= ctx->net_list->cap;
-    return (props_full && net_full) ? 1 : 0;
+    const bool proc_full = !ctx->want_proc || ctx->proc_list->count >= ctx->proc_list->cap;
+    return (props_full && net_full && proc_full) ? 1 : 0;
 }
 
 // Single-pass /proc/self/maps resolution collects up to kMaxPropHookSlots unique (dev, ino)
-// prop library mappings (always prioritizing libandroid_runtime.so ahead of APEX libbase/libcutils duplicates).
-void findLibrariesFromMaps(bool want_props, TargetList& prop_list, bool want_net, TargetList& net_list) {
+// prop/net/proc library mappings (always prioritizing libandroid_runtime.so ahead of APEX duplicates).
+void findLibrariesFromMaps(
+    bool want_props, TargetList& prop_list,
+    bool want_net, TargetList& net_list,
+    bool want_proc, TargetList& proc_list) {
     prop_list.count = 0;
     prop_list.cap = kMaxPropHookSlots;
     net_list.count = 0;
     net_list.cap = kMaxNetHookSlots;
-    if (!want_props && !want_net) return;
+    proc_list.count = 0;
+    proc_list.cap = kMaxProcHookSlots;
+    if (!want_props && !want_net && !want_proc) return;
     bool have_android_runtime = false;
 
     FILE* fp = std::fopen("/proc/self/maps", "re");
@@ -608,9 +857,14 @@ void findLibrariesFromMaps(bool want_props, TargetList& prop_list, bool want_net
                     endsWithAnySuffix(path, plen, kNetTargetSuffixes, kNetSuffixCount)) {
                     appendUniqueTarget(net_list, dev, ino);
                 }
+                if (want_proc && proc_list.count < proc_list.cap &&
+                    endsWithAnySuffix(path, plen, kProcTargetSuffixes, kProcSuffixCount)) {
+                    appendUniqueTarget(proc_list, dev, ino);
+                }
                 const bool props_full = !want_props || (prop_list.count >= prop_list.cap && have_android_runtime);
                 const bool net_full = !want_net || net_list.count >= net_list.cap;
-                if (props_full && net_full) {
+                const bool proc_full = !want_proc || proc_list.count >= proc_list.cap;
+                if (props_full && net_full && proc_full) {
                     break;
                 }
             }
@@ -618,8 +872,10 @@ void findLibrariesFromMaps(bool want_props, TargetList& prop_list, bool want_net
         std::fclose(fp);
     }
 
-    if ((want_props && (!have_android_runtime || prop_list.count == 0)) || (want_net && net_list.count == 0)) {
-        PhdrMultiCtx ctx{&prop_list, want_props, have_android_runtime, &net_list, want_net};
+    if ((want_props && (!have_android_runtime || prop_list.count == 0)) ||
+        (want_net && net_list.count == 0) ||
+        (want_proc && proc_list.count == 0)) {
+        PhdrMultiCtx ctx{&prop_list, want_props, have_android_runtime, &net_list, want_net, &proc_list, want_proc};
         dl_iterate_phdr(phdrMultiMatchCallback, &ctx);
     }
 }
@@ -1016,9 +1272,11 @@ public:
             const bool want_props = g_cfg.spoof_carrier || g_cfg.spoof_timezone || g_cfg.spoof_locale ||
                 g_cfg.spoof_device_region || g_cfg.hide_adb;
             const bool want_net = g_cfg.sanitize_network;
+            const bool want_proc = g_cfg.enabled;
             TargetList prop_hits{};
             TargetList net_hits{};
-            findLibrariesFromMaps(want_props, prop_hits, want_net, net_hits);
+            TargetList proc_hits{};
+            findLibrariesFromMaps(want_props, prop_hits, want_net, net_hits, want_proc, proc_hits);
 
             bool has_registered = false;
             FnPropFind propFindHooks[kMaxPropHookSlots] = {};
@@ -1029,6 +1287,10 @@ public:
                                std::make_index_sequence<kMaxPropHookSlots>{});
             FnGetIfAddrs netHooks[kMaxNetHookSlots] = {};
             fillNetHookTable(netHooks, std::make_index_sequence<kMaxNetHookSlots>{});
+            FnOpen openHooks[kMaxProcHookSlots] = {};
+            FnOpen2 open2Hooks[kMaxProcHookSlots] = {};
+            FnFopen fopenHooks[kMaxProcHookSlots] = {};
+            fillProcHookTables(openHooks, open2Hooks, fopenHooks, std::make_index_sequence<kMaxProcHookSlots>{});
 
             size_t prop_libs_registered = prop_hits.count;
             for (size_t i = 0; i < prop_hits.count; i++) {
@@ -1055,6 +1317,20 @@ public:
                                       reinterpret_cast<void**>(&g_orig_getifaddrs[i]));
                 has_registered = true;
             }
+            size_t proc_libs_registered = proc_hits.count;
+            for (size_t i = 0; i < proc_hits.count; i++) {
+                const ResolvedTarget& prt = proc_hits.items[i];
+                api_->pltHookRegister(prt.dev, prt.inode, "open",
+                                      reinterpret_cast<void*>(openHooks[i]),
+                                      reinterpret_cast<void**>(&g_orig_open[i]));
+                api_->pltHookRegister(prt.dev, prt.inode, "__open_2",
+                                      reinterpret_cast<void*>(open2Hooks[i]),
+                                      reinterpret_cast<void**>(&g_orig_open2[i]));
+                api_->pltHookRegister(prt.dev, prt.inode, "fopen",
+                                      reinterpret_cast<void*>(fopenHooks[i]),
+                                      reinterpret_cast<void**>(&g_orig_fopen[i]));
+                has_registered = true;
+            }
             if (has_registered) {
                 bool committed = api_->pltHookCommit();
                 bool any_orig = false;
@@ -1064,10 +1340,13 @@ public:
                 for (size_t i = 0; i < net_libs_registered; i++) {
                     if (g_orig_getifaddrs[i]) any_orig = true;
                 }
+                for (size_t i = 0; i < proc_libs_registered; i++) {
+                    if (g_orig_open[i] || g_orig_open2[i] || g_orig_fopen[i]) any_orig = true;
+                }
                 g_plt_hooked = committed || any_orig;
                 if (g_plt_hooked) {
-                    LOGI("pltHookCommit active for %s (%d) oem=%s committed=%d prop_libs=%zu net_libs=%zu",
-                         proc_name.c_str(), uid, stealth::kOemProfileName, committed ? 1 : 0, prop_libs_registered, net_libs_registered);
+                    LOGI("pltHookCommit active for %s (%d) oem=%s committed=%d prop_libs=%zu net_libs=%zu proc_libs=%zu",
+                         proc_name.c_str(), uid, stealth::kOemProfileName, committed ? 1 : 0, prop_libs_registered, net_libs_registered, proc_libs_registered);
                 } else {
                     LOGW("pltHookCommit failed in %s (%d)", proc_name.c_str(), uid);
                 }

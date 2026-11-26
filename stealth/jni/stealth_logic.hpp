@@ -743,4 +743,116 @@ inline bool lookupSpoofedProperty(
     return true;
 }
 
+inline bool isSanitizedProcMapsPath(const char* path, bool* out_is_smaps = nullptr) {
+    if (!path || std::strncmp(path, "/proc/", 6) != 0) {
+        return false;
+    }
+    const char* p = path + 6;
+    if (std::strncmp(p, "self/", 5) == 0) {
+        p += 5;
+    } else if (std::strncmp(p, "thread-self/", 12) == 0) {
+        p += 12;
+    } else if (*p >= '0' && *p <= '9') {
+        while (*p >= '0' && *p <= '9') {
+            p++;
+        }
+        if (*p != '/') {
+            return false;
+        }
+        p++;
+    } else {
+        return false;
+    }
+    if (std::strcmp(p, "maps") == 0) {
+        if (out_is_smaps) *out_is_smaps = false;
+        return true;
+    }
+    if (std::strcmp(p, "smaps") == 0) {
+        if (out_is_smaps) *out_is_smaps = true;
+        return true;
+    }
+    return false;
+}
+
+inline bool isSmapsHeaderLine(const char* line, size_t len) {
+    if (!line || len == 0) {
+        return false;
+    }
+    auto isHex = [](char c) {
+        return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+    };
+    size_t i = 0;
+    size_t left_hex = 0;
+    while (i < len && isHex(line[i])) {
+        left_hex++;
+        i++;
+    }
+    if (left_hex == 0 || i >= len || line[i] != '-') {
+        return false;
+    }
+    i++; // consume '-'
+    size_t right_hex = 0;
+    while (i < len && isHex(line[i])) {
+        right_hex++;
+        i++;
+    }
+    if (right_hex == 0 || i >= len) {
+        return false;
+    }
+    return line[i] == ' ' || line[i] == '\t';
+}
+
+namespace detail {
+
+inline bool containsAsciiCaseInsensitive(const char* hay, size_t hay_len, const char* needle, size_t needle_len) {
+    if (!hay || !needle || needle_len == 0 || hay_len < needle_len) {
+        return false;
+    }
+    auto lowerChar = [](unsigned char c) -> unsigned char {
+        return (c >= 'A' && c <= 'Z') ? static_cast<unsigned char>(c - 'A' + 'a') : c;
+    };
+    const size_t limit = hay_len - needle_len;
+    for (size_t i = 0; i <= limit; i++) {
+        size_t j = 0;
+        while (j < needle_len &&
+               lowerChar(static_cast<unsigned char>(hay[i + j])) ==
+               lowerChar(static_cast<unsigned char>(needle[j]))) {
+            j++;
+        }
+        if (j == needle_len) {
+            return true;
+        }
+    }
+    return false;
+}
+
+} // namespace detail
+
+inline bool shouldHideProcMapsLine(const char* line, size_t len) {
+    if (!line || len == 0) {
+        return false;
+    }
+    static constexpr const char* kTokens[] = {
+        "/data/adb/",
+        "zygisk",
+        "sandbox_guard",
+        "libzygisk",
+        "magisk",
+        "kernelsu",
+        "apatch",
+        "lsposed",
+        "lspd",
+        "riru",
+        "shamiko",
+        "susfs",
+        "debug_ramdisk",
+    };
+    for (const char* tok : kTokens) {
+        if (detail::containsAsciiCaseInsensitive(line, len, tok, std::strlen(tok))) {
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace stealth

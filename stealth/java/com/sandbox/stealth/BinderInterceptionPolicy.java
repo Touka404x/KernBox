@@ -692,4 +692,19 @@ public final class BinderInterceptionPolicy {
                 return -1;   // TelephonyManager.UNKNOWN_CARRIER_ID
         }
     }
+
+    public static String spoofedSettingsGlobalValue(String key, StealthConfig cfg) {
+        if (cfg == null || !cfg.enabled || !cfg.hideAdb || key == null) {
+            return null;
+        }
+        switch (key) {
+            case "adb_enabled":
+            case "adb_wifi_enabled":
+            case "development_settings_enabled":
+            case "stay_on_while_plugged_in":
+                return "0";
+            default:
+                return null;
+        }
+    }
 }

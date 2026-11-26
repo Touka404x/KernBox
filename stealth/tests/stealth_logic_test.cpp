@@ -264,6 +264,46 @@ int main() {
         assert(!stealth::lookupSpoofedPropertyIntoBuf(baked_no_adb, "sys.usb.state", "adb", stack_buf, sizeof(stack_buf), &res));
     }
 
+    // 10. /proc/*/maps & smaps sanitization helpers
+    {
+        bool is_smaps = true;
+        assert(stealth::isSanitizedProcMapsPath("/proc/self/maps", &is_smaps) && !is_smaps);
+        assert(stealth::isSanitizedProcMapsPath("/proc/thread-self/maps", &is_smaps) && !is_smaps);
+        assert(stealth::isSanitizedProcMapsPath("/proc/15423/maps", &is_smaps) && !is_smaps);
+        assert(stealth::isSanitizedProcMapsPath("/proc/self/smaps", &is_smaps) && is_smaps);
+        assert(stealth::isSanitizedProcMapsPath("/proc/thread-self/smaps", &is_smaps) && is_smaps);
+        assert(stealth::isSanitizedProcMapsPath("/proc/99/smaps", &is_smaps) && is_smaps);
+
+        assert(!stealth::isSanitizedProcMapsPath(nullptr, &is_smaps));
+        assert(!stealth::isSanitizedProcMapsPath("/proc/self/mountinfo", &is_smaps));
+        assert(!stealth::isSanitizedProcMapsPath("/proc/self/status", &is_smaps));
+        assert(!stealth::isSanitizedProcMapsPath("/proc/maps", &is_smaps));
+        assert(!stealth::isSanitizedProcMapsPath("/proc/abc/maps", &is_smaps));
+        assert(!stealth::isSanitizedProcMapsPath("/data/self/maps", &is_smaps));
+        assert(!stealth::isSanitizedProcMapsPath("/proc/self/maps/extra", &is_smaps));
+
+        const char* hdr1 = "311f744000-311f768000 r--p 00000000 fe:2f 1998962  /data/adb/modules/sandbox_guard/zygisk/arm64-v8a.so (deleted)\n";
+        const char* hdr2 = "311fd86000-311fec1000 r-xp 00000000 fe:2f 2301169  /data/adb/modules/zygisksu/lib64/libzygisk.so\n";
+        const char* attr1 = "Size:                144 kB\n";
+        const char* attr2 = "VmFlags: rd ex mr mw me dw\n";
+        assert(stealth::isSmapsHeaderLine(hdr1, std::strlen(hdr1)));
+        assert(stealth::isSmapsHeaderLine(hdr2, std::strlen(hdr2)));
+        assert(!stealth::isSmapsHeaderLine(attr1, std::strlen(attr1)));
+        assert(!stealth::isSmapsHeaderLine(attr2, std::strlen(attr2)));
+
+        assert(stealth::shouldHideProcMapsLine(hdr1, std::strlen(hdr1)));
+        assert(stealth::shouldHideProcMapsLine(hdr2, std::strlen(hdr2)));
+        const char* mixed = "7000-8000 r-xp 0000 00:00 0 /memfd:LSPosed-dex\n";
+        assert(stealth::shouldHideProcMapsLine(mixed, std::strlen(mixed)));
+
+        const char* safe1 = "7f80000000-7f80100000 r-xp 00000000 fd:00 123 /system/lib64/libc.so\n";
+        const char* safe2 = "7f90000000-7f90100000 r-xp 00000000 00:00 0 /memfd:jit-cache (deleted)\n";
+        const char* safe3 = "7fa0000000-7fa0100000 r--p 00000000 fd:01 456 /apex/com.android.art/lib64/libart.so\n";
+        assert(!stealth::shouldHideProcMapsLine(safe1, std::strlen(safe1)));
+        assert(!stealth::shouldHideProcMapsLine(safe2, std::strlen(safe2)));
+        assert(!stealth::shouldHideProcMapsLine(safe3, std::strlen(safe3)));
+    }
+
     std::cout << "ALL stealth_logic_test C++ ASSERTIONS PASSED (oem=" << stealth::kOemProfileName << ")\n";
     return 0;
 }

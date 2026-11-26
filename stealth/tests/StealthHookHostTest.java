@@ -1,6 +1,7 @@
 package com.sandbox.stealth;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -528,6 +529,78 @@ public final class StealthHookHostTest {
                 == BinderInterceptionPolicy.Action.WRITE_NULL_STRONG_BINDER, "bluetooth_manager.getAdapter -> null binder");
         check(BinderInterceptionPolicy.decide("location", "getGnssYearOfHardware", cfg, u10App, null).intValue == 0,
                 "location.getGnssYearOfHardware -> 0");
+
+        // Settings.Global ADB/DevOptions spoofing & tryWrapSettingsProvider host tests
+        check("0".equals(BinderInterceptionPolicy.spoofedSettingsGlobalValue("adb_enabled", cfg)),
+                "spoofedSettingsGlobalValue(adb_enabled) -> 0");
+        check("0".equals(BinderInterceptionPolicy.spoofedSettingsGlobalValue("adb_wifi_enabled", cfg)),
+                "spoofedSettingsGlobalValue(adb_wifi_enabled) -> 0");
+        check("0".equals(BinderInterceptionPolicy.spoofedSettingsGlobalValue("development_settings_enabled", cfg)),
+                "spoofedSettingsGlobalValue(development_settings_enabled) -> 0");
+        check("0".equals(BinderInterceptionPolicy.spoofedSettingsGlobalValue("stay_on_while_plugged_in", cfg)),
+                "spoofedSettingsGlobalValue(stay_on_while_plugged_in) -> 0");
+        check(BinderInterceptionPolicy.spoofedSettingsGlobalValue("private_dns_mode", cfg) == null,
+                "spoofedSettingsGlobalValue(private_dns_mode) -> null");
+        check(BinderInterceptionPolicy.spoofedSettingsGlobalValue("adb_enabled", noAdbCfg) == null,
+                "spoofedSettingsGlobalValue with hide_adb=false -> null");
+        check(BinderInterceptionPolicy.spoofedSettingsGlobalValue("adb_enabled",
+                StealthConfig.fromJson("{\"enabled\":false,\"hide_adb\":true}")) == null,
+                "spoofedSettingsGlobalValue when disabled -> null");
+
+        testSettingsProviderWrapping(cfg);
+    }
+
+    public interface FakeIContentProvider {
+        Object asBinder();
+        String callDirect(String arg);
+    }
+
+    public static final class FakeContentProviderRecord {
+        public FakeIContentProvider provider;
+        public FakeContentProviderRecord(FakeIContentProvider provider) {
+            this.provider = provider;
+        }
+    }
+
+    public static final class FakeProviderMap {
+        public final Map<String, FakeContentProviderRecord> mSingletonByName = new HashMap<>();
+    }
+
+    public static final class FakeActivityManagerService {
+        public final FakeProviderMap mProviderMap = new FakeProviderMap();
+    }
+
+    public static final class FakeSettingsBinderWrapper {
+        public final Object delegate;
+        public FakeSettingsBinderWrapper(Object delegate) {
+            this.delegate = delegate;
+        }
+    }
+
+    private static void testSettingsProviderWrapping(StealthConfig cfg) {
+        final Object rawSettingsBinder = new Object();
+        FakeIContentProvider realProvider = new FakeIContentProvider() {
+            @Override public Object asBinder() { return rawSettingsBinder; }
+            @Override public String callDirect(String arg) { return "direct:" + arg; }
+        };
+        FakeActivityManagerService fakeAms = new FakeActivityManagerService();
+        fakeAms.mProviderMap.mSingletonByName.put("settings", new FakeContentProviderRecord(realProvider));
+
+        SystemServerHook.SettingsProviderWrapperFactory mockFactory = new SystemServerHook.SettingsProviderWrapperFactory() {
+            @Override public Class<?> providerInterface(Object provider) { return FakeIContentProvider.class; }
+            @Override public Object asBinder(Object provider) { return ((FakeIContentProvider) provider).asBinder(); }
+            @Override public Object wrapBinder(Object delegateBinder, StealthConfig c) { return new FakeSettingsBinderWrapper(delegateBinder); }
+        };
+
+        boolean wrapped = SystemServerHook.tryWrapSettingsProvider(fakeAms, cfg, mockFactory);
+        check(wrapped, "tryWrapSettingsProvider must wrap settings record");
+        FakeIContentProvider storedProvider = fakeAms.mProviderMap.mSingletonByName.get("settings").provider;
+        check(storedProvider != realProvider, "stored settings provider must be wrapped proxy");
+        check(storedProvider.asBinder() instanceof FakeSettingsBinderWrapper, "asBinder() must return wrapped binder");
+        check(((FakeSettingsBinderWrapper) storedProvider.asBinder()).delegate == rawSettingsBinder, "wrapped binder delegates to rawSettingsBinder");
+        check("direct:ok".equals(storedProvider.callDirect("ok")), "in-process direct methods must pass through to real provider");
+        check(SystemServerHook.tryWrapSettingsProvider(fakeAms, cfg, mockFactory), "idempotent re-wrap must return true");
+        check(fakeAms.mProviderMap.mSingletonByName.get("settings").provider == storedProvider, "idempotent re-wrap must preserve existing proxy");
     }
 
     public static void main(String[] args) {
