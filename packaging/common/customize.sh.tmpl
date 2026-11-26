@@ -45,7 +45,7 @@ install_exec_atomic() {
 
 install_exec_atomic "$MODPATH/bin/sandbox_guard" "$GUARD_HOME/sandbox_guard" ""
 install_exec_atomic "$MODPATH/bin/sandbox_broker" "$GUARD_HOME/sandbox_broker" "u:object_r:sandbox_broker_exec:s0"
-rm -rf "$MODPATH/bin"
+rm -rf "${MODPATH:?}/bin"
 
 seed_default_json() {
     src=$1

@@ -1316,13 +1316,16 @@ func (d *Daemon) reconcileOnce(ctx context.Context, req reconcileReq) error {
 	// Persist exemption.v1.json if changed.
 	if dec.WriteExemption {
 		if err := d.writeExemption(dec.NewExemption); err != nil {
-			d.log.Printf("write exemption.v1.json: %v", err)
+			if d.log != nil {
+				d.log.Printf("write exemption.v1.json: %v", err)
+			}
 			// Fail closed if exemption could not be persisted.
 			dec.OpenGate = false
 			dec.ArmRawDrop = extCap
 			dec.NextState = StateBlockedLocked
 			dec.StartAckWait = false
 			dec.ClearAckDeadline = true
+			dec.Reason = fmt.Sprintf("write exemption.v1.json: %v", err)
 		} else {
 			d.mu.Lock()
 			exCopy := dec.NewExemption
@@ -2102,7 +2105,7 @@ func (d *Daemon) getSandboxAppsForPolicy(ctx context.Context, policy contracts.P
 	return apps, nil
 }
 
-func (d *Daemon) prewarmLauncherCache(ctx context.Context, policy contracts.Policy) {
+func (d *Daemon) prewarmLauncherCache(ctx context.Context, policy contracts.Policy, skipPkgs ...string) {
 	if d.isPaused() || d.runner == nil {
 		return
 	}
@@ -2110,8 +2113,22 @@ func (d *Daemon) prewarmLauncherCache(ctx context.Context, policy contracts.Poli
 	if err != nil || len(apps) == 0 {
 		return
 	}
+	var skipSet map[string]struct{}
+	if len(skipPkgs) > 0 {
+		skipSet = make(map[string]struct{}, len(skipPkgs))
+		for _, s := range skipPkgs {
+			if s != "" {
+				skipSet[s] = struct{}{}
+			}
+		}
+	}
 	var missing []string
 	for _, pkg := range apps {
+		if skipSet != nil {
+			if _, skip := skipSet[pkg]; skip {
+				continue
+			}
+		}
 		if d.cachedLauncher(pkg) == "" {
 			missing = append(missing, pkg)
 		}
@@ -2163,7 +2180,7 @@ func (d *Daemon) needsLauncherPrewarm(policy contracts.Policy) bool {
 	return false
 }
 
-func (d *Daemon) scheduleMaintenance(policy contracts.Policy, restoreRemaining bool) {
+func (d *Daemon) scheduleMaintenance(policy contracts.Policy, restoreRemaining bool, skipPrewarmPkgs ...string) {
 	perf := d.getPerfConfig()
 	needPrewarm := d.needsLauncherPrewarm(policy)
 	d.mu.Lock()
@@ -2189,11 +2206,12 @@ func (d *Daemon) scheduleMaintenance(policy contracts.Policy, restoreRemaining b
 	if prevCancel != nil {
 		prevCancel()
 	}
-	go func(ctxBg context.Context, cancelFn context.CancelFunc, pol contracts.Policy, doRestore, doPrune, doSync, doPrewarm bool) {
+	skipCopy := append([]string(nil), skipPrewarmPkgs...)
+	go func(ctxBg context.Context, cancelFn context.CancelFunc, pol contracts.Policy, doRestore, doPrune, doSync, doPrewarm bool, skipPkgs []string) {
 		defer d.maintWg.Done()
 		defer cancelFn()
 		if doPrewarm && ctxBg.Err() == nil && !d.isPaused() {
-			d.prewarmLauncherCache(ctxBg, pol)
+			d.prewarmLauncherCache(ctxBg, pol, skipPkgs...)
 		}
 		if !doRestore && !doPrune && !doSync {
 			return
@@ -2225,7 +2243,7 @@ func (d *Daemon) scheduleMaintenance(policy contracts.Policy, restoreRemaining b
 		if doSync {
 			_, _ = d.syncPolicies(ctxBg, pol)
 		}
-	}(mctx, mcancel, policy, restoreRemaining, needPrune, needSync, needPrewarm)
+	}(mctx, mcancel, policy, restoreRemaining, needPrune, needSync, needPrewarm, skipCopy)
 }
 
 func (d *Daemon) startTProxySandbox(ctx context.Context, policy contracts.Policy) error {
@@ -2421,7 +2439,7 @@ func (d *Daemon) startTProxySandboxWithPriorityTraced(ctx context.Context, polic
 		return failErr(errors.New("sandbox TProxy port not ready"))
 	}
 
-	d.scheduleMaintenance(policy, len(remaining) > 0)
+	d.scheduleMaintenance(policy, len(remaining) > 0, priorityPkg)
 	return thawUs, restoreUs, reconcileUs, nil
 }
 
@@ -2852,7 +2870,7 @@ func (d *Daemon) HandleRPC(ctx context.Context, req contracts.RPCRequest) contra
 				}
 				d.lifecycleMu.Unlock()
 				if len(remaining) > 0 && !d.isPaused() {
-					d.scheduleMaintenance(policy, true)
+					d.scheduleMaintenance(policy, true, req.Pkg)
 				}
 			} else if !d.isPaused() {
 				d.lifecycleMu.Lock()
