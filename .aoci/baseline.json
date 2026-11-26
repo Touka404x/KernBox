@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-11-26T12:29:19Z",
-  "updated_at": "2026-11-26T13:14:19Z",
+  "updated_at": "2026-11-26T14:17:45Z",
   "files": {
     ".gitattributes": {
       "role": "index",
@@ -235,6 +235,12 @@
       "role": "index",
       "sha256": "3c29df93df0f1afcc43a15abc23b3e8329bbfba06a9b0aa15284451bd206fbff",
       "size": 1482852
+    },
+    "broker/tests/broker_test.c": {
+      "role": "observe",
+      "sha256": "cb8c8d4fce334007cb8afe1790cbf813acb5cd40f467753db81ecaff3812efa1",
+      "size": 6419,
+      "normalized_sha256": "cb8c8d4fce334007cb8afe1790cbf813acb5cd40f467753db81ecaff3812efa1"
     },
     "controller/AndroidManifest.xml": {
       "role": "index",
@@ -928,6 +934,14 @@
       "size": 2412,
       "normalized_sha256": "660cf8c2f7e6c1bdba33d91e0d1857572e82f92f14002be9dd01a50e40075758",
       "format_sha256": "660cf8c2f7e6c1bdba33d91e0d1857572e82f92f14002be9dd01a50e40075758",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/netfilter/rtnetlink_test.go": {
+      "role": "observe",
+      "sha256": "11c53a15615aca4535513f1f04707ae9b114a75cc926625a1830a0a1fec8449c",
+      "size": 2581,
+      "normalized_sha256": "11c53a15615aca4535513f1f04707ae9b114a75cc926625a1830a0a1fec8449c",
+      "format_sha256": "11c53a15615aca4535513f1f04707ae9b114a75cc926625a1830a0a1fec8449c",
       "format_kind": "gofmt"
     },
     "guard/internal/netfilter/rules.go": {

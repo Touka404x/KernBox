@@ -50,6 +50,8 @@ def resolve_toolchain(args: argparse.Namespace) -> dict:
         if not d8_hits:
             raise FileNotFoundError(f"No {d8_name} found under {sdk / 'build-tools'}")
         d8 = d8_hits[0]
+    d8_jar = d8.parent / "lib" / "d8.jar"
+    java = jdk_bin / exe_name("java")
 
     ndk_str = (
         args.ndk
@@ -71,17 +73,21 @@ def resolve_toolchain(args: argparse.Namespace) -> dict:
         raise FileNotFoundError(f"LLVM toolchain bin dir not found under {ndk}")
     ndk_bin = prebuilt_candidates[0]
     min_sdk = int(getattr(args, "min_sdk", 31) or 31)
-    clang_name = (
-        f"aarch64-linux-android{min_sdk}-clang++.cmd"
-        if IS_WIN
-        else f"aarch64-linux-android{min_sdk}-clang++"
-    )
-    clangxx = ndk_bin / clang_name
-    if not clangxx.is_file():
-        clang_hits = sorted(ndk_bin.glob("aarch64-linux-android*-clang++" + (".cmd" if IS_WIN else "")), reverse=True)
-        if not clang_hits:
-            raise FileNotFoundError(f"aarch64 clang++ not found under {ndk_bin}")
-        clangxx = clang_hits[0]
+    clang_target = f"aarch64-linux-android{min_sdk}"
+    if IS_WIN and (ndk_bin / "clang++.exe").is_file():
+        clangxx = ndk_bin / "clang++.exe"
+    else:
+        clang_name = (
+            f"{clang_target}-clang++.cmd"
+            if IS_WIN
+            else f"{clang_target}-clang++"
+        )
+        clangxx = ndk_bin / clang_name
+        if not clangxx.is_file():
+            clang_hits = sorted(ndk_bin.glob("aarch64-linux-android*-clang++" + (".cmd" if IS_WIN else "")), reverse=True)
+            if not clang_hits:
+                raise FileNotFoundError(f"aarch64 clang++ not found under {ndk_bin}")
+            clangxx = clang_hits[0]
 
     llvm_nm = ndk_bin / exe_name("llvm-nm")
     llvm_readelf = ndk_bin / exe_name("llvm-readelf")
@@ -90,10 +96,13 @@ def resolve_toolchain(args: argparse.Namespace) -> dict:
     env["PATH"] = str(jdk_bin) + os.pathsep + env.get("PATH", "")
 
     return {
+        "java": java,
         "javac": javac,
         "android_jar": android_jar,
         "d8": d8,
+        "d8_jar": d8_jar,
         "clangxx": clangxx,
+        "clang_target": clang_target,
         "llvm_nm": llvm_nm,
         "llvm_readelf": llvm_readelf,
         "env": env,
@@ -140,7 +149,12 @@ def build_dex(tc: dict, build_dir: pathlib.Path) -> bytes:
     class_files = sorted(classes_dir.rglob("*.class"))
     assert class_files, "javac produced no .class files"
 
-    d8_cmd = ["cmd", "/c", str(tc["d8"])] if IS_WIN and str(tc["d8"]).lower().endswith(".bat") else [str(tc["d8"])]
+    if IS_WIN and tc["d8_jar"].is_file():
+        d8_cmd = [str(tc["java"]), "-cp", str(tc["d8_jar"]), "com.android.tools.r8.D8"]
+    elif IS_WIN and str(tc["d8"]).lower().endswith(".bat"):
+        d8_cmd = ["cmd", "/c", str(tc["d8"])]
+    else:
+        d8_cmd = [str(tc["d8"])]
     d8_cmd.extend(["--min-api", "26", "--release", "--output", str(dex_dir), *[str(p) for p in class_files]])
     run(d8_cmd, env=tc["env"])
 
@@ -181,6 +195,8 @@ def build_so(tc: dict, build_dir: pathlib.Path, oem: str, out_so: pathlib.Path) 
     macro = f"-DOEM_{oem.upper()}"
 
     cmd = ["cmd", "/c", str(tc["clangxx"])] if IS_WIN and str(tc["clangxx"]).lower().endswith(".cmd") else [str(tc["clangxx"])]
+    if tc["clangxx"].name.lower().startswith("clang++"):
+        cmd.append(f"--target={tc['clang_target']}")
     cmd.extend([
         "-std=c++17",
         "-O2",

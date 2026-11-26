@@ -36,12 +36,11 @@ def resolve_go(explicit: str = "") -> str:
     return found
 
 
-def build_go_pair(go_exe: str, oem: str, kernel: str, version: str, stage_dir: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
+def build_go_guard(go_exe: str, oem: str, kernel: str, version: str, stage_dir: pathlib.Path) -> pathlib.Path:
     tags = f"oem_{oem}" if kernel == "k510" else f"oem_{oem},kernel_compat"
     out_dir = stage_dir / "go" / f"{oem}-{kernel}"
     out_dir.mkdir(parents=True, exist_ok=True)
     guard_bin = out_dir / "sandbox_guard"
-    broker_bin = out_dir / "sandbox_broker"
 
     env = dict(os.environ)
     env["CGO_ENABLED"] = "0"
@@ -57,13 +56,24 @@ def build_go_pair(go_exe: str, oem: str, kernel: str, version: str, stage_dir: p
         env=env,
         check=True,
     )
-    subprocess.run(
-        [go_exe, "build", "-trimpath", f"-ldflags={ldflags}", "-tags", tags, "-o", str(broker_bin), "./cmd/broker"],
-        cwd=REPO_ROOT / "guard",
-        env=env,
-        check=True,
-    )
-    return guard_bin, broker_bin
+    return guard_bin
+
+
+def build_native_broker(stage_dir: pathlib.Path, args: argparse.Namespace) -> pathlib.Path:
+    out_bin = stage_dir / "native" / "sandbox_broker"
+    cmd = [
+        sys.executable,
+        str(REPO_ROOT / "broker" / "build.py"),
+        "--out",
+        str(out_bin),
+    ]
+    if args.sdk:
+        cmd.extend(["--sdk", args.sdk])
+    if args.ndk:
+        cmd.extend(["--ndk", args.ndk])
+    print("[broker build] static C11 arm64 sandbox_broker")
+    subprocess.run(cmd, cwd=REPO_ROOT, check=True)
+    return out_bin
 
 
 def build_zygisk_oem(oem: str, stage_dir: pathlib.Path, args: argparse.Namespace, skip_dex: bool) -> pathlib.Path:
@@ -157,6 +167,7 @@ def main(argv=None) -> int:
     try:
         ctrl_meta = build_controller_apk(out_dir, args)
         apk_meta = build_verify_apk(out_dir, args)
+        broker_bin = build_native_broker(stage_dir, args)
 
         zygisk_map: dict[str, pathlib.Path] = {}
         for idx, oem in enumerate(args.oems):
@@ -165,7 +176,7 @@ def main(argv=None) -> int:
         variants = []
         for oem in args.oems:
             for kernel, roots in KERNEL_ROOT_PAIRS:
-                guard_bin, broker_bin = build_go_pair(go_exe, oem, kernel, args.version, stage_dir)
+                guard_bin = build_go_guard(go_exe, oem, kernel, args.version, stage_dir)
                 for root in roots:
                     zip_name = f"KernBox-{oem}-{kernel}-{root}-arm64.zip"
                     meta = pack_variant.pack_variant(

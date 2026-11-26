@@ -61,14 +61,17 @@ def resolve_toolchain(args: argparse.Namespace) -> dict:
     env["PATH"] = str(jdk_bin) + os.pathsep + env.get("PATH", "")
 
     return {
+        "java": jdk_bin / exe_name("java"),
         "javac": jdk_bin / exe_name("javac"),
         "keytool": jdk_bin / exe_name("keytool"),
         "platform": platform,
         "d8": tools_dir / exe_name("d8", ".bat"),
+        "d8_jar": tools_dir / "lib" / "d8.jar",
         "aapt": tools_dir / exe_name("aapt"),
         "aapt2": tools_dir / exe_name("aapt2"),
         "zipalign": tools_dir / exe_name("zipalign"),
         "apksigner": tools_dir / exe_name("apksigner", ".bat"),
+        "apksigner_jar": tools_dir / "lib" / "apksigner.jar",
         "env": env,
     }
 
@@ -211,16 +214,20 @@ def build_apk(args: argparse.Namespace) -> pathlib.Path:
             for compiled in sorted(classes.rglob("*.class"), key=lambda p: p.relative_to(classes).as_posix()):
                 archive.writestr(fixed_zipinfo(compiled.relative_to(classes).as_posix()), compiled.read_bytes())
 
-        run_cmd(tc, tc["d8"], "--min-api", "26", "--release", "--lib", tc["platform"], "--output", staging, jar)
+        if IS_WIN and tc["d8_jar"].is_file():
+            run_cmd(tc, tc["java"], "-cp", tc["d8_jar"], "com.android.tools.r8.D8", "--min-api", "26", "--release", "--lib", tc["platform"], "--output", staging, jar)
+        else:
+            run_cmd(tc, tc["d8"], "--min-api", "26", "--release", "--lib", tc["platform"], "--output", staging, jar)
         with ZipFile(unsigned, "a") as archive:
             archive.writestr(fixed_zipinfo("classes.dex"), (staging / "classes.dex").read_bytes())
 
         aligned = staging / "aligned.apk"
         run_cmd(tc, tc["zipalign"], "-f", "4", unsigned, aligned)
         ks_pass_arg = f"env:{args.storepass_env}" if args.storepass_env else f"pass:{storepass}"
+        signer_prefix = [tc["java"], "-jar", tc["apksigner_jar"]] if (IS_WIN and tc["apksigner_jar"].is_file()) else [tc["apksigner"]]
         run_cmd(
             tc,
-            tc["apksigner"],
+            *signer_prefix,
             "sign",
             "--ks",
             key,
@@ -233,9 +240,12 @@ def build_apk(args: argparse.Namespace) -> pathlib.Path:
             aligned,
         )
 
-    verify_cmd = [str(tc["apksigner"]), "verify", "--print-certs", str(output)]
-    if IS_WIN and verify_cmd[0].lower().endswith(".bat"):
-        verify_cmd = ["cmd", "/c", *verify_cmd]
+    verify_cmd = (
+        [str(tc["java"]), "-jar", str(tc["apksigner_jar"])]
+        if (IS_WIN and tc["apksigner_jar"].is_file())
+        else [str(tc["apksigner"])]
+    )
+    verify_cmd.extend(["verify", "--print-certs", str(output)])
     verify_res = subprocess.run(verify_cmd, env=tc["env"], check=True, capture_output=True, text=True)
     sys.stdout.write(verify_res.stdout)
     for line in verify_res.stdout.splitlines():

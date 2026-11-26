@@ -60,15 +60,21 @@ def resolve_toolchain(args: argparse.Namespace) -> dict:
     env["JAVA_HOME"] = str(jdk)
     env["PATH"] = str(jdk_bin) + os.pathsep + env.get("PATH", "")
 
+    d8_jar = tools_dir / "lib" / "d8.jar"
+    apksigner_jar = tools_dir / "lib" / "apksigner.jar"
+
     return {
+        "java": jdk_bin / exe_name("java"),
         "javac": jdk_bin / exe_name("javac"),
         "keytool": jdk_bin / exe_name("keytool"),
         "platform": platform,
         "d8": tools_dir / exe_name("d8", ".bat"),
+        "d8_jar": d8_jar if d8_jar.is_file() else None,
         "aapt": tools_dir / exe_name("aapt"),
         "aapt2": tools_dir / exe_name("aapt2"),
         "zipalign": tools_dir / exe_name("zipalign"),
         "apksigner": tools_dir / exe_name("apksigner", ".bat"),
+        "apksigner_jar": apksigner_jar if apksigner_jar.is_file() else None,
         "env": env,
     }
 
@@ -177,7 +183,24 @@ def build_apk(args: argparse.Namespace) -> pathlib.Path:
             for compiled in sorted(classes.rglob("*.class"), key=lambda p: p.relative_to(classes).as_posix()):
                 archive.writestr(fixed_zipinfo(compiled.relative_to(classes).as_posix()), compiled.read_bytes())
 
-        run_cmd(tc, tc["d8"], "--min-api", "26", "--release", "--lib", tc["platform"], "--output", staging, jar)
+        if IS_WIN and tc["d8_jar"]:
+            run_cmd(
+                tc,
+                tc["java"],
+                "-cp",
+                tc["d8_jar"],
+                "com.android.tools.r8.D8",
+                "--min-api",
+                "26",
+                "--release",
+                "--lib",
+                tc["platform"],
+                "--output",
+                staging,
+                jar,
+            )
+        else:
+            run_cmd(tc, tc["d8"], "--min-api", "26", "--release", "--lib", tc["platform"], "--output", staging, jar)
         res_dir = staging / "res"
         stage_icon_resources(res_dir)
         compiled_res = staging / "compiled-res.zip"
@@ -207,9 +230,14 @@ def build_apk(args: argparse.Namespace) -> pathlib.Path:
         aligned = staging / "aligned.apk"
         run_cmd(tc, tc["zipalign"], "-f", "4", unsigned, aligned)
         ks_pass_arg = f"env:{args.storepass_env}" if args.storepass_env else f"pass:{storepass}"
+        apksigner_cmd = (
+            [tc["java"], "-jar", tc["apksigner_jar"]]
+            if (IS_WIN and tc["apksigner_jar"])
+            else [tc["apksigner"]]
+        )
         run_cmd(
             tc,
-            tc["apksigner"],
+            *apksigner_cmd,
             "sign",
             "--ks",
             key,
@@ -222,7 +250,7 @@ def build_apk(args: argparse.Namespace) -> pathlib.Path:
             aligned,
         )
 
-    run_cmd(tc, tc["apksigner"], "verify", "--print-certs", output)
+    run_cmd(tc, *apksigner_cmd, "verify", "--print-certs", output)
     run_cmd(tc, tc["aapt"], "dump", "badging", output)
     print(f"BUILT_APK={output} SIZE={output.stat().st_size}")
     return output

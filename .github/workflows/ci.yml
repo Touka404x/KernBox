@@ -78,6 +78,10 @@ jobs:
           SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           yes | "$SDKM" --licenses >/dev/null || true
           "$SDKM" "platforms;android-35" "build-tools;35.0.0"
+      - name: C11 native broker unit tests
+        run: |
+          gcc -std=c11 -O2 -Wall -Wextra -Werror broker/broker_core.c broker/tests/broker_test.c -o /tmp/broker_test
+          /tmp/broker_test
       - name: C++ 5-OEM stealth logic tests
         run: |
           for oem in OEM_HYPEROS OEM_OPLUS OEM_ONEUI OEM_AOSP OEM_GENERIC; do

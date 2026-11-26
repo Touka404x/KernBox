@@ -3,6 +3,7 @@ package netfilter
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
@@ -234,8 +235,32 @@ type pendingHookVerify struct {
 	expectEmpty bool
 }
 
+func (c *Controller) useNativeNetlink() bool {
+	if runtime.GOOS != "linux" {
+		return false
+	}
+	if c.Runner == nil {
+		return true
+	}
+	switch c.Runner.(type) {
+	case ExecRunner, *ExecRunner:
+		return true
+	default:
+		return false
+	}
+}
+
 func (c *Controller) verifyTProxyRouting(ctx context.Context, spec GateSpec) error {
 	mark := spec.tproxyMark()
+	if c.useNativeNetlink() {
+		err := nativeVerifyTProxyRouting(mark, contracts.DefaultTProxyPref, contracts.DefaultTProxyTable)
+		if err == nil {
+			return nil
+		}
+		if errors.Is(err, errTProxyVerifyMismatch) || c.Runner == nil {
+			return err
+		}
+	}
 	table := strconv.Itoa(contracts.DefaultTProxyTable)
 	pref := strconv.Itoa(contracts.DefaultTProxyPref)
 	wantFw := fmt.Sprintf("fwmark 0x%x/0x%x", mark, contracts.NetIDMask)
@@ -267,6 +292,14 @@ func (c *Controller) verifyTProxyRouting(ctx context.Context, spec GateSpec) err
 
 func (c *Controller) ensureTProxyRouting(ctx context.Context, spec GateSpec) error {
 	mark := spec.tproxyMark()
+	if c.useNativeNetlink() {
+		if err := nativeEnsureTProxyRouting(mark, contracts.DefaultTProxyPref, contracts.DefaultTProxyTable); err == nil {
+			c.routingCleaned = false
+			return nil
+		} else if c.Runner == nil {
+			return err
+		}
+	}
 	table := strconv.Itoa(contracts.DefaultTProxyTable)
 	pref := strconv.Itoa(contracts.DefaultTProxyPref)
 	wantFw := fmt.Sprintf("fwmark 0x%x/0x%x", mark, contracts.NetIDMask)
@@ -333,6 +366,14 @@ func (c *Controller) ensureTProxyRouting(ctx context.Context, spec GateSpec) err
 func (c *Controller) cleanupTProxyRouting(ctx context.Context) {
 	if c.routingCleaned {
 		return
+	}
+	if c.useNativeNetlink() {
+		if err := nativeCleanupTProxyRouting(contracts.DefaultTProxyPref, contracts.DefaultTProxyTable); err == nil {
+			c.routingCleaned = true
+			return
+		} else if c.Runner == nil {
+			return
+		}
 	}
 	table := strconv.Itoa(contracts.DefaultTProxyTable)
 	pref := strconv.Itoa(contracts.DefaultTProxyPref)
