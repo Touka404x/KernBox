@@ -46,6 +46,7 @@ typedef enum conn_state {
 typedef struct conn_slot {
     int client_fd;
     int guard_fd;
+    int client_in_epoll;
     conn_state_t state;
     uint64_t deadline_ms;
     size_t req_len;
@@ -158,6 +159,28 @@ static int epoll_mod(int fd, uint32_t events, uint32_t tag) {
 #define TAG_IS_GUARD(tag) (((tag) >> 16) & 1U)
 #define TAG_SLOT(tag) ((tag) & 0xFFFFU)
 
+static int set_client_epoll(conn_slot_t *s, size_t slot_idx, uint32_t events) {
+    if (s->client_fd < 0) {
+        return -1;
+    }
+    uint32_t tag = MAKE_TAG(slot_idx, 0);
+    if (events == 0) {
+        if (s->client_in_epoll) {
+            (void)epoll_ctl(g_epfd, EPOLL_CTL_DEL, s->client_fd, NULL);
+            s->client_in_epoll = 0;
+        }
+        return 0;
+    }
+    if (s->client_in_epoll) {
+        return epoll_mod(s->client_fd, events, tag);
+    }
+    if (epoll_add(s->client_fd, events, tag) != 0) {
+        return -1;
+    }
+    s->client_in_epoll = 1;
+    return 0;
+}
+
 static void close_slot(conn_slot_t *s) {
     if (s->guard_fd >= 0) {
         epoll_ctl(g_epfd, EPOLL_CTL_DEL, s->guard_fd, NULL);
@@ -165,7 +188,10 @@ static void close_slot(conn_slot_t *s) {
         s->guard_fd = -1;
     }
     if (s->client_fd >= 0) {
-        epoll_ctl(g_epfd, EPOLL_CTL_DEL, s->client_fd, NULL);
+        if (s->client_in_epoll) {
+            epoll_ctl(g_epfd, EPOLL_CTL_DEL, s->client_fd, NULL);
+            s->client_in_epoll = 0;
+        }
         close(s->client_fd);
         s->client_fd = -1;
     }
@@ -193,7 +219,7 @@ static void queue_error_reply(conn_slot_t *s, size_t slot_idx, const char *err_m
     }
     s->state = ST_WRITE_CLIENT;
     s->deadline_ms = now_ms + 5000ULL;
-    if (epoll_mod(s->client_fd, EPOLLOUT, MAKE_TAG(slot_idx, 0)) != 0) {
+    if (set_client_epoll(s, slot_idx, EPOLLOUT) != 0) {
         close_slot(s);
     }
 }
@@ -255,6 +281,7 @@ static void handle_accept(int listen_fd, uint64_t now_ms) {
         conn_slot_t *s = &g_slots[free_idx];
         s->client_fd = cfd;
         s->guard_fd = -1;
+        s->client_in_epoll = 0;
         s->state = ST_READ_CLIENT;
         s->deadline_ms = now_ms + 36000ULL;
         s->req_len = 0;
@@ -264,7 +291,7 @@ static void handle_accept(int listen_fd, uint64_t now_ms) {
         s->is_install_apk = 0;
         s->req_id[0] = '\0';
 
-        if (epoll_add(cfd, EPOLLIN, MAKE_TAG(free_idx, 0)) != 0) {
+        if (set_client_epoll(s, (size_t)free_idx, EPOLLIN) != 0) {
             close_slot(s);
         }
     }
@@ -300,8 +327,8 @@ static void start_guard_forward(conn_slot_t *s, size_t slot_idx, uint64_t now_ms
             queue_error_reply(s, slot_idx, "guard unavailable", now_ms);
             return;
         }
-        /* Stop polling client_fd until reply is ready. */
-        (void)epoll_mod(s->client_fd, 0, MAKE_TAG(slot_idx, 0));
+        /* Remove client_fd from epoll while waiting on guard to prevent level-triggered EPOLLHUP spin. */
+        (void)set_client_epoll(s, slot_idx, 0);
         return;
     }
     if (errno == EINPROGRESS) {
@@ -314,7 +341,7 @@ static void start_guard_forward(conn_slot_t *s, size_t slot_idx, uint64_t now_ms
             queue_error_reply(s, slot_idx, "guard unavailable", now_ms);
             return;
         }
-        (void)epoll_mod(s->client_fd, 0, MAKE_TAG(slot_idx, 0));
+        (void)set_client_epoll(s, slot_idx, 0);
         return;
     }
     close(gfd);
@@ -478,7 +505,7 @@ static void handle_guard_event(conn_slot_t *s, size_t slot_idx, uint32_t events,
 
         s->state = ST_WRITE_CLIENT;
         s->deadline_ms = now_ms + 5000ULL;
-        if (epoll_mod(s->client_fd, EPOLLOUT, MAKE_TAG(slot_idx, 0)) != 0) {
+        if (set_client_epoll(s, slot_idx, EPOLLOUT) != 0) {
             close_slot(s);
         }
     }

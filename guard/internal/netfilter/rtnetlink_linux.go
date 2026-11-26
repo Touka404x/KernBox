@@ -55,6 +55,14 @@ func netlinkExchange(fd int, req []byte, seq uint32) ([]byte, error) {
 			if mlen < 16 || mlen > len(chunk) {
 				return nil, fmt.Errorf("malformed netlink msg len=%d buf=%d", mlen, len(chunk))
 			}
+			step := nlAlign4(mlen)
+			if step <= 0 || step > len(chunk) {
+				step = len(chunk)
+			}
+			if mseq != seq {
+				chunk = chunk[step:]
+				continue
+			}
 			msg := chunk[:mlen]
 			if mtype == rtmNLMsgError {
 				if len(msg) < 20 {
@@ -69,12 +77,9 @@ func netlinkExchange(fd int, req []byte, seq uint32) ([]byte, error) {
 			if mtype == rtmNLMsgDone {
 				return out, nil
 			}
-			if mseq == seq {
-				out = append(out, msg...)
-			}
-			step := nlAlign4(mlen)
-			if step <= 0 || step > len(chunk) {
-				break
+			out = append(out, msg...)
+			for z := mlen; z < step; z++ {
+				out = append(out, 0)
 			}
 			chunk = chunk[step:]
 		}
@@ -112,26 +117,26 @@ func nativeEnsureTProxyRouting(mark uint32, pref, table int) error {
 	if err != nil {
 		return err
 	}
-	haveRule := false
-	staleRules := 0
+	validCount := 0
+	staleCount := 0
 	for _, r := range parseIPv4Rules(rulesRaw) {
 		if r.Pref != wantPref {
 			continue
 		}
 		if r.Mark == mark && r.Mask == wantMask && r.Table == wantTable {
-			haveRule = true
+			validCount++
 		} else {
-			staleRules++
+			staleCount++
 		}
 	}
 
-	delCount := staleRules
-	if haveRule && staleRules > 0 {
-		delCount++
-		haveRule = false
+	haveRule := validCount == 1 && staleCount == 0
+	delCount := 0
+	if !haveRule && (validCount > 0 || staleCount > 0) {
+		delCount = validCount + staleCount
 	}
 	var seq uint32 = 2
-	for i := 0; i < delCount && i < 8; i++ {
+	for i := 0; i < delCount && i < 16; i++ {
 		delMsg := encodeIPv4RuleMsg(rtmDelRule, nlmFRequest|nlmFAck, seq, wantPref, 0, 0, 0)
 		seq++
 		if _, derr := netlinkExchange(fd, delMsg, seq-1); derr != nil {
@@ -179,15 +184,20 @@ func nativeVerifyTProxyRouting(mark uint32, pref, table int) error {
 	if err != nil {
 		return err
 	}
-	haveRule := false
+	validCount := 0
+	staleCount := 0
 	for _, r := range parseIPv4Rules(rulesRaw) {
-		if r.Pref == wantPref && r.Mark == mark && r.Mask == wantMask && r.Table == wantTable {
-			haveRule = true
-			break
+		if r.Pref != wantPref {
+			continue
+		}
+		if r.Mark == mark && r.Mask == wantMask && r.Table == wantTable {
+			validCount++
+		} else {
+			staleCount++
 		}
 	}
-	if !haveRule {
-		return fmt.Errorf("%w: missing ip rule pref %d fwmark 0x%x/0x%x lookup %d", errTProxyVerifyMismatch, pref, mark, wantMask, table)
+	if validCount != 1 || staleCount > 0 {
+		return fmt.Errorf("%w: pref %d ip rule mismatch (valid=%d stale=%d want fwmark 0x%x/0x%x lookup %d)", errTProxyVerifyMismatch, pref, validCount, staleCount, mark, wantMask, table)
 	}
 
 	routesRaw, err := netlinkExchange(fd, encodeIPv4LocalRouteMsg(rtmGetRoute, nlmFRequest|nlmFDump, 2, 0, 0), 2)

@@ -194,6 +194,10 @@ func loopbackHTTPRequest(ctx context.Context, method, baseURL, reqPath, secret s
 	}
 	defer conn.Close()
 	_ = conn.SetDeadline(deadline)
+	stopCancel := context.AfterFunc(ctx, func() {
+		_ = conn.SetDeadline(time.Now())
+	})
+	defer stopCancel()
 
 	var reqBuf bytes.Buffer
 	reqBuf.Grow(128 + len(reqPath) + len(secret))

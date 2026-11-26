@@ -31,7 +31,11 @@ func generateTestCertDER(t *testing.T, isCA bool) []byte {
 		NotAfter:     time.Now().Add(24 * time.Hour),
 		IsCA:                  isCA,
 		BasicConstraintsValid: isCA,
+		MaxPathLen:            -1,
 		KeyUsage:              x509.KeyUsageDigitalSignature,
+	}
+	if isCA {
+		tmpl.MaxPathLen = 1
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
 	if err != nil {

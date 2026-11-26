@@ -100,7 +100,8 @@ func validateX509CertDER(der []byte) (bool, error) {
 			continue
 		}
 		var bc struct {
-			IsCA bool `asn1:"optional"`
+			IsCA       bool `asn1:"optional"`
+			MaxPathLen int  `asn1:"optional,default:-1"`
 		}
 		if _, err := asn1.Unmarshal(ext.Value, &bc); err == nil && bc.IsCA {
 			return true, nil
