@@ -17,6 +17,7 @@ import (
 )
 
 type v251FailingIPTables struct {
+	mu              sync.Mutex
 	base            *statefulMockIPTables
 	hasExtOutput    bool
 	failRestoreNext bool
@@ -26,12 +27,23 @@ func (m *v251FailingIPTables) Run(ctx context.Context, timeout time.Duration, st
 	if name == "ip" {
 		return "", nil
 	}
+	m.mu.Lock()
+	hasExt := m.hasExtOutput
+	failNext := false
+	if m.failRestoreNext && name == "iptables-restore" {
+		m.failRestoreNext = false
+		failNext = true
+	}
+	m.mu.Unlock()
+	if failNext {
+		return "COMMIT FAILED", errors.New("mock iptables-restore error")
+	}
 	if name == "iptables-save" {
 		out, err := m.base.Run(ctx, timeout, stdin, name, args...)
 		if err != nil {
 			return out, err
 		}
-		if m.hasExtOutput && !strings.Contains(out, "EXT_PROXY_OUTPUT") {
+		if hasExt && !strings.Contains(out, "EXT_PROXY_OUTPUT") {
 			if strings.Contains(out, "*mangle\n") {
 				out = strings.Replace(out, "*mangle\n", "*mangle\n:EXT_PROXY_OUTPUT - [0:0]\n-A OUTPUT -j EXT_PROXY_OUTPUT\n", 1)
 			} else {
@@ -39,10 +51,6 @@ func (m *v251FailingIPTables) Run(ctx context.Context, timeout time.Duration, st
 			}
 		}
 		return out, nil
-	}
-	if m.failRestoreNext && name == "iptables-restore" {
-		m.failRestoreNext = false
-		return "COMMIT FAILED", errors.New("mock iptables-restore error")
 	}
 	return m.base.Run(ctx, timeout, stdin, name, args...)
 }

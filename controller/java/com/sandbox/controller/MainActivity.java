@@ -54,7 +54,7 @@ public final class MainActivity extends Activity {
     private final Strings strings = new Strings();
     private final BrokerClient broker = new BrokerClient();
     private final ExecutorService rpcExecutor = Executors.newFixedThreadPool(2);
-    private final ExecutorService iconExecutor = Executors.newSingleThreadExecutor();
+    private final ExecutorService iconExecutor = Executors.newFixedThreadPool(2);
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final Map<String, AppTileInfo> tileCache = new ConcurrentHashMap<String, AppTileInfo>();
 
@@ -95,6 +95,7 @@ public final class MainActivity extends Activity {
     private String lastActionError = "";
     private boolean connected = false;
     private boolean busy = false;
+    private boolean silentRefreshing = false;
 
     private final Runnable hideToastTask = new Runnable() {
         @Override
@@ -128,7 +129,7 @@ public final class MainActivity extends Activity {
         if (haloView != null) {
             haloView.setHostResumed(true);
         }
-        refreshStatus(false);
+        refreshStatus(false, connected);
     }
 
     @Override
@@ -906,7 +907,33 @@ public final class MainActivity extends Activity {
     }
 
     private void refreshStatus(final boolean notifyOnSuccess) {
+        refreshStatus(notifyOnSuccess, false);
+    }
+
+    private void refreshStatus(final boolean notifyOnSuccess, final boolean silent) {
         if (busy) {
+            return;
+        }
+        if (silent) {
+            if (silentRefreshing) {
+                return;
+            }
+            silentRefreshing = true;
+            rpcExecutor.execute(new Runnable() {
+                @Override
+                public void run() {
+                    final BrokerProtocol.RpcResponse resp = broker.getStatus();
+                    mainHandler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            silentRefreshing = false;
+                            if (!busy) {
+                                applyRpcResponse(resp, notifyOnSuccess);
+                            }
+                        }
+                    });
+                }
+            });
             return;
         }
         busy = true;

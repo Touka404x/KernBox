@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,12 +14,15 @@ import (
 )
 
 type permissiveAppopsRunner struct {
+	mu    sync.Mutex
 	calls []string
 }
 
 func (p *permissiveAppopsRunner) Run(_ context.Context, _ time.Duration, _ string, name string, args ...string) (string, error) {
 	line := name + " " + strings.Join(args, " ")
+	p.mu.Lock()
 	p.calls = append(p.calls, line)
+	p.mu.Unlock()
 	if line == "cmd package list packages -3 --user 10" {
 		return "package:com.demo.app\n", nil
 	}
@@ -126,12 +130,15 @@ func TestCustomExemptionLockAndAckCustomPIDKey(t *testing.T) {
 }
 
 type adminExcludeRunner struct {
+	mu    sync.Mutex
 	calls []string
 }
 
 func (a *adminExcludeRunner) Run(_ context.Context, _ time.Duration, _ string, name string, args ...string) (string, error) {
 	line := name + " " + strings.Join(args, " ")
+	a.mu.Lock()
 	a.calls = append(a.calls, line)
+	a.mu.Unlock()
 	if line == "cmd package list packages -3 --user 10" {
 		return "package:com.android.chrome\npackage:com.legacy.dpc\npackage:com.sandbox.controller\npackage:com.sandbox.verify\n", nil
 	}
@@ -232,6 +239,7 @@ func TestBuildStatusDataPrependsEnabledPlayStore(t *testing.T) {
 	}
 
 	d.runner = &playStoreStatusRunner{enabled: false}
+	d.invalidateStatusCaches()
 	appsNoPlay := d.buildStatusData(context.Background())["sandbox_apps"].([]string)
 	if len(appsNoPlay) != 1 || appsNoPlay[0] != "com.android.chrome" {
 		t.Fatalf("expected Play Store omitted when disabled, got %v", appsNoPlay)

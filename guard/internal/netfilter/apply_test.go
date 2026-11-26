@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -38,6 +39,7 @@ func TestResolveIPTablesCompanionBin(t *testing.T) {
 }
 
 type ruleMockRunner struct {
+	mu    sync.Mutex
 	calls []string
 	rules string
 	route string
@@ -45,7 +47,9 @@ type ruleMockRunner struct {
 
 func (r *ruleMockRunner) Run(_ context.Context, _ time.Duration, _ string, name string, args ...string) (string, error) {
 	line := name + " " + strings.Join(args, " ")
+	r.mu.Lock()
 	r.calls = append(r.calls, line)
+	r.mu.Unlock()
 	if line == "ip -4 rule show" {
 		return r.rules, nil
 	}

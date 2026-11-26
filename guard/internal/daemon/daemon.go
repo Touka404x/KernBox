@@ -181,6 +181,11 @@ type Daemon struct {
 	launchTraces           []LaunchTrace
 	wakeSeq                uint64
 	hotEscalating          bool
+	cachedPrivateDNS       string
+	cachedPrivateDNSAt     time.Time
+	cachedSandboxApps      []string
+	cachedSandboxAppsAt    time.Time
+	cachedSandboxAppsUID   int
 
 	reconcileCh    chan reconcileReq
 	timerRefreshCh chan struct{}
@@ -349,6 +354,21 @@ func (d *Daemon) evictCachedLauncher(pkg string) {
 func (d *Daemon) invalidateLaunchCaches() {
 	d.mu.Lock()
 	d.launcherCache = nil
+	d.cachedPrivateDNS = ""
+	d.cachedPrivateDNSAt = time.Time{}
+	d.cachedSandboxApps = nil
+	d.cachedSandboxAppsAt = time.Time{}
+	d.cachedSandboxAppsUID = 0
+	d.mu.Unlock()
+}
+
+func (d *Daemon) invalidateStatusCaches() {
+	d.mu.Lock()
+	d.cachedPrivateDNS = ""
+	d.cachedPrivateDNSAt = time.Time{}
+	d.cachedSandboxApps = nil
+	d.cachedSandboxAppsAt = time.Time{}
+	d.cachedSandboxAppsUID = 0
 	d.mu.Unlock()
 }
 
@@ -399,6 +419,7 @@ func (d *Daemon) loadPersistedState() {
 	if p, err := ReadPolicy(); err == nil {
 		d.policy = p
 		d.policyLoaded = true
+		d.invalidateStatusCaches()
 		d.applyPolicyNetfilterLock(p)
 		exPath = d.resolvedExemptionPath(p)
 	} else {
@@ -1961,8 +1982,130 @@ func (d *Daemon) enforcePausedAtBootLocked(ctx context.Context) {
 	}
 }
 
+func (d *Daemon) getSandboxAppsForPolicy(ctx context.Context, policy contracts.Policy, forceFresh bool) ([]string, error) {
+	if !forceFresh {
+		d.mu.Lock()
+		fresh := d.cachedSandboxAppsUID == policy.UserID &&
+			!d.cachedSandboxAppsAt.IsZero() &&
+			time.Since(d.cachedSandboxAppsAt) < 30*time.Second &&
+			d.cachedSandboxApps != nil
+		var cachedCopy []string
+		if fresh {
+			cachedCopy = append([]string(nil), d.cachedSandboxApps...)
+		}
+		d.mu.Unlock()
+		if fresh {
+			return cachedCopy, nil
+		}
+	}
+
+	const playPkg = "com.android.vending"
+	var (
+		apps    []string
+		listErr error
+		playOut string
+		playErr error
+		wg      sync.WaitGroup
+	)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		apps, listErr = android.ListSandboxApps(ctx, d.runner, policy.UserID, policy.EffectiveCallerPackage(), policy.EffectiveAdminPackage(), contracts.VerifyProbePackage)
+	}()
+	go func() {
+		defer wg.Done()
+		playOut, playErr = d.runner.Run(ctx, 2*time.Second, "", "cmd", "package", "list", "packages", "-e", "--user", strconv.Itoa(policy.UserID), playPkg)
+	}()
+	wg.Wait()
+
+	if listErr != nil {
+		return nil, listErr
+	}
+	hasPlay := false
+	for _, a := range apps {
+		if a == playPkg {
+			hasPlay = true
+			break
+		}
+	}
+	if !hasPlay && playErr == nil && strings.Contains(playOut, "package:"+playPkg) {
+		apps = append([]string{playPkg}, apps...)
+	}
+	if ctx.Err() == nil {
+		appsCopy := append([]string(nil), apps...)
+		d.mu.Lock()
+		d.cachedSandboxApps = appsCopy
+		d.cachedSandboxAppsAt = time.Now()
+		d.cachedSandboxAppsUID = policy.UserID
+		d.mu.Unlock()
+	}
+	return apps, nil
+}
+
+func (d *Daemon) prewarmLauncherCache(ctx context.Context, policy contracts.Policy) {
+	if d.isPaused() || d.runner == nil {
+		return
+	}
+	apps, err := d.getSandboxAppsForPolicy(ctx, policy, false)
+	if err != nil || len(apps) == 0 {
+		return
+	}
+	var missing []string
+	for _, pkg := range apps {
+		if d.cachedLauncher(pkg) == "" {
+			missing = append(missing, pkg)
+		}
+	}
+	if len(missing) == 0 {
+		return
+	}
+	workers := 4
+	if len(missing) < workers {
+		workers = len(missing)
+	}
+	jobs := make(chan string, len(missing))
+	for _, pkg := range missing {
+		jobs <- pkg
+	}
+	close(jobs)
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func() {
+			defer wg.Done()
+			for pkg := range jobs {
+				if ctx.Err() != nil || d.isPaused() {
+					return
+				}
+				if comp, rerr := android.ResolveLauncherComponent(ctx, d.runner, policy.UserID, pkg); rerr == nil && comp != "" {
+					d.setCachedLauncher(pkg, comp)
+				}
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+func (d *Daemon) needsLauncherPrewarm(policy contracts.Policy) bool {
+	if !policy.IsTProxy() || d.isPaused() || d.runner == nil {
+		return false
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if len(d.cachedSandboxApps) == 0 {
+		return len(d.launcherCache) == 0
+	}
+	for _, pkg := range d.cachedSandboxApps {
+		if d.launcherCache[pkg] == "" {
+			return true
+		}
+	}
+	return false
+}
+
 func (d *Daemon) scheduleMaintenance(policy contracts.Policy, restoreRemaining bool) {
 	perf := d.getPerfConfig()
+	needPrewarm := d.needsLauncherPrewarm(policy)
 	d.mu.Lock()
 	if d.shuttingDown {
 		d.mu.Unlock()
@@ -1970,7 +2113,7 @@ func (d *Daemon) scheduleMaintenance(policy contracts.Policy, restoreRemaining b
 	}
 	needPrune := perf.AutoPruneBloatOnStart && !d.bloatPrunedOnce
 	needSync := d.lastPolicySyncHash == ""
-	if !restoreRemaining && !needPrune && !needSync {
+	if !restoreRemaining && !needPrune && !needSync && !needPrewarm {
 		d.mu.Unlock()
 		return
 	}
@@ -1986,9 +2129,15 @@ func (d *Daemon) scheduleMaintenance(policy contracts.Policy, restoreRemaining b
 	if prevCancel != nil {
 		prevCancel()
 	}
-	go func(ctxBg context.Context, cancelFn context.CancelFunc, pol contracts.Policy, doRestore, doPrune, doSync bool) {
+	go func(ctxBg context.Context, cancelFn context.CancelFunc, pol contracts.Policy, doRestore, doPrune, doSync, doPrewarm bool) {
 		defer d.maintWg.Done()
 		defer cancelFn()
+		if doPrewarm && ctxBg.Err() == nil && !d.isPaused() {
+			d.prewarmLauncherCache(ctxBg, pol)
+		}
+		if !doRestore && !doPrune && !doSync {
+			return
+		}
 		d.lifecycleMu.Lock()
 		defer d.lifecycleMu.Unlock()
 		if ctxBg.Err() != nil || d.isPaused() {
@@ -2016,7 +2165,7 @@ func (d *Daemon) scheduleMaintenance(policy contracts.Policy, restoreRemaining b
 		if doSync {
 			_, _ = d.syncPolicies(ctxBg, pol)
 		}
-	}(mctx, mcancel, policy, restoreRemaining, needPrune, needSync)
+	}(mctx, mcancel, policy, restoreRemaining, needPrune, needSync, needPrewarm)
 }
 
 func (d *Daemon) startTProxySandbox(ctx context.Context, policy contracts.Policy) error {
@@ -2081,7 +2230,7 @@ func (d *Daemon) startTProxySandboxWithPriorityTraced(ctx context.Context, polic
 		go func() {
 			defer recWg.Done()
 			tRec := time.Now()
-			recErr = d.requestReconcile(ctx, reconcileReq{clearAckBlock: true, invalidateID: true})
+			recErr = d.requestReconcile(ctx, reconcileReq{clearAckBlock: true})
 			reconcileUs = time.Since(tRec).Microseconds()
 		}()
 	}
@@ -2109,7 +2258,7 @@ func (d *Daemon) startTProxySandboxWithPriorityTraced(ctx context.Context, polic
 		}
 	} else {
 		if !tproxyUp {
-			_ = d.requestReconcile(ctx, reconcileReq{clearAckBlock: true, invalidateID: true})
+			_ = d.requestReconcile(ctx, reconcileReq{clearAckBlock: true})
 			perr := errors.New("proxy core not running and auto-start failed")
 			if !d.isPaused() {
 				d.mu.Lock()
@@ -2119,7 +2268,7 @@ func (d *Daemon) startTProxySandboxWithPriorityTraced(ctx context.Context, polic
 			return thawUs, restoreUs, reconcileUs, perr
 		}
 		tRec := time.Now()
-		if err := d.requestReconcile(ctx, reconcileReq{clearAckBlock: true, invalidateID: true}); err != nil {
+		if err := d.requestReconcile(ctx, reconcileReq{clearAckBlock: true}); err != nil {
 			reconcileUs = time.Since(tRec).Microseconds()
 			if !d.isPaused() {
 				d.mu.Lock()
@@ -2140,7 +2289,8 @@ func (d *Daemon) startTProxySandboxWithPriorityTraced(ctx context.Context, polic
 		if curSt != StateAckWait {
 			return curSt, curErr
 		}
-		deadline := time.Now().Add(time.Duration(AckWaitTimeoutNs) + 500*time.Millisecond)
+		startedAt := time.Now()
+		deadline := startedAt.Add(time.Duration(AckWaitTimeoutNs) + 500*time.Millisecond)
 		for curSt == StateAckWait && time.Now().Before(deadline) {
 			if ack := d.readCurrentAck(policy); ack != nil && ack.BootID == bootID &&
 				ack.AppliedGeneration > 0 && (curGen == 0 || ack.AppliedGeneration >= curGen) {
@@ -2152,10 +2302,14 @@ func (d *Daemon) startTProxySandboxWithPriorityTraced(ctx context.Context, polic
 					break
 				}
 			}
+			sleep := 50 * time.Millisecond
+			if time.Since(startedAt) < 500*time.Millisecond {
+				sleep = 15 * time.Millisecond
+			}
 			select {
 			case <-ctx.Done():
 				return curSt, curErr
-			case <-time.After(50 * time.Millisecond):
+			case <-time.After(sleep):
 			}
 			d.mu.Lock()
 			curSt, curErr, curGen = d.state, d.lastError, d.lastGen
@@ -2376,7 +2530,7 @@ func (d *Daemon) HandleRPC(ctx context.Context, req contracts.RPCRequest) contra
 		if err != nil {
 			return contracts.RPCResponse{ID: req.ID, OK: false, Error: err.Error(), Data: map[string]any{"output": strings.TrimSpace(out)}}
 		}
-		d.evictCachedLauncher(req.Pkg)
+		d.invalidateLaunchCaches()
 		hideRes, hideErr := android.SyncHideApps(ctx, d.runner, policy.UserID, policy.Serial)
 		polRes, _ := d.syncPolicies(ctx, policy)
 		data := map[string]any{
@@ -2712,7 +2866,7 @@ func (d *Daemon) HandleRPC(ctx context.Context, req contracts.RPCRequest) contra
 		if _, err := android.RemoveSandboxApp(ctx, d.runner, policy.UserID, req.Pkg, policy.EffectiveCallerPackage()); err != nil {
 			return contracts.RPCResponse{ID: req.ID, OK: false, Error: err.Error(), Data: d.buildStatusData(ctx)}
 		}
-		d.evictCachedLauncher(req.Pkg)
+		d.invalidateLaunchCaches()
 		_, _ = android.SyncHideApps(ctx, d.runner, policy.UserID, policy.Serial)
 		return contracts.RPCResponse{ID: req.ID, OK: true, Error: "", Data: d.buildStatusData(ctx)}
 
@@ -2788,6 +2942,7 @@ func (d *Daemon) HandleCtl(ctx context.Context, cmd string, args []string) (stri
 		d.policyLoaded = true
 		d.cachedID = nil
 		d.mu.Unlock()
+		d.invalidateStatusCaches()
 		d.applyPolicyNetfilterLock(p)
 		if d.watchers != nil && d.sandboxAckPath == "" {
 			d.watchers.EnsureProxyBaseWatch(filepath.Dir(p.EffectiveProxyAckPath()))
@@ -3025,7 +3180,32 @@ func (d *Daemon) HandleCtl(ctx context.Context, cmd string, args []string) (stri
 	}
 }
 
+func (d *Daemon) getPrivateDNSMode(ctx context.Context, forceFresh bool) string {
+	if !forceFresh {
+		d.mu.Lock()
+		fresh := !d.cachedPrivateDNSAt.IsZero() && time.Since(d.cachedPrivateDNSAt) < 15*time.Second
+		cached := d.cachedPrivateDNS
+		d.mu.Unlock()
+		if fresh {
+			return cached
+		}
+	}
+	privDNS, err := d.runner.Run(ctx, 2*time.Second, "", "settings", "get", "global", "private_dns_mode")
+	privDNS = strings.TrimSpace(privDNS)
+	if err == nil && ctx.Err() == nil {
+		d.mu.Lock()
+		d.cachedPrivateDNS = privDNS
+		d.cachedPrivateDNSAt = time.Now()
+		d.mu.Unlock()
+	}
+	return privDNS
+}
+
 func (d *Daemon) buildStatusData(ctx context.Context) map[string]any {
+	return d.buildStatusDataEx(ctx, false)
+}
+
+func (d *Daemon) buildStatusDataEx(ctx context.Context, forceFresh bool) map[string]any {
 	d.mu.Lock()
 	state := d.state
 	paused := d.paused
@@ -3060,8 +3240,24 @@ func (d *Daemon) buildStatusData(ctx context.Context) map[string]any {
 			}
 		}
 	}
-	privDNS, _ := d.runner.Run(ctx, 2*time.Second, "", "settings", "get", "global", "private_dns_mode")
-	privDNS = strings.TrimSpace(privDNS)
+
+	var privDNS string
+	var apps []string
+	var appsErr error
+	var fetchWg sync.WaitGroup
+	fetchWg.Add(1)
+	go func() {
+		defer fetchWg.Done()
+		privDNS = d.getPrivateDNSMode(ctx, forceFresh)
+	}()
+	if loaded {
+		fetchWg.Add(1)
+		go func() {
+			defer fetchWg.Done()
+			apps, appsErr = d.getSandboxAppsForPolicy(ctx, policy, forceFresh)
+		}()
+	}
+	fetchWg.Wait()
 
 	_, _, disabledFlag := d.resolvedStealthPaths()
 	_, flagErr := os.Stat(disabledFlag)
@@ -3141,20 +3337,7 @@ func (d *Daemon) buildStatusData(ctx context.Context) map[string]any {
 		} else {
 			data["frozen_uids"] = []int{}
 		}
-		if apps, err := android.ListSandboxApps(ctx, d.runner, policy.UserID, policy.EffectiveCallerPackage(), policy.EffectiveAdminPackage(), contracts.VerifyProbePackage); err == nil {
-			const playPkg = "com.android.vending"
-			hasPlay := false
-			for _, a := range apps {
-				if a == playPkg {
-					hasPlay = true
-					break
-				}
-			}
-			if !hasPlay {
-				if out, perr := d.runner.Run(ctx, 2*time.Second, "", "cmd", "package", "list", "packages", "-e", "--user", strconv.Itoa(policy.UserID), playPkg); perr == nil && strings.Contains(out, "package:"+playPkg) {
-					apps = append([]string{playPkg}, apps...)
-				}
-			}
+		if appsErr == nil && apps != nil {
 			data["sandbox_apps"] = apps
 		} else {
 			data["sandbox_apps"] = []string{}
@@ -3261,7 +3444,7 @@ func ParseInstrumentationResult(output string) (map[string]any, error) {
 }
 
 func (d *Daemon) runOnDemandProbe(ctx context.Context) (map[string]any, error) {
-	res := d.buildStatusData(ctx)
+	res := d.buildStatusDataEx(ctx, true)
 	d.mu.Lock()
 	loaded, policy, sess := d.policyLoaded, d.policy, d.lastSession
 	d.mu.Unlock()

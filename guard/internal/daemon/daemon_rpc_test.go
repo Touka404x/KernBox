@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,14 +19,18 @@ import (
 )
 
 type mockCmdRunner struct {
+	mu    sync.Mutex
 	calls []string
 	out   map[string]string
 }
 
 func (m *mockCmdRunner) Run(ctx context.Context, timeout time.Duration, stdin string, name string, args ...string) (string, error) {
 	cmdLine := name + " " + strings.Join(args, " ")
+	m.mu.Lock()
 	m.calls = append(m.calls, cmdLine)
-	if v, ok := m.out[cmdLine]; ok {
+	v, ok := m.out[cmdLine]
+	m.mu.Unlock()
+	if ok {
 		return v, nil
 	}
 	return "", errors.New("unexpected command: " + cmdLine)
@@ -307,6 +312,7 @@ func TestRunProbeInstrumentationParsing(t *testing.T) {
 // statefulMockIPTables simulates iptables-save / iptables-restore per (tool-family, table)
 // so reconcileOnce tests exercise real netfilter.ApplyOrVerify & DetectProxyCapture end-to-end.
 type statefulMockIPTables struct {
+	mu     sync.Mutex
 	tables map[string]map[string][]string // "4/mangle" -> chain -> []rule
 }
 
@@ -332,6 +338,8 @@ func (s *statefulMockIPTables) Run(ctx context.Context, timeout time.Duration, s
 	if name == "ip" {
 		return "", nil
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	fam := "4"
 	if strings.HasPrefix(name, "ip6") {
 		fam = "6"

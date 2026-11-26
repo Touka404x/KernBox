@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -57,6 +58,7 @@ func TestFlushSandboxConnectionsOnlyClosesMatchingInbound(t *testing.T) {
 	if authHeader != "Bearer topsecret" {
 		t.Fatalf("unexpected Authorization header: %q", authHeader)
 	}
+	sort.Strings(deleted)
 	joined := strings.Join(deleted, ",")
 	if joined != "jp-1,jp-2" {
 		t.Fatalf("must delete ONLY jp-1,jp-2 (never sg-1 or bad/id), got %q", joined)

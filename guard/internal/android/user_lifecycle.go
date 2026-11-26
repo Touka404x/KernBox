@@ -862,7 +862,19 @@ func HotFreezeSandboxUserWithOpts(ctx context.Context, r Runner, userID int, sta
 		return 0, fmt.Errorf("refusing to hot-freeze forbidden user %d", userID)
 	}
 	u := strconv.Itoa(userID)
-	thirdOut, _ := r.Run(ctx, 5*time.Second, "", "cmd", "package", "list", "packages", "-3", "--user", u)
+	var thirdOut, imeOut string
+	var listWg sync.WaitGroup
+	listWg.Add(2)
+	go func() {
+		defer listWg.Done()
+		thirdOut, _ = r.Run(ctx, 5*time.Second, "", "cmd", "package", "list", "packages", "-3", "--user", u)
+	}()
+	go func() {
+		defer listWg.Done()
+		imeOut, _ = r.Run(ctx, 4*time.Second, "", "ime", "list", "-s", "--user", u)
+	}()
+	listWg.Wait()
+
 	thirdPkgs := parsePackageList(thirdOut)
 	initialEntries := scanUserProcEntriesWithRoot(cgroupRoot, userID)
 	runningSeen := make(map[string]bool)
@@ -881,7 +893,6 @@ func HotFreezeSandboxUserWithOpts(ctx context.Context, r Runner, userID int, sta
 		runningPkgs = append(runningPkgs, p)
 	}
 
-	imeOut, _ := r.Run(ctx, 4*time.Second, "", "ime", "list", "-s", "--user", u)
 	imeProtected := parseIMEPkgs(imeOut)
 	protected := hibernationProtectedPkgSet(extraProtected...)
 	for k, v := range imeProtected {
@@ -911,11 +922,15 @@ func HotFreezeSandboxUserWithOpts(ctx context.Context, r Runner, userID int, sta
 	sort.Ints(freezableUIDs)
 
 	// Cancel scheduled background jobs best-effort before freezing UIDs so JobScheduler doesn't stall system_server.
+	var cancelTargets []string
 	for _, pkg := range runningPkgs {
 		if !protected[pkg] {
-			_, _ = r.Run(ctx, 2*time.Second, "", "cmd", "jobscheduler", "cancel", "-u", u, pkg)
+			cancelTargets = append(cancelTargets, pkg)
 		}
 	}
+	runPackagePool(ctx, cancelTargets, sandboxWorkerPoolSize, func(pkg string) {
+		_, _ = r.Run(ctx, 2*time.Second, "", "cmd", "jobscheduler", "cancel", "-u", u, pkg)
+	})
 
 	// Freeze cgroups FIRST, then scan cgroup.procs and reclaim pages with pidfd + UID verification.
 	frozenNow := SetCgroupFreezeUIDs(cgroupRoot, userID, freezableUIDs, true)
@@ -1382,15 +1397,26 @@ func InspectSandboxActivityFast(
 		}
 	}
 
-	audioActive := false
-	audOut, errAud := r.Run(ctx, 4*time.Second, "", "dumpsys", "audio")
+	var audOut, topOut string
+	var errAud, errTop error
+	var probeWg sync.WaitGroup
+	probeWg.Add(2)
+	go func() {
+		defer probeWg.Done()
+		audOut, errAud = r.Run(ctx, 4*time.Second, "", "dumpsys", "audio")
+	}()
+	go func() {
+		defer probeWg.Done()
+		topOut, errTop = r.Run(ctx, 3*time.Second, "", "dumpsys", "activity", "top")
+	}()
+	probeWg.Wait()
+
 	if errAud != nil {
 		return SandboxActivitySnapshot{}, fmt.Errorf("dumpsys audio: %w", errAud)
 	}
-	audioActive = ParseAudioActiveForUser(audOut, uidStart, uidEnd)
+	audioActive := ParseAudioActiveForUser(audOut, uidStart, uidEnd)
 
 	fgUser := false
-	topOut, errTop := r.Run(ctx, 3*time.Second, "", "dumpsys", "activity", "top")
 	if errTop == nil {
 		if topLines, conclusive := extractTopActivityLines(topOut); conclusive {
 			fgUser = ParseTopActivityIsUser(topLines, userID)

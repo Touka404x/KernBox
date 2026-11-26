@@ -240,7 +240,21 @@ func (c *Controller) ensureTProxyRouting(ctx context.Context, spec GateSpec) err
 	pref := strconv.Itoa(contracts.DefaultTProxyPref)
 	wantFw := fmt.Sprintf("fwmark 0x%x/0x%x", mark, contracts.NetIDMask)
 
-	rulesOut, err := c.Runner.Run(ctx, 4*time.Second, "", "ip", "-4", "rule", "show")
+	var (
+		rulesOut, routeOut string
+		err, rerr          error
+		wg                 sync.WaitGroup
+	)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		rulesOut, err = c.Runner.Run(ctx, 4*time.Second, "", "ip", "-4", "rule", "show")
+	}()
+	go func() {
+		defer wg.Done()
+		routeOut, rerr = c.Runner.Run(ctx, 4*time.Second, "", "ip", "-4", "route", "show", "table", table)
+	}()
+	wg.Wait()
 	if err != nil {
 		return err
 	}
@@ -262,7 +276,6 @@ func (c *Controller) ensureTProxyRouting(ctx context.Context, spec GateSpec) err
 			break
 		}
 	}
-	routeOut, rerr := c.Runner.Run(ctx, 4*time.Second, "", "ip", "-4", "route", "show", "table", table)
 	haveRoute := rerr == nil && strings.Contains(routeOut, "local") && strings.Contains(routeOut, "dev lo")
 	if !haveRoute {
 		if _, err := c.Runner.Run(ctx, 4*time.Second, "", "ip", "-4", "route", "replace", "local", "0.0.0.0/0", "dev", "lo", "table", table); err != nil {
@@ -328,78 +341,95 @@ func (c *Controller) ApplyOrVerify(ctx context.Context, spec GateSpec, inspect b
 	}
 
 	hooks := GateHooksFor(spec)
-	for _, family := range []int{4, 6} {
-		getTable := c.loadFamilyTables(ctx, family)
-		var batches []string
-		var pendingVerify []pendingHookVerify
+	var err4, err6 error
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		err4 = c.applyOrVerifyFamily(ctx, 4, hooks, spec, inspect)
+	}()
+	go func() {
+		defer wg.Done()
+		err6 = c.applyOrVerifyFamily(ctx, 6, hooks, spec, inspect)
+	}()
+	wg.Wait()
+	if err4 != nil {
+		return err4
+	}
+	return err6
+}
 
-		for _, hook := range hooks {
-			if !hookActive(hook, family, spec) {
-				if hook.TProxyOnly && family == 4 {
-					current, err := getTable(hook.Table)
-					if err != nil {
-						return err
-					}
-					if inspect {
-						if ChainPresent(current, hook) {
-							return fmt.Errorf("IPv%d %s (%s) still present outside tproxy mode", family, hook.Chain, hook.Table)
-						}
-						continue
-					}
-					if batch := RemoveBatch(current, hook); batch != "" {
-						batches = append(batches, batch)
-						pendingVerify = append(pendingVerify, pendingHookVerify{hook: hook, expectEmpty: true})
-					}
-				}
-				continue
-			}
-			expected, err := RulesFor(family, hook, spec)
-			if err != nil {
-				return err
-			}
-			current, err := getTable(hook.Table)
-			if err != nil {
-				return err
-			}
-			if inspect {
-				if !GateInstalled(current, hook, expected) {
-					return fmt.Errorf("IPv%d %s (%s) failed verification", family, hook.Chain, hook.Table)
-				}
-				continue
-			}
-			if GateInstalled(current, hook, expected) {
-				continue
-			}
-			batches = append(batches, GateBatch(current, hook, expected))
-			pendingVerify = append(pendingVerify, pendingHookVerify{hook: hook, expected: expected})
-		}
+func (c *Controller) applyOrVerifyFamily(ctx context.Context, family int, hooks []GateHook, spec GateSpec, inspect bool) error {
+	getTable := c.loadFamilyTables(ctx, family)
+	var batches []string
+	var pendingVerify []pendingHookVerify
 
-		if inspect || len(batches) == 0 {
+	for _, hook := range hooks {
+		if !hookActive(hook, family, spec) {
+			if hook.TProxyOnly && family == 4 {
+				current, err := getTable(hook.Table)
+				if err != nil {
+					return err
+				}
+				if inspect {
+					if ChainPresent(current, hook) {
+						return fmt.Errorf("IPv%d %s (%s) still present outside tproxy mode", family, hook.Chain, hook.Table)
+					}
+					continue
+				}
+				if batch := RemoveBatch(current, hook); batch != "" {
+					batches = append(batches, batch)
+					pendingVerify = append(pendingVerify, pendingHookVerify{hook: hook, expectEmpty: true})
+				}
+			}
 			continue
 		}
-		tableOrder := []string{"raw", "filter", "mangle"}
-		if spec.Open {
-			tableOrder = []string{"mangle", "filter", "raw"}
-		}
-		combined := MergeTableBatches(batches, tableOrder)
-		if err := c.restoreTable(ctx, family, combined); err != nil {
+		expected, err := RulesFor(family, hook, spec)
+		if err != nil {
 			return err
 		}
-		verifyTable := c.loadFamilyTables(ctx, family)
-		for _, pv := range pendingVerify {
-			current, err := verifyTable(pv.hook.Table)
-			if err != nil {
-				return err
+		current, err := getTable(hook.Table)
+		if err != nil {
+			return err
+		}
+		if inspect {
+			if !GateInstalled(current, hook, expected) {
+				return fmt.Errorf("IPv%d %s (%s) failed verification", family, hook.Chain, hook.Table)
 			}
-			if pv.expectEmpty {
-				if ChainPresent(current, pv.hook) {
-					return fmt.Errorf("IPv%d %s (%s) removal failed verification", family, pv.hook.Chain, pv.hook.Table)
-				}
-				continue
+			continue
+		}
+		if GateInstalled(current, hook, expected) {
+			continue
+		}
+		batches = append(batches, GateBatch(current, hook, expected))
+		pendingVerify = append(pendingVerify, pendingHookVerify{hook: hook, expected: expected})
+	}
+
+	if inspect || len(batches) == 0 {
+		return nil
+	}
+	tableOrder := []string{"raw", "filter", "mangle"}
+	if spec.Open {
+		tableOrder = []string{"mangle", "filter", "raw"}
+	}
+	combined := MergeTableBatches(batches, tableOrder)
+	if err := c.restoreTable(ctx, family, combined); err != nil {
+		return err
+	}
+	verifyTable := c.loadFamilyTables(ctx, family)
+	for _, pv := range pendingVerify {
+		current, err := verifyTable(pv.hook.Table)
+		if err != nil {
+			return err
+		}
+		if pv.expectEmpty {
+			if ChainPresent(current, pv.hook) {
+				return fmt.Errorf("IPv%d %s (%s) removal failed verification", family, pv.hook.Chain, pv.hook.Table)
 			}
-			if !GateInstalled(current, pv.hook, pv.expected) {
-				return fmt.Errorf("IPv%d %s (%s) failed verification", family, pv.hook.Chain, pv.hook.Table)
-			}
+			continue
+		}
+		if !GateInstalled(current, pv.hook, pv.expected) {
+			return fmt.Errorf("IPv%d %s (%s) failed verification", family, pv.hook.Chain, pv.hook.Table)
 		}
 	}
 	return nil

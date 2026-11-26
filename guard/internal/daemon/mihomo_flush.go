@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"sandbox_guard/internal/contracts"
@@ -148,8 +150,13 @@ func flushMihomoInboundURL(ctx context.Context, baseURL, secret, inboundName str
 	defer cancel()
 
 	client := &http.Client{
-		Timeout:   1500 * time.Millisecond,
-		Transport: &http.Transport{Proxy: nil},
+		Timeout: 1500 * time.Millisecond,
+		Transport: &http.Transport{
+			Proxy:               nil,
+			MaxIdleConns:        16,
+			MaxIdleConnsPerHost: 8,
+			IdleConnTimeout:     5 * time.Second,
+		},
 		CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
@@ -175,7 +182,7 @@ func flushMihomoInboundURL(ctx context.Context, baseURL, secret, inboundName str
 		return 0, err
 	}
 
-	closed := 0
+	var targetIDs []string
 	for _, c := range list.Connections {
 		if c.Metadata.InboundName != inboundName {
 			continue
@@ -183,20 +190,49 @@ func flushMihomoInboundURL(ctx context.Context, baseURL, secret, inboundName str
 		if c.ID == "" || c.ID == "." || c.ID == ".." || strings.ContainsAny(c.ID, "/?\\#%") {
 			continue
 		}
-		delReq, derr := http.NewRequestWithContext(cctx, http.MethodDelete, baseURL+"/connections/"+url.PathEscape(c.ID), nil)
-		if derr != nil {
-			continue
-		}
-		if secret != "" {
-			delReq.Header.Set("Authorization", "Bearer "+secret)
-		}
-		delResp, derr := client.Do(delReq)
-		if derr == nil {
-			_ = delResp.Body.Close()
-			if delResp.StatusCode >= 200 && delResp.StatusCode < 300 {
-				closed++
-			}
-		}
+		targetIDs = append(targetIDs, c.ID)
 	}
-	return closed, nil
+	if len(targetIDs) == 0 {
+		return 0, nil
+	}
+
+	workers := 8
+	if len(targetIDs) < workers {
+		workers = len(targetIDs)
+	}
+	jobs := make(chan string, len(targetIDs))
+	for _, id := range targetIDs {
+		jobs <- id
+	}
+	close(jobs)
+
+	var closed atomic.Int64
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func() {
+			defer wg.Done()
+			for id := range jobs {
+				if cctx.Err() != nil {
+					return
+				}
+				delReq, derr := http.NewRequestWithContext(cctx, http.MethodDelete, baseURL+"/connections/"+url.PathEscape(id), nil)
+				if derr != nil {
+					continue
+				}
+				if secret != "" {
+					delReq.Header.Set("Authorization", "Bearer "+secret)
+				}
+				delResp, derr := client.Do(delReq)
+				if derr == nil {
+					_ = delResp.Body.Close()
+					if delResp.StatusCode >= 200 && delResp.StatusCode < 300 {
+						closed.Add(1)
+					}
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	return int(closed.Load()), nil
 }
