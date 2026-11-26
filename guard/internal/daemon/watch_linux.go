@@ -148,6 +148,7 @@ type InotifyWatcher struct {
 	workUserID   int
 	workClientID int
 	workPkg      string
+	closed       bool
 	closeOnce    sync.Once
 }
 
@@ -233,6 +234,10 @@ func (w *InotifyWatcher) EnsureProxyBaseWatch(dir string) {
 		return
 	}
 	w.mu.Lock()
+	if w.closed {
+		w.mu.Unlock()
+		return
+	}
 	if _, dup := w.proxyDirs[clean]; dup {
 		_, _ = unix.InotifyRmWatch(w.fd, uint32(wd))
 	} else {
@@ -293,8 +298,11 @@ func (w *InotifyWatcher) EnsureWorkFilesWatch(userID, clientUID int, workPkg ...
 	}
 
 	w.mu.Lock()
-	if w.workWd >= 0 {
-		_, _ = unix.InotifyRmWatch(w.fd, uint32(wd))
+	if w.closed || w.workWd >= 0 {
+		if !w.closed {
+			_, _ = unix.InotifyRmWatch(w.fd, uint32(wd))
+		}
+		w.mu.Unlock()
 		_ = closeFiles()
 	} else {
 		w.workFD = filesFD
@@ -303,15 +311,22 @@ func (w *InotifyWatcher) EnsureWorkFilesWatch(userID, clientUID int, workPkg ...
 		w.workClientID = clientUID
 		w.workPkg = pkg
 		w.kinds[wd] = "workfiles"
+		w.mu.Unlock()
 	}
-	w.mu.Unlock()
 }
 
 func (w *InotifyWatcher) resetWorkFilesWatch() {
 	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.resetWorkFilesWatchLocked()
+}
+
+func (w *InotifyWatcher) resetWorkFilesWatchLocked() {
 	if w.workWd >= 0 {
 		delete(w.kinds, w.workWd)
-		_, _ = unix.InotifyRmWatch(w.fd, uint32(w.workWd))
+		if !w.closed {
+			_, _ = unix.InotifyRmWatch(w.fd, uint32(w.workWd))
+		}
 		w.workWd = -1
 	}
 	if w.workFD >= 0 {
@@ -321,12 +336,13 @@ func (w *InotifyWatcher) resetWorkFilesWatch() {
 	w.workUserID = 0
 	w.workClientID = 0
 	w.workPkg = ""
-	w.mu.Unlock()
 }
 
 func (w *InotifyWatcher) Close() {
 	w.closeOnce.Do(func() {
-		w.resetWorkFilesWatch()
+		w.mu.Lock()
+		w.resetWorkFilesWatchLocked()
+		w.mu.Unlock()
 		close(w.done)
 		_ = unix.Close(w.stopW)
 	})
@@ -334,7 +350,10 @@ func (w *InotifyWatcher) Close() {
 
 func (w *InotifyWatcher) loop(ch WatchChannels) {
 	defer func() {
+		w.mu.Lock()
+		w.closed = true
 		_ = unix.Close(w.fd)
+		w.mu.Unlock()
 		_ = unix.Close(w.stopR)
 	}()
 	buf := make([]byte, 16<<10)

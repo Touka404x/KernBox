@@ -233,8 +233,8 @@ func TestV251PauseModeHybridManualPauseAndL1ToL2Escalation(t *testing.T) {
 		t.Fatal("expected HotFrozen=false after L1->L2 deep escalation")
 	}
 	callsAll := strings.Join(runner.callsSnapshot(), "\n")
-	if !strings.Contains(callsAll, "force-stop --user 10 com.google.android.apps.bard") {
-		t.Fatalf("expected force-stop during L1->L2 escalation, calls:\n%s", callsAll)
+	if !strings.Contains(callsAll, "stop-app --user 10 com.google.android.apps.bard") {
+		t.Fatalf("expected stop-app during L1->L2 escalation, calls:\n%s", callsAll)
 	}
 }
 

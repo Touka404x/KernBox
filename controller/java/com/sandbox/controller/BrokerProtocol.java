@@ -182,6 +182,10 @@ public final class BrokerProtocol {
                     ? (Map<String, Object>) root.get("data")
                     : Collections.<String, Object>emptyMap();
             StatusSnapshot snapshot = parseSnapshot(data);
+            if (!ok && !snapshot.policyLoaded && ("guard unavailable".equals(err)
+                    || "guard write failed".equals(err) || "guard read failed".equals(err))) {
+                return new RpcResponse(id, false, true, OfflineReason.DAEMON_DOWN, err, snapshot);
+            }
             return new RpcResponse(id, ok, false, OfflineReason.NONE, err, snapshot);
         } catch (IllegalArgumentException ex) {
             return RpcResponse.error("", "malformed JSON: " + ex.getMessage(), false);

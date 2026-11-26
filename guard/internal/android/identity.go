@@ -32,7 +32,7 @@ var (
 	ErrWorkVPNMissing = errors.New("no active Android VPN record for the sandbox controller package")
 
 	networkRecord         = regexp.MustCompile(`^NetworkAgentInfo\{network\{([0-9]+)\}`)
-	networkInterface      = regexp.MustCompile(`\bInterfaceName:\s*([a-zA-Z0-9_]+)(?:\s|,|\})`)
+	networkInterface      = regexp.MustCompile(`\bInterfaceName:\s*([a-zA-Z0-9_.-]+)(?:\s|,|\})`)
 	networkOwner          = regexp.MustCompile(`\bOwnerUid:\s*([0-9]+)\b`)
 	networkUnderlying     = regexp.MustCompile(`\bunderlying\{\[([0-9]+)\]\}`)
 	networkUnderlyingCaps = regexp.MustCompile(`\bUnderlyingNetworks:\s*\[([0-9]+)\]`)

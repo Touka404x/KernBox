@@ -17,9 +17,10 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public final class BrokerClient {
 
-    private static final int DEFAULT_TIMEOUT_MS = 8000;
-    private static final int LIFECYCLE_TIMEOUT_MS = 18000;
-    private static final int PROBE_TIMEOUT_MS = 34000;
+    private static final int DEFAULT_TIMEOUT_MS = 10000;
+    private static final int LIFECYCLE_TIMEOUT_MS = 32000;
+    private static final int PROBE_TIMEOUT_MS = 38000;
+    private static final int INSTALL_APK_TIMEOUT_MS = 125000;
     private static final int MAX_RESPONSE_BYTES = 65536;
     private static final AtomicInteger SEQ = new AtomicInteger(1);
 
@@ -64,12 +65,12 @@ public final class BrokerClient {
 
     public BrokerProtocol.RpcResponse installApk(String apkPath) {
         String id = nextId();
-        return exchange(id, BrokerProtocol.buildInstallApk(id, apkPath), PROBE_TIMEOUT_MS);
+        return exchange(id, BrokerProtocol.buildInstallApk(id, apkPath), INSTALL_APK_TIMEOUT_MS);
     }
 
     public BrokerProtocol.RpcResponse installApks(List<String> apkPaths) {
         String id = nextId();
-        return exchange(id, BrokerProtocol.buildInstallApks(id, apkPaths), PROBE_TIMEOUT_MS);
+        return exchange(id, BrokerProtocol.buildInstallApks(id, apkPaths), INSTALL_APK_TIMEOUT_MS);
     }
 
     public BrokerProtocol.RpcResponse launchApp(String pkg) {

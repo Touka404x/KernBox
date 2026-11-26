@@ -60,6 +60,25 @@ class TestPackagingVariants(unittest.TestCase):
                     self.assertEqual(mode, 0o755, f"{exec_sh} mode={oct(mode)}")
                 self.assertIn(b"versionCode=10200\n", zf.read("module.prop"))
 
+                uninstall_sh = zf.read("uninstall.sh").decode("utf-8")
+                self.assertIn("ctl start-sandbox", uninstall_sh)
+                self.assertNotIn("ctl resume", uninstall_sh)
+                self.assertIn("mangle -D POSTROUTING -j SBW_EGRESS", uninstall_sh)
+                self.assertIn("mangle:SBW_EGRESS", uninstall_sh)
+
+                action_sh = zf.read("action.sh").decode("utf-8")
+                self.assertIn("ctl start-sandbox", action_sh)
+                self.assertIn("ctl pause-sandbox", action_sh)
+                self.assertNotIn("ctl resume", action_sh)
+                self.assertNotIn("ctl pause\n", action_sh)
+
+                customize_sh = zf.read("customize.sh").decode("utf-8")
+                for must_exec in ("action.sh", "uninstall.sh", "bin/sandbox_guard", "bin/sandbox_broker"):
+                    self.assertIn(must_exec, customize_sh)
+
+                service_sh = zf.read("service.sh").decode("utf-8")
+                self.assertIn("9>&- &", service_sh)
+
 
 if __name__ == "__main__":
     unittest.main()

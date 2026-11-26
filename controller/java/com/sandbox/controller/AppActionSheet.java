@@ -57,6 +57,7 @@ public final class AppActionSheet extends FrameLayout {
     private boolean open = false;
     private boolean removeArmed = false;
     private boolean working = false;
+    private int opSeq = 0;
 
     public AppActionSheet(
             Context ctx,
@@ -240,6 +241,7 @@ public final class AppActionSheet extends FrameLayout {
         this.currentLabel = label;
         this.removeArmed = false;
         this.working = false;
+        this.opSeq++;
 
         appLabelView.setText(label);
         appPkgView.setText(pkg);
@@ -279,6 +281,7 @@ public final class AppActionSheet extends FrameLayout {
             return;
         }
         open = false;
+        opSeq++;
         backdrop.animate().cancel();
         backdrop.animate().alpha(0f).setDuration(170L).start();
         sheetContainer.animate().cancel();
@@ -316,6 +319,7 @@ public final class AppActionSheet extends FrameLayout {
         }
         working = true;
         setButtonsEnabled(false);
+        final int seq = ++opSeq;
         final String pkg = currentPkg;
         final String label = currentLabel;
         executor.execute(new Runnable() {
@@ -323,19 +327,37 @@ public final class AppActionSheet extends FrameLayout {
             public void run() {
                 final BrokerProtocol.RpcResponse resp;
                 final String okMsg;
-                if (kind == 0) {
-                    resp = broker.launchApp(pkg);
-                    okMsg = strings.launchingFmt(label);
-                } else if (kind == 1) {
-                    resp = broker.stopApp(pkg);
-                    okMsg = strings.stoppedFmt(label);
-                } else {
-                    resp = broker.removeApp(pkg);
-                    okMsg = strings.removedFmt(label);
+                try {
+                    if (kind == 0) {
+                        resp = broker.launchApp(pkg);
+                        okMsg = strings.launchingFmt(label);
+                    } else if (kind == 1) {
+                        resp = broker.stopApp(pkg);
+                        okMsg = strings.stoppedFmt(label);
+                    } else {
+                        resp = broker.removeApp(pkg);
+                        okMsg = strings.removedFmt(label);
+                    }
+                } catch (Throwable t) {
+                    mainHandler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (seq != opSeq) {
+                                return;
+                            }
+                            working = false;
+                            setButtonsEnabled(true);
+                            callback.onActionError(strings.failPrefix() + t.getMessage());
+                        }
+                    });
+                    return;
                 }
                 mainHandler.post(new Runnable() {
                     @Override
                     public void run() {
+                        if (seq != opSeq) {
+                            return;
+                        }
                         working = false;
                         setButtonsEnabled(true);
                         if (resp.ok) {

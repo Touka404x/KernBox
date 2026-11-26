@@ -126,8 +126,8 @@ func StopSandboxApp(ctx context.Context, r Runner, userID int, pkg, callerPkg st
 	if protectPkg == "" {
 		protectPkg = contracts.DefaultWorkPackage
 	}
-	if pkg == protectPkg {
-		return fmt.Errorf("refusing to force-stop protected controller %s", pkg)
+	if pkg == protectPkg || protectedRemovePackages[pkg] || pkg == contracts.ManagedProvisioningPkg {
+		return fmt.Errorf("refusing to force-stop protected package %s", pkg)
 	}
 	out, err := r.Run(ctx, 5*time.Second, "", "am", "force-stop", "--user", strconv.Itoa(userID), pkg)
 	if err != nil {
@@ -253,10 +253,16 @@ func isLocaleServiceUnsupported(out string, err error) bool {
 }
 
 // StopSandboxApps stops third-party and core Google background processes inside the sandbox user
-// on pause while excluding the bridge package so zero idle battery/CPU drain occurs.
-func StopSandboxApps(ctx context.Context, r Runner, userID int, excludePkg string) (int, error) {
+// on pause while excluding the specified packages (such as controller and admin) so zero idle battery/CPU drain occurs.
+func StopSandboxApps(ctx context.Context, r Runner, userID int, excludePkgs ...string) (int, error) {
 	if oem.IsForbiddenUser(userID) {
 		return 0, fmt.Errorf("invalid work user %d", userID)
+	}
+	exclude := make(map[string]bool, len(excludePkgs))
+	for _, ep := range excludePkgs {
+		if ep != "" {
+			exclude[ep] = true
+		}
 	}
 	u := strconv.Itoa(userID)
 	out, listErr := r.Run(ctx, 5*time.Second, "", "cmd", "package", "list", "packages", "-3", "--user", u)
@@ -266,10 +272,10 @@ func StopSandboxApps(ctx context.Context, r Runner, userID int, excludePkg strin
 	stopped := 0
 	var errs []string
 	for _, pkg := range targets {
-		if pkg == excludePkg || !contracts.ValidPackageName(pkg) {
+		if exclude[pkg] || !contracts.ValidPackageName(pkg) {
 			continue
 		}
-		if _, err := r.Run(ctx, 3*time.Second, "", "am", "force-stop", "--user", u, pkg); err != nil {
+		if err := stopPackagePreserveStopped(ctx, r, u, pkg); err != nil {
 			errs = append(errs, pkg+": "+err.Error())
 		} else {
 			stopped++
@@ -314,7 +320,10 @@ func SyncSandboxAppPoliciesWithOpts(ctx context.Context, r Runner, userID int, o
 	u := strconv.Itoa(userID)
 	res := AppPolicySyncResult{UserID: userID, Locale: defLoc}
 
-	out, _ := r.Run(ctx, 5*time.Second, "", "cmd", "package", "list", "packages", "-3", "--user", u)
+	out, err := r.Run(ctx, 5*time.Second, "", "cmd", "package", "list", "packages", "-3", "--user", u)
+	if err != nil {
+		return res, fmt.Errorf("list sandbox packages: %w (%s)", err, strings.TrimSpace(out))
+	}
 	userPkgs := parsePackageList(out)
 
 	localeTargets := mergeSortedUnique(userPkgs, coreSandboxApps)

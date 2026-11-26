@@ -24,7 +24,7 @@ const sandboxWorkerPoolSize = 4
 
 var (
 	actUserStateRegex = regexp.MustCompile(`(?m)^\s*User #([0-9]+):\s*state=([A-Z_]+)`)
-	audioUIDRegex     = regexp.MustCompile(`\buid[:=\s]+([0-9]+)\b`)
+	audioUIDRegex     = regexp.MustCompile(`(?i)\b(?:uid[:=\s]+|u/pid:)([0-9]+)(?:/[0-9]+)?`)
 	hibFileMu         sync.Mutex
 )
 
@@ -48,6 +48,7 @@ type HibernatedState struct {
 // LifecycleOptions configures v2.5.0+ hibernation/restore fast paths.
 type LifecycleOptions struct {
 	CallerPackage       string
+	AdminPackage        string
 	PackagesListPath    string
 	CgroupRoot          string
 	SkipAppOpsForFrozen bool
@@ -55,31 +56,181 @@ type LifecycleOptions struct {
 }
 
 var baseHibernationProtectedPkgs = map[string]bool{
-	contracts.DefaultWorkPackage:             true,
-	contracts.ManagedProvisioningPkg:         true,
-	"android":                                true,
-	"com.android.systemui":                   true,
-	"com.android.settings":                   true,
-	"com.android.phone":                      true,
-	"com.android.bluetooth":                  true,
-	"com.android.webview":                    true,
-	"com.google.android.webview":             true,
-	"com.android.packageinstaller":           true,
-	"com.google.android.packageinstaller":    true,
-	"com.android.certinstaller":              true,
-	"com.android.providers.media":            true,
-	"com.android.providers.media.module":     true,
-	"com.android.externalstorage":            true,
-	"com.android.documentsui":                true,
-	"com.google.android.documentsui":         true,
-	"com.android.keychain":                   true,
-	"com.android.permissioncontroller":       true,
+	contracts.DefaultWorkPackage:              true,
+	contracts.ManagedProvisioningPkg:          true,
+	"android":                                 true,
+	"com.android.systemui":                    true,
+	"com.android.settings":                    true,
+	"com.android.phone":                       true,
+	"com.android.bluetooth":                   true,
+	"com.android.webview":                     true,
+	"com.google.android.webview":              true,
+	"com.android.packageinstaller":            true,
+	"com.google.android.packageinstaller":     true,
+	"com.android.certinstaller":               true,
+	"com.android.providers.media":             true,
+	"com.android.providers.media.module":      true,
+	"com.android.providers.contacts":          true,
+	"com.android.providers.calendar":          true,
+	"com.android.mtp":                         true,
+	"com.android.externalstorage":             true,
+	"com.android.documentsui":                 true,
+	"com.google.android.documentsui":          true,
+	"com.android.keychain":                    true,
+	"com.android.permissioncontroller":        true,
 	"com.google.android.permissioncontroller": true,
-	"com.android.se":                         true,
-	"com.android.providers.settings":         true,
-	"com.android.providers.downloads":        true,
-	"com.android.networkstack":               true,
-	"com.android.networkstack.process":       true,
+	"com.android.se":                          true,
+	"com.android.providers.settings":          true,
+	"com.android.providers.downloads":         true,
+	"com.android.networkstack":                true,
+	"com.android.networkstack.process":        true,
+	"com.google.android.ext.services":         true,
+	"com.android.ext.services":                true,
+	"com.android.remoteprovisioner":           true,
+	"com.lbe.security.miui":                   true,
+	"com.miui.securitycore":                   true,
+}
+
+func isProcessOnlyName(name string) bool {
+	return strings.HasPrefix(name, "android.process.") ||
+		strings.HasPrefix(name, "com.google.process.") ||
+		strings.HasSuffix(name, ".unstable")
+}
+
+func loadKnownPackageSet(packagesListPath string) map[string]bool {
+	if strings.TrimSpace(packagesListPath) == "" {
+		packagesListPath = contracts.PackagesListPath
+	}
+	f, err := os.Open(packagesListPath)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	out := make(map[string]bool)
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		fields := strings.Fields(sc.Text())
+		if len(fields) > 0 && contracts.ValidPackageName(fields[0]) {
+			out[fields[0]] = true
+		}
+	}
+	return out
+}
+
+func filterEligibleRunningPackages(runningPkgs, thirdPkgs []string, packagesListPath string) []string {
+	if len(runningPkgs) == 0 {
+		return nil
+	}
+	known := loadKnownPackageSet(packagesListPath)
+	thirdSet := make(map[string]bool, len(thirdPkgs))
+	for _, p := range thirdPkgs {
+		thirdSet[p] = true
+	}
+	var out []string
+	for _, pkg := range runningPkgs {
+		if isProcessOnlyName(pkg) {
+			continue
+		}
+		if len(known) > 0 && !known[pkg] && !thirdSet[pkg] {
+			continue
+		}
+		out = append(out, pkg)
+	}
+	return out
+}
+
+// CompanionHostPackages returns companion host packages required by thin shell apps (e.g. Gemini -> Google App).
+func CompanionHostPackages(pkg string) []string {
+	switch pkg {
+	case "com.google.android.apps.bard",
+		"com.google.android.apps.googleassistant",
+		"com.google.ar.lens",
+		"com.google.android.apps.weather":
+		return []string{"com.google.android.googlequicksearchbox"}
+	default:
+		return nil
+	}
+}
+
+// CompanionDirectLaunchIntentArgs returns direct VIEW deeplink `am` args for shell apps whose host might be stopped.
+func CompanionDirectLaunchIntentArgs(userID int, pkg string) []string {
+	if oem.IsForbiddenUser(userID) {
+		return nil
+	}
+	if pkg == "com.google.android.apps.bard" {
+		return []string{
+			"start",
+			"--user", strconv.Itoa(userID),
+			"-a", "android.intent.action.VIEW",
+			"-d", "https://bard.google.com/android?source=bardshell",
+			"-p", "com.google.android.googlequicksearchbox",
+			"-f", "0x10200000",
+		}
+	}
+	return nil
+}
+
+func isAMStartErrorOutput(out string) bool {
+	return strings.Contains(out, "Error:") ||
+		strings.Contains(out, "Exception") ||
+		strings.Contains(out, "does not exist")
+}
+
+// IsPackageStoppedForUser checks `dumpsys package <pkg>` to see whether `stopped=true` is set for userID.
+func IsPackageStoppedForUser(ctx context.Context, r Runner, userID int, pkg string) bool {
+	if r == nil || oem.IsForbiddenUser(userID) || !contracts.ValidPackageName(pkg) {
+		return false
+	}
+	out, err := r.Run(ctx, 3*time.Second, "", "dumpsys", "package", pkg)
+	if err != nil || out == "" {
+		return false
+	}
+	marker := fmt.Sprintf("User %d:", userID)
+	for _, raw := range strings.Split(out, "\n") {
+		line := strings.TrimSpace(raw)
+		if !strings.HasPrefix(line, marker) {
+			continue
+		}
+		if strings.Contains(line, "installed=false") {
+			return false
+		}
+		return strings.Contains(line, "stopped=true")
+	}
+	return false
+}
+
+// LaunchViaCompanionFallbackIfHostStopped self-heals when a thin shell app's host package is already in stopped=true
+// state (preventing ActivityNotFoundException under FLAG_EXCLUDE_STOPPED_PACKAGES) by launching the host deeplink directly.
+func LaunchViaCompanionFallbackIfHostStopped(ctx context.Context, r Runner, userID int, pkg string) (bool, error) {
+	if r == nil || oem.IsForbiddenUser(userID) || !contracts.ValidPackageName(pkg) {
+		return false, nil
+	}
+	hosts := CompanionHostPackages(pkg)
+	if len(hosts) == 0 {
+		return false, nil
+	}
+	hostStopped := false
+	for _, host := range hosts {
+		if IsPackageStoppedForUser(ctx, r, userID, host) {
+			hostStopped = true
+			break
+		}
+	}
+	if !hostStopped {
+		return false, nil
+	}
+	args := CompanionDirectLaunchIntentArgs(userID, pkg)
+	if len(args) == 0 {
+		return false, nil
+	}
+	out, err := r.Run(ctx, 5*time.Second, "", "am", args...)
+	if err != nil {
+		return true, err
+	}
+	if isAMStartErrorOutput(out) {
+		return true, fmt.Errorf("am %s companion fallback %s: %s", strings.Join(args, " "), pkg, strings.TrimSpace(out))
+	}
+	return true, nil
 }
 
 func hibernationProtectedPkgSet(extra ...string) map[string]bool {
@@ -147,9 +298,11 @@ func StartSandboxUserAndWait(ctx context.Context, r Runner, userID int, timeout 
 			}
 			if lastState == "RUNNING_LOCKED" {
 				lockedSeen++
-				if lockedSeen >= 2 {
+				if lockedSeen >= 12 {
 					return fmt.Errorf("工作资料处于加密锁定状态，请点按通知或解锁手机屏幕一次后重试 (user=%d state=%s)", userID, lastState)
 				}
+			} else {
+				lockedSeen = 0
 			}
 		}
 		if time.Now().After(deadline) {
@@ -245,7 +398,7 @@ func scanUserProcEntriesWithRootFS(cgroupRoot, procRoot string, userID int) []us
 				uid  int
 			}{name: ent.Name(), uid: uid})
 		}
-		if hasUIDDirs {
+		if hasUIDDirs && len(matchedDirs) > 0 {
 			var procs []userProcEntry
 			seenPID := make(map[int]struct{})
 			appendProcsFile := func(uid int, procsFile string) {
@@ -411,10 +564,16 @@ func ResolveFreezableUIDs(packagesListPath string, userID int, pkgs []string, ex
 	defer f.Close()
 
 	seen := make(map[int]struct{})
+	protectedAppIDs := make(map[int]bool)
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
 		fields := strings.Fields(sc.Text())
-		if len(fields) < 2 || !wantPkg[fields[0]] {
+		if len(fields) < 2 {
+			continue
+		}
+		pkgName := fields[0]
+		isProtected := protected[pkgName] || pkgName == "com.google.android.gms" || pkgName == "com.google.android.gsf"
+		if !isProtected && !wantPkg[pkgName] {
 			continue
 		}
 		rawID, perr := strconv.Atoi(fields[1])
@@ -422,16 +581,23 @@ func ResolveFreezableUIDs(packagesListPath string, userID int, pkgs []string, ex
 			continue
 		}
 		appID := rawID % contracts.AndroidUserWidth
-		if appID >= contracts.MinAppID && appID < 90000 {
-			seen[userID*contracts.AndroidUserWidth+appID] = struct{}{}
+		if isProtected {
+			protectedAppIDs[appID] = true
+			continue
 		}
+		if appID >= contracts.MinAppID && appID < 90000 {
+			seen[appID] = struct{}{}
+		}
+	}
+	for appID := range protectedAppIDs {
+		delete(seen, appID)
 	}
 	if len(seen) == 0 {
 		return nil
 	}
 	out := make([]int, 0, len(seen))
-	for u := range seen {
-		out = append(out, u)
+	for appID := range seen {
+		out = append(out, userID*contracts.AndroidUserWidth+appID)
 	}
 	sort.Ints(out)
 	return out
@@ -594,12 +760,98 @@ func runPackagePool(ctx context.Context, pkgs []string, workers int, fn func(pkg
 	wg.Wait()
 }
 
+func isStopAppUnsupported(out string, err error) bool {
+	combined := strings.ToLower(out)
+	if err != nil {
+		combined += " " + strings.ToLower(err.Error())
+	}
+	return strings.Contains(combined, "unknown command") ||
+		strings.Contains(combined, "unrecognized") ||
+		strings.Contains(combined, "usage:") ||
+		strings.Contains(combined, "invalid command")
+}
+
+func stopPackagePreserveStopped(ctx context.Context, r Runner, u, pkg string) error {
+	out, err := r.Run(ctx, 3*time.Second, "", "am", "stop-app", "--user", u, pkg)
+	if err == nil && !isStopAppUnsupported(out, nil) {
+		return nil
+	}
+	if isStopAppUnsupported(out, err) {
+		_, err2 := r.Run(ctx, 3*time.Second, "", "am", "force-stop", "--user", u, pkg)
+		return err2
+	}
+	return err
+}
+
+// ThawAllUserCgroups scans all uid_<uid> freezer nodes strictly within [user*100000+MinAppID .. user*100000+99999]
+// and clears any active freeze unconditionally without needing a state file.
+func ThawAllUserCgroups(cgroupRoot string, userID int) []int {
+	if oem.IsForbiddenUser(userID) {
+		return nil
+	}
+	if strings.TrimSpace(cgroupRoot) == "" {
+		cgroupRoot = "/sys/fs/cgroup"
+	}
+	uidMin := userID*contracts.AndroidUserWidth + contracts.MinAppID
+	uidMax := userID*contracts.AndroidUserWidth + 99999
+
+	roots := []string{cgroupRoot, filepath.Join(cgroupRoot, "freezer")}
+	if cgroupRoot == "/sys/fs/cgroup" {
+		roots = append(roots, "/dev/freezer")
+	}
+
+	seen := make(map[int]struct{})
+	for _, root := range roots {
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			continue
+		}
+		isV1 := root != cgroupRoot
+		for _, ent := range entries {
+			if !ent.IsDir() || !strings.HasPrefix(ent.Name(), "uid_") {
+				continue
+			}
+			uid, perr := strconv.Atoi(strings.TrimPrefix(ent.Name(), "uid_"))
+			if perr != nil || uid < uidMin || uid > uidMax {
+				continue
+			}
+			if !isV1 {
+				freezeFile := filepath.Join(root, ent.Name(), "cgroup.freeze")
+				if b, rerr := os.ReadFile(freezeFile); rerr == nil && strings.TrimSpace(string(b)) == "1" {
+					if os.WriteFile(freezeFile, []byte("0"), 0644) == nil {
+						seen[uid] = struct{}{}
+					}
+				}
+				continue
+			}
+			v1File := filepath.Join(root, ent.Name(), "freezer.state")
+			if b, rerr := os.ReadFile(v1File); rerr == nil {
+				st := strings.ToUpper(strings.TrimSpace(string(b)))
+				if st == "FROZEN" || st == "FREEZING" {
+					if os.WriteFile(v1File, []byte("THAWED"), 0644) == nil {
+						seen[uid] = struct{}{}
+					}
+				}
+			}
+		}
+	}
+	if len(seen) == 0 {
+		return nil
+	}
+	out := make([]int, 0, len(seen))
+	for uid := range seen {
+		out = append(out, uid)
+	}
+	sort.Ints(out)
+	return out
+}
+
 func hibernateSinglePackage(ctx context.Context, r Runner, u, pkg string) {
 	_, _ = r.Run(ctx, 3*time.Second, "", "appops", "set", "--user", u, pkg, "RUN_ANY_IN_BACKGROUND", "ignore")
 	_, _ = r.Run(ctx, 3*time.Second, "", "appops", "set", "--user", u, pkg, "WAKE_LOCK", "ignore")
 	_, _ = r.Run(ctx, 3*time.Second, "", "am", "set-standby-bucket", "--user", u, pkg, "restricted")
 	_, _ = r.Run(ctx, 3*time.Second, "", "cmd", "jobscheduler", "cancel", "-u", u, pkg)
-	_, _ = r.Run(ctx, 3*time.Second, "", "am", "force-stop", "--user", u, pkg)
+	_ = stopPackagePreserveStopped(ctx, r, u, pkg)
 }
 
 func restoreSinglePackage(ctx context.Context, r Runner, u, pkg string) {
@@ -610,7 +862,7 @@ func restoreSinglePackage(ctx context.Context, r Runner, u, pkg string) {
 
 func hibernateSinglePackageNoAppOps(ctx context.Context, r Runner, u, pkg string) {
 	_, _ = r.Run(ctx, 3*time.Second, "", "cmd", "jobscheduler", "cancel", "-u", u, pkg)
-	_, _ = r.Run(ctx, 3*time.Second, "", "am", "force-stop", "--user", u, pkg)
+	_ = stopPackagePreserveStopped(ctx, r, u, pkg)
 }
 
 func resolvePkgUIDMap(packagesListPath string, userID int, pkgs []string, extraProtected ...string) map[string]int {
@@ -639,10 +891,16 @@ func resolvePkgUIDMap(packagesListPath string, userID int, pkgs []string, extraP
 	defer f.Close()
 
 	out := make(map[string]int, len(wantPkg))
+	protectedAppIDs := make(map[int]bool)
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
 		fields := strings.Fields(sc.Text())
-		if len(fields) < 2 || !wantPkg[fields[0]] {
+		if len(fields) < 2 {
+			continue
+		}
+		pkgName := fields[0]
+		isProtected := protected[pkgName] || pkgName == "com.google.android.gms" || pkgName == "com.google.android.gsf"
+		if !isProtected && !wantPkg[pkgName] {
 			continue
 		}
 		rawID, perr := strconv.Atoi(fields[1])
@@ -650,8 +908,19 @@ func resolvePkgUIDMap(packagesListPath string, userID int, pkgs []string, extraP
 			continue
 		}
 		appID := rawID % contracts.AndroidUserWidth
+		if isProtected {
+			protectedAppIDs[appID] = true
+			continue
+		}
 		if appID >= contracts.MinAppID && appID < 90000 {
-			out[fields[0]] = userID*contracts.AndroidUserWidth + appID
+			out[pkgName] = userID*contracts.AndroidUserWidth + appID
+		}
+	}
+	if len(protectedAppIDs) > 0 {
+		for k, uid := range out {
+			if protectedAppIDs[uid%contracts.AndroidUserWidth] {
+				delete(out, k)
+			}
 		}
 	}
 	return out
@@ -738,12 +1007,12 @@ func HibernateSandboxUserEx(ctx context.Context, r Runner, userID int, statePath
 	u := strconv.Itoa(userID)
 	thirdOut, _ := r.Run(ctx, 5*time.Second, "", "cmd", "package", "list", "packages", "-3", "--user", u)
 	thirdPkgs := parsePackageList(thirdOut)
-	runningPkgs := discoverRunningUserPackagesWithRoot(opts.CgroupRoot, userID)
+	runningPkgs := filterEligibleRunningPackages(discoverRunningUserPackagesWithRoot(opts.CgroupRoot, userID), thirdPkgs, opts.PackagesListPath)
 
 	imeOut, _ := r.Run(ctx, 4*time.Second, "", "ime", "list", "-s", "--user", u)
 	imeProtected := parseIMEPkgs(imeOut)
 
-	protected := hibernationProtectedPkgSet(opts.CallerPackage)
+	protected := hibernationProtectedPkgSet(opts.CallerPackage, opts.AdminPackage)
 	for k, v := range imeProtected {
 		protected[k] = v
 	}
@@ -757,7 +1026,7 @@ func HibernateSandboxUserEx(ctx context.Context, r Runner, userID int, statePath
 		eligible = append(eligible, pkg)
 	}
 
-	pkgUIDs := resolvePkgUIDMap(opts.PackagesListPath, userID, eligible, opts.CallerPackage)
+	pkgUIDs := resolvePkgUIDMap(opts.PackagesListPath, userID, eligible, opts.CallerPackage, opts.AdminPackage)
 	freezeCapable := make(map[string]bool, len(pkgUIDs))
 	freezableUIDSet := make(map[int]struct{}, len(pkgUIDs))
 	for pkg, uid := range pkgUIDs {
@@ -888,10 +1157,11 @@ func HotFreezeSandboxUserWithOpts(ctx context.Context, r Runner, userID int, sta
 			isolatedUIDSet[pe.uid] = struct{}{}
 		}
 	}
-	var runningPkgs []string
+	var rawRunningPkgs []string
 	for p := range runningSeen {
-		runningPkgs = append(runningPkgs, p)
+		rawRunningPkgs = append(rawRunningPkgs, p)
 	}
+	runningPkgs := filterEligibleRunningPackages(rawRunningPkgs, thirdPkgs, packagesListPath)
 
 	imeProtected := parseIMEPkgs(imeOut)
 	protected := hibernationProtectedPkgSet(extraProtected...)
@@ -921,15 +1191,27 @@ func HotFreezeSandboxUserWithOpts(ctx context.Context, r Runner, userID int, sta
 	}
 	sort.Ints(freezableUIDs)
 
-	// Cancel scheduled background jobs best-effort before freezing UIDs so JobScheduler doesn't stall system_server.
-	var cancelTargets []string
+	// Cancel scheduled background jobs and quiesce UIDs to idle BEFORE freezing cgroups so
+	// ActivityManager does not dispatch foreground-service/broadcast ANRs against frozen processes.
+	cancelSet := make(map[string]bool, len(runningPkgs)+len(eligible))
 	for _, pkg := range runningPkgs {
 		if !protected[pkg] {
-			cancelTargets = append(cancelTargets, pkg)
+			cancelSet[pkg] = true
 		}
 	}
+	for _, pkg := range eligible {
+		if _, hasUID := pkgUIDs[pkg]; hasUID && !protected[pkg] {
+			cancelSet[pkg] = true
+		}
+	}
+	cancelTargets := make([]string, 0, len(cancelSet))
+	for pkg := range cancelSet {
+		cancelTargets = append(cancelTargets, pkg)
+	}
+	sort.Strings(cancelTargets)
 	runPackagePool(ctx, cancelTargets, sandboxWorkerPoolSize, func(pkg string) {
 		_, _ = r.Run(ctx, 2*time.Second, "", "cmd", "jobscheduler", "cancel", "-u", u, pkg)
+		_, _ = r.Run(ctx, 2*time.Second, "", "am", "make-uid-idle", "--user", u, pkg)
 	})
 
 	// Freeze cgroups FIRST, then scan cgroup.procs and reclaim pages with pidfd + UID verification.
@@ -952,6 +1234,19 @@ func HotFreezeSandboxUserWithOpts(ctx context.Context, r Runner, userID int, sta
 		if hasRunningFreezable {
 			return 0, errors.New("no writable cgroup freeze control found for active sandbox UIDs")
 		}
+		if statePath != "" {
+			prev := readHibernatedState(statePath)
+			if prev.HotFrozen || len(prev.FrozenUIDs) > 0 {
+				if len(prev.Packages) == 0 {
+					removeHibernatedState(statePath)
+				} else {
+					prev.HotFrozen = false
+					prev.FrozenUIDs = nil
+					prev.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+					_ = writeHibernatedState(statePath, prev)
+				}
+			}
+		}
 		return 0, nil
 	}
 	frozenSet := make(map[int]bool, len(frozenNow))
@@ -959,10 +1254,27 @@ func HotFreezeSandboxUserWithOpts(ctx context.Context, r Runner, userID int, sta
 		frozenSet[uid] = true
 	}
 	if len(frozenSet) > 0 {
+		unfrozenPkgs := make(map[string]bool)
+		freezableSet := make(map[int]bool, len(freezableUIDs))
+		for _, uid := range freezableUIDs {
+			freezableSet[uid] = true
+		}
 		for _, pe := range scanUserProcEntriesWithRoot(cgroupRoot, userID) {
 			if frozenSet[pe.uid] {
 				_ = ReclaimProcessMemoryForUser(pe.pid, userID)
+			} else if freezableSet[pe.uid] && contracts.ValidPackageName(pe.pkg) && !protected[pe.pkg] {
+				unfrozenPkgs[pe.pkg] = true
 			}
+		}
+		if len(unfrozenPkgs) > 0 {
+			fallbackPkgs := make([]string, 0, len(unfrozenPkgs))
+			for pkg := range unfrozenPkgs {
+				fallbackPkgs = append(fallbackPkgs, pkg)
+			}
+			sort.Strings(fallbackPkgs)
+			runPackagePool(ctx, fallbackPkgs, sandboxWorkerPoolSize, func(pkg string) {
+				_ = stopPackagePreserveStopped(ctx, r, u, pkg)
+			})
 		}
 	}
 
@@ -1025,6 +1337,7 @@ func RestoreHibernatedPriorityEx(ctx context.Context, r Runner, userID int, stat
 		statePath = contracts.HibernatedPkgsPath
 	}
 	st := readHibernatedState(statePath)
+	_ = ThawAllUserCgroups(opts.CgroupRoot, userID)
 	if len(st.FrozenUIDs) > 0 {
 		_ = SetCgroupFreezeUIDs(opts.CgroupRoot, userID, st.FrozenUIDs, false)
 	}
@@ -1050,10 +1363,10 @@ func RestoreHibernatedPriorityEx(ctx context.Context, r Runner, userID int, stat
 		}
 	}
 
-	protected := hibernationProtectedPkgSet(opts.CallerPackage)
+	protected := hibernationProtectedPkgSet(opts.CallerPackage, opts.AdminPackage)
 	var prioSet map[string]bool
 	if len(priorityPkgs) > 0 {
-		prioSet = make(map[string]bool, len(priorityPkgs)+3)
+		prioSet = make(map[string]bool, len(priorityPkgs)+4)
 		// Always restore GMS & GSF synchronously if they were appops-restricted so Play/FCM/Gemini work cleanly.
 		if !opts.SyncTargetOnly || restrictedSet["com.google.android.gms"] {
 			prioSet["com.google.android.gms"] = true
@@ -1067,6 +1380,11 @@ func RestoreHibernatedPriorityEx(ctx context.Context, r Runner, userID int, stat
 		for _, pkg := range priorityPkgs {
 			if contracts.ValidPackageName(pkg) && !protected[pkg] {
 				prioSet[pkg] = true
+			}
+			for _, host := range CompanionHostPackages(pkg) {
+				if contracts.ValidPackageName(host) && !protected[host] {
+					prioSet[host] = true
+				}
 			}
 		}
 	}
@@ -1161,7 +1479,7 @@ func LaunchComponentAsRoot(ctx context.Context, r Runner, userID int, comp strin
 	if err != nil {
 		return err
 	}
-	if strings.Contains(out, "Error:") || strings.Contains(out, "Exception") {
+	if isAMStartErrorOutput(out) {
 		return fmt.Errorf("am start %s: %s", comp, strings.TrimSpace(out))
 	}
 	return nil
@@ -1278,7 +1596,7 @@ func ParseIptablesChainBytes(section string, uidStart, uidEnd int) uint64 {
 func ParseAudioActiveForUser(section string, uidStart, uidEnd int) bool {
 	for _, raw := range strings.Split(section, "\n") {
 		line := strings.TrimSpace(raw)
-		if line == "" || !strings.Contains(line, "state:started") {
+		if line == "" || !strings.Contains(strings.ToLower(line), "state:started") {
 			continue
 		}
 		for _, m := range audioUIDRegex.FindAllStringSubmatch(line, -1) {

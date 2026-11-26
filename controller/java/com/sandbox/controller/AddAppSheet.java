@@ -83,6 +83,8 @@ public final class AddAppSheet extends FrameLayout {
 
     private final List<AppItem> allDeviceApps = new ArrayList<AppItem>();
     private final Set<String> importedPackages = new HashSet<String>();
+    private final Set<String> importingPkgs = new HashSet<String>();
+    private int loadSeq = 0;
     private final Runnable debouncedFilterTask = new Runnable() {
         @Override
         public void run() {
@@ -468,53 +470,69 @@ public final class AddAppSheet extends FrameLayout {
 
     private void loadDeviceAppsAsync() {
         loadingApps = true;
+        final int seq = ++loadSeq;
+        final Set<String> importedSnapshot = new HashSet<String>(importedPackages);
         renderFilteredApps();
         final Context appCtx = getContext().getApplicationContext();
         executor.execute(new Runnable() {
             @Override
             public void run() {
-                PackageManager pm = appCtx.getPackageManager();
-                Intent mainIntent = new Intent(Intent.ACTION_MAIN, null);
-                mainIntent.addCategory(Intent.CATEGORY_LAUNCHER);
-                @SuppressWarnings("deprecation")
-                List<ResolveInfo> resolved = pm.queryIntentActivities(mainIntent, PackageManager.MATCH_ALL);
-                Set<String> seen = new HashSet<String>();
                 final List<AppItem> loaded = new ArrayList<AppItem>();
-                for (ResolveInfo ri : resolved) {
-                    if (ri.activityInfo == null || ri.activityInfo.packageName == null) {
-                        continue;
+                try {
+                    PackageManager pm = appCtx.getPackageManager();
+                    Intent mainIntent = new Intent(Intent.ACTION_MAIN, null);
+                    mainIntent.addCategory(Intent.CATEGORY_LAUNCHER);
+                    @SuppressWarnings("deprecation")
+                    List<ResolveInfo> resolved = pm.queryIntentActivities(mainIntent, PackageManager.MATCH_ALL);
+                    if (resolved == null) {
+                        resolved = Collections.emptyList();
                     }
-                    String pkg = ri.activityInfo.packageName;
-                    if ("com.sandbox.controller".equals(pkg)
-                            || "com.sandbox.verify".equals(pkg)
-                            || !seen.add(pkg)) {
-                        continue;
+                    Set<String> seen = new HashSet<String>();
+                    for (ResolveInfo ri : resolved) {
+                        if (ri == null || ri.activityInfo == null || ri.activityInfo.packageName == null) {
+                            continue;
+                        }
+                        String pkg = ri.activityInfo.packageName;
+                        if ("com.sandbox.controller".equals(pkg)
+                                || "com.sandbox.verify".equals(pkg)
+                                || !seen.add(pkg)) {
+                            continue;
+                        }
+                        String label = pkg;
+                        Drawable icon = null;
+                        try {
+                            CharSequence labelCs = ri.loadLabel(pm);
+                            String s = labelCs != null ? labelCs.toString().trim() : pkg;
+                            if (!s.isEmpty()) {
+                                label = s;
+                            }
+                            icon = ri.loadIcon(pm);
+                        } catch (RuntimeException ignored) {
+                        }
+                        AppItem item = new AppItem(pkg, label, icon);
+                        item.imported = importedSnapshot.contains(pkg);
+                        loaded.add(item);
                     }
-                    CharSequence labelCs = ri.loadLabel(pm);
-                    String label = labelCs != null ? labelCs.toString().trim() : pkg;
-                    if (label.isEmpty()) {
-                        label = pkg;
-                    }
-                    Drawable icon = ri.loadIcon(pm);
-                    AppItem item = new AppItem(pkg, label, icon);
-                    item.imported = importedPackages.contains(pkg);
-                    loaded.add(item);
+                    Collections.sort(loaded, new Comparator<AppItem>() {
+                        @Override
+                        public int compare(AppItem a, AppItem b) {
+                            return a.label.compareToIgnoreCase(b.label);
+                        }
+                    });
+                } finally {
+                    mainHandler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (seq != loadSeq) {
+                                return;
+                            }
+                            loadingApps = false;
+                            allDeviceApps.clear();
+                            allDeviceApps.addAll(loaded);
+                            renderFilteredApps();
+                        }
+                    });
                 }
-                Collections.sort(loaded, new Comparator<AppItem>() {
-                    @Override
-                    public int compare(AppItem a, AppItem b) {
-                        return a.label.compareToIgnoreCase(b.label);
-                    }
-                });
-                mainHandler.post(new Runnable() {
-                    @Override
-                    public void run() {
-                        loadingApps = false;
-                        allDeviceApps.clear();
-                        allDeviceApps.addAll(loaded);
-                        renderFilteredApps();
-                    }
-                });
             }
         });
     }
@@ -602,7 +620,7 @@ public final class AddAppSheet extends FrameLayout {
         actionBtn.setOnClickListener(new OnClickListener() {
             @Override
             public void onClick(View v) {
-                if (item.imported) {
+                if (item.imported || !importingPkgs.add(item.pkg)) {
                     return;
                 }
                 actionBtn.setEnabled(false);
@@ -610,10 +628,17 @@ public final class AddAppSheet extends FrameLayout {
                 executor.execute(new Runnable() {
                     @Override
                     public void run() {
-                        final BrokerProtocol.RpcResponse resp = broker.importExistingApp(item.pkg);
+                        BrokerProtocol.RpcResponse r;
+                        try {
+                            r = broker.importExistingApp(item.pkg);
+                        } catch (Throwable t) {
+                            r = BrokerProtocol.RpcResponse.error("", String.valueOf(t.getMessage()), false);
+                        }
+                        final BrokerProtocol.RpcResponse resp = r;
                         mainHandler.post(new Runnable() {
                             @Override
                             public void run() {
+                                importingPkgs.remove(item.pkg);
                                 actionBtn.setEnabled(true);
                                 actionBtn.setAlpha(1f);
                                 if (resp.ok) {
@@ -662,7 +687,13 @@ public final class AddAppSheet extends FrameLayout {
         executor.execute(new Runnable() {
             @Override
             public void run() {
-                final BrokerProtocol.RpcResponse resp = broker.installApks(paths);
+                BrokerProtocol.RpcResponse r;
+                try {
+                    r = broker.installApks(paths);
+                } catch (Throwable t) {
+                    r = BrokerProtocol.RpcResponse.error("", String.valueOf(t.getMessage()), false);
+                }
+                final BrokerProtocol.RpcResponse resp = r;
                 mainHandler.post(new Runnable() {
                     @Override
                     public void run() {

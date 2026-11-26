@@ -63,7 +63,7 @@ func BuildHideAppBean(pkg, activity, serial string) HideAppBean {
 // ParseQueryActivities parses `cmd package query-activities --user <u> -a android.intent.action.MAIN -c android.intent.category.LAUNCHER`.
 func ParseQueryActivities(output string) []LauncherActivity {
 	seen := make(map[string]LauncherActivity)
-	var inActivityInfo bool
+	var inActivityInfo, inAppInfo bool
 	var curPkg, curName string
 
 	flush := func() {
@@ -84,14 +84,20 @@ func ParseQueryActivities(output string) []LauncherActivity {
 		if strings.HasPrefix(line, "Activity #") || line == "" {
 			flush()
 			inActivityInfo = false
+			inAppInfo = false
 			continue
 		}
 		if line == "ActivityInfo:" {
 			inActivityInfo = true
+			inAppInfo = false
 			continue
 		}
 		if line == "ApplicationInfo:" {
 			inActivityInfo = false
+			inAppInfo = true
+			continue
+		}
+		if inAppInfo {
 			continue
 		}
 		if inActivityInfo {
@@ -196,10 +202,13 @@ func SyncHideApps(ctx context.Context, r Runner, userID, serial int) (HideSyncRe
 	}
 	workActs := ParseQueryActivities(actOut)
 
-	existingRaw, _ := r.Run(ctx, 4*time.Second, "", "settings", "--user", "0", "get", "secure", secureKey)
+	existingRaw, getErr := r.Run(ctx, 4*time.Second, "", "settings", "--user", "0", "get", "secure", secureKey)
+	if getErr != nil {
+		return HideSyncResult{}, fmt.Errorf("read secure %s: %w", secureKey, getErr)
+	}
 	existing, parseErr := ParseHideAppListJSON(existingRaw)
 	if parseErr != nil {
-		existing = nil
+		return HideSyncResult{}, fmt.Errorf("parse secure %s (refusing to overwrite): %w", secureKey, parseErr)
 	}
 
 	merged, missing, stale := MergeHideAppList(existing, workActs, serialStr)

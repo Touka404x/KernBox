@@ -96,6 +96,8 @@ public final class MainActivity extends Activity {
     private boolean connected = false;
     private boolean busy = false;
     private boolean silentRefreshing = false;
+    private boolean pendingRefresh = false;
+    private int rpcSeq = 0;
 
     private final Runnable hideToastTask = new Runnable() {
         @Override
@@ -345,6 +347,7 @@ public final class MainActivity extends Activity {
             @Override
             public void onActionSuccess(BrokerProtocol.StatusSnapshot snapshot, String toastMessage) {
                 lastActionError = "";
+                rpcSeq++;
                 if (snapshot != null && snapshot.policyLoaded) {
                     connected = true;
                     currentSnapshot = snapshot.withPreservedProbeFrom(currentSnapshot);
@@ -888,18 +891,34 @@ public final class MainActivity extends Activity {
         }
         final boolean targetPause = !currentSnapshot.paused;
         busy = true;
+        final int seq = ++rpcSeq;
         renderSnapshot();
         rpcExecutor.execute(new Runnable() {
             @Override
             public void run() {
-                final BrokerProtocol.RpcResponse resp = targetPause
-                        ? broker.pauseSandbox()
-                        : broker.startSandbox();
+                BrokerProtocol.RpcResponse r;
+                try {
+                    r = targetPause ? broker.pauseSandbox() : broker.startSandbox();
+                } catch (Throwable t) {
+                    r = BrokerProtocol.RpcResponse.error("", String.valueOf(t.getMessage()), false);
+                }
+                final BrokerProtocol.RpcResponse resp = r;
                 mainHandler.post(new Runnable() {
                     @Override
                     public void run() {
+                        if (isFinishing() || isDestroyed()) {
+                            return;
+                        }
                         busy = false;
-                        applyRpcResponse(resp, true);
+                        if (seq == rpcSeq) {
+                            applyRpcResponse(resp, true);
+                        } else {
+                            renderSnapshot();
+                        }
+                        if (pendingRefresh) {
+                            pendingRefresh = false;
+                            refreshStatus(false);
+                        }
                     }
                 });
             }
@@ -912,6 +931,9 @@ public final class MainActivity extends Activity {
 
     private void refreshStatus(final boolean notifyOnSuccess, final boolean silent) {
         if (busy) {
+            if (!silent) {
+                pendingRefresh = true;
+            }
             return;
         }
         if (silent) {
@@ -919,15 +941,25 @@ public final class MainActivity extends Activity {
                 return;
             }
             silentRefreshing = true;
+            final int seq = rpcSeq;
             rpcExecutor.execute(new Runnable() {
                 @Override
                 public void run() {
-                    final BrokerProtocol.RpcResponse resp = broker.getStatus();
+                    BrokerProtocol.RpcResponse r;
+                    try {
+                        r = broker.getStatus();
+                    } catch (Throwable t) {
+                        r = BrokerProtocol.RpcResponse.error("", String.valueOf(t.getMessage()), false);
+                    }
+                    final BrokerProtocol.RpcResponse resp = r;
                     mainHandler.post(new Runnable() {
                         @Override
                         public void run() {
+                            if (isFinishing() || isDestroyed()) {
+                                return;
+                            }
                             silentRefreshing = false;
-                            if (!busy) {
+                            if (!busy && seq == rpcSeq) {
                                 applyRpcResponse(resp, notifyOnSuccess);
                             }
                         }
@@ -937,16 +969,34 @@ public final class MainActivity extends Activity {
             return;
         }
         busy = true;
+        final int seq = ++rpcSeq;
         renderSnapshot();
         rpcExecutor.execute(new Runnable() {
             @Override
             public void run() {
-                final BrokerProtocol.RpcResponse resp = broker.getStatus();
+                BrokerProtocol.RpcResponse r;
+                try {
+                    r = broker.getStatus();
+                } catch (Throwable t) {
+                    r = BrokerProtocol.RpcResponse.error("", String.valueOf(t.getMessage()), false);
+                }
+                final BrokerProtocol.RpcResponse resp = r;
                 mainHandler.post(new Runnable() {
                     @Override
                     public void run() {
+                        if (isFinishing() || isDestroyed()) {
+                            return;
+                        }
                         busy = false;
-                        applyRpcResponse(resp, notifyOnSuccess);
+                        if (seq == rpcSeq) {
+                            applyRpcResponse(resp, notifyOnSuccess);
+                        } else {
+                            renderSnapshot();
+                        }
+                        if (pendingRefresh) {
+                            pendingRefresh = false;
+                            refreshStatus(false);
+                        }
                     }
                 });
             }
@@ -1143,6 +1193,8 @@ public final class MainActivity extends Activity {
             if (info == null) {
                 info = new AppTileInfo(pkg, shortPkgLabel(pkg), null);
                 missingIcons.add(pkg);
+            } else if (info.icon == null && !currentSnapshot.paused) {
+                missingIcons.add(pkg);
             }
             View tile = buildAppTile(info, i);
             GridLayout.LayoutParams glp = new GridLayout.LayoutParams();
@@ -1173,6 +1225,9 @@ public final class MainActivity extends Activity {
                 mainHandler.post(new Runnable() {
                     @Override
                     public void run() {
+                        if (isFinishing() || isDestroyed()) {
+                            return;
+                        }
                         for (AppTileInfo item : resolved) {
                             tileCache.put(item.pkg, item);
                         }

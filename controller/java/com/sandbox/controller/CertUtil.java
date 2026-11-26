@@ -45,7 +45,7 @@ public final class CertUtil {
             if (si == null) {
                 return null;
             }
-            return si.hasMultipleSigners() ? si.getApkContentsSigners() : si.getSigningCertificateHistory();
+            return si.getApkContentsSigners();
         }
         PackageInfo legacy = pm.getPackageInfo(pkg, PackageManager.GET_SIGNATURES);
         return legacy.signatures;

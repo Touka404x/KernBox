@@ -9,7 +9,7 @@ export PATH={{ROOT_PATH_PREFIX}}:/data/adb/ksu/bin:/data/adb/ap/bin:/data/adb/ma
 
 # Best-effort restore of hibernated sandbox apps and pruned bloat before stopping daemon.
 if [ -x "$GUARD_BIN" ]; then
-    "$GUARD_BIN" ctl resume >/dev/null 2>&1 || true
+    "$GUARD_BIN" ctl start-sandbox >/dev/null 2>&1 || true
     "$GUARD_BIN" ctl restore-bloat >/dev/null 2>&1 || true
 fi
 
@@ -34,13 +34,13 @@ for ipt in iptables ip6tables; do
     "$ipt" -t mangle -D PREROUTING -j SBW_TPROXY_PRE 2>/dev/null || true
     "$ipt" -t raw -D OUTPUT -j SBW_RAW_OUTPUT 2>/dev/null || true
     "$ipt" -t filter -D OUTPUT -j SBW_OUTPUT 2>/dev/null || true
-    "$ipt" -t filter -D OUTPUT -j SBW_EGRESS 2>/dev/null || true
+    "$ipt" -t mangle -D POSTROUTING -j SBW_EGRESS 2>/dev/null || true
     for tbl_chain in \
         "mangle:SBW_TPROXY_OUT" \
         "mangle:SBW_TPROXY_PRE" \
         "raw:SBW_RAW_OUTPUT" \
         "filter:SBW_OUTPUT" \
-        "filter:SBW_EGRESS"; do
+        "mangle:SBW_EGRESS"; do
         tbl=${tbl_chain%%:*}
         ch=${tbl_chain#*:}
         "$ipt" -t "$tbl" -F "$ch" 2>/dev/null || true

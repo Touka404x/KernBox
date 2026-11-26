@@ -207,6 +207,11 @@ public final class BrokerProtocolHostTest {
                 "kb-t1", "RPC timeout: SocketTimeoutException", BrokerProtocol.OfflineReason.RPC_TIMEOUT);
         assertTrue(!timeoutResp.ok && !timeoutResp.offline, "RPC_TIMEOUT must NOT wipe UI as offline");
         assertEquals(BrokerProtocol.OfflineReason.RPC_TIMEOUT, timeoutResp.offlineReason, "offlineReason=RPC_TIMEOUT");
+
+        BrokerProtocol.RpcResponse guardDown = BrokerProtocol.parseResponse(
+                "{\"id\":\"kb-g1\",\"ok\":false,\"error\":\"guard unavailable\",\"data\":{}}");
+        assertTrue(!guardDown.ok && guardDown.offline, "guard unavailable with empty data must mark offline=true");
+        assertEquals(BrokerProtocol.OfflineReason.DAEMON_DOWN, guardDown.offlineReason, "offlineReason=DAEMON_DOWN");
     }
 
     private static void testBilingualStrings() {

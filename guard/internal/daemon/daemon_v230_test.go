@@ -193,11 +193,11 @@ func TestTProxyStartAutoStartsProxyAndPauseStopsApps(t *testing.T) {
 	runner.mu.Lock()
 	joined := strings.Join(runner.calls, "\n")
 	runner.mu.Unlock()
-	if !strings.Contains(joined, "am force-stop --user 10 com.google.android.apps.bard") {
+	if !strings.Contains(joined, "am stop-app --user 10 com.google.android.apps.bard") {
 		t.Fatalf("expected pause to stop User 10 bard app, calls:\n%s", joined)
 	}
-	if strings.Contains(joined, "am force-stop --user 10 "+pkg) {
-		t.Fatalf("must not force-stop bridge package:\n%s", joined)
+	if strings.Contains(joined, "am stop-app --user 10 "+pkg) || strings.Contains(joined, "am force-stop --user 10 "+pkg) {
+		t.Fatalf("must not stop/force-stop bridge package:\n%s", joined)
 	}
 }
 

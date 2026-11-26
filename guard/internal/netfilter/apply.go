@@ -234,6 +234,37 @@ type pendingHookVerify struct {
 	expectEmpty bool
 }
 
+func (c *Controller) verifyTProxyRouting(ctx context.Context, spec GateSpec) error {
+	mark := spec.tproxyMark()
+	table := strconv.Itoa(contracts.DefaultTProxyTable)
+	pref := strconv.Itoa(contracts.DefaultTProxyPref)
+	wantFw := fmt.Sprintf("fwmark 0x%x/0x%x", mark, contracts.NetIDMask)
+
+	rulesOut, err := c.Runner.Run(ctx, 4*time.Second, "", "ip", "-4", "rule", "show")
+	if err != nil {
+		return err
+	}
+	haveRule := false
+	for _, line := range strings.Split(rulesOut, "\n") {
+		l := strings.TrimSpace(line)
+		if strings.HasPrefix(l, pref+":") && strings.Contains(l, wantFw) && strings.Contains(l, "lookup "+table) {
+			haveRule = true
+			break
+		}
+	}
+	if !haveRule {
+		return fmt.Errorf("missing ip rule pref %s %s lookup %s", pref, wantFw, table)
+	}
+	routeOut, rerr := c.Runner.Run(ctx, 4*time.Second, "", "ip", "-4", "route", "show", "table", table)
+	if rerr != nil {
+		return rerr
+	}
+	if !strings.Contains(routeOut, "local") || !strings.Contains(routeOut, "dev lo") {
+		return fmt.Errorf("missing local dev lo route in table %s", table)
+	}
+	return nil
+}
+
 func (c *Controller) ensureTProxyRouting(ctx context.Context, spec GateSpec) error {
 	mark := spec.tproxyMark()
 	table := strconv.Itoa(contracts.DefaultTProxyTable)
@@ -271,7 +302,14 @@ func (c *Controller) ensureTProxyRouting(ctx context.Context, spec GateSpec) err
 			staleRules++
 		}
 	}
-	for i := 0; i < staleRules && i < 4; i++ {
+	// ip -4 rule del pref <N> always deletes the highest remaining rule at that pref, so if
+	// stale rules share the same pref with a valid rule, clear all pref rules and re-add cleanly.
+	delCount := staleRules
+	if haveRule && staleRules > 0 {
+		delCount++
+		haveRule = false
+	}
+	for i := 0; i < delCount && i < 8; i++ {
 		if _, derr := c.Runner.Run(ctx, 4*time.Second, "", "ip", "-4", "rule", "del", "pref", pref); derr != nil {
 			break
 		}
@@ -337,6 +375,10 @@ func (c *Controller) ApplyOrVerify(ctx context.Context, spec GateSpec, inspect b
 			}
 		} else {
 			defer c.cleanupTProxyRouting(ctx)
+		}
+	} else if spec.IsTProxy() && spec.Open {
+		if err := c.verifyTProxyRouting(ctx, spec); err != nil {
+			return fmt.Errorf("tproxy routing verification: %w", err)
 		}
 	}
 

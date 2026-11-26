@@ -166,15 +166,28 @@ func handleBrokerConn(conn net.Conn, cfg BrokerConfig) {
 		return
 	}
 
+	if req.Op == contracts.OpInstallApk {
+		_ = conn.SetDeadline(time.Now().Add(125 * time.Second))
+	}
+
+	payload := append(bytes.TrimSpace(line), '\n')
+	if len(payload) > contracts.MaxRPCLineBytes {
+		writeBrokerErr(conn, req.ID, fmt.Sprintf("request exceeds %d bytes", contracts.MaxRPCLineBytes))
+		return
+	}
+
 	upstream, err := net.DialTimeout("unix", cfg.GuardSockPath, 3*time.Second)
 	if err != nil {
 		writeBrokerErr(conn, req.ID, "guard unavailable")
 		return
 	}
 	defer upstream.Close()
-	_ = upstream.SetDeadline(time.Now().Add(33 * time.Second))
+	upDeadline := 33 * time.Second
+	if req.Op == contracts.OpInstallApk {
+		upDeadline = 125 * time.Second
+	}
+	_ = upstream.SetDeadline(time.Now().Add(upDeadline))
 
-	payload := append(bytes.TrimSpace(line), '\n')
 	if _, err := upstream.Write(payload); err != nil {
 		writeBrokerErr(conn, req.ID, "guard write failed")
 		return

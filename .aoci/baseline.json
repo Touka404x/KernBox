@@ -1,0 +1,1514 @@
+{
+  "version": 1,
+  "created_at": "2026-11-26T12:29:19Z",
+  "updated_at": "2026-11-26T13:14:19Z",
+  "files": {
+    ".gitattributes": {
+      "role": "index",
+      "sha256": "437e8e8a78ba09b5647e7b7e9ce6aebcd8d63137b5473ee9d57a3a195134afd4",
+      "size": 271,
+      "normalized_sha256": "437e8e8a78ba09b5647e7b7e9ce6aebcd8d63137b5473ee9d57a3a195134afd4"
+    },
+    ".github/ISSUE_TEMPLATE/bug-report.yml": {
+      "role": "index",
+      "sha256": "955678c8eeb629dbe3886d2c41ac447642d8de0c3ae09d8a4156b997dd0facc5",
+      "size": 1292,
+      "normalized_sha256": "955678c8eeb629dbe3886d2c41ac447642d8de0c3ae09d8a4156b997dd0facc5"
+    },
+    ".github/ISSUE_TEMPLATE/config.yml": {
+      "role": "index",
+      "sha256": "4657c7bdd4e6122ff888ee237ac7d9a1ade86ca2b75d735ab26961b0107f293b",
+      "size": 252,
+      "normalized_sha256": "4657c7bdd4e6122ff888ee237ac7d9a1ade86ca2b75d735ab26961b0107f293b"
+    },
+    ".github/ISSUE_TEMPLATE/device-support.yml": {
+      "role": "index",
+      "sha256": "62677f02b1cde13e3a68c427a52747c991934afd53e7276fb876a71eec7360a5",
+      "size": 1580,
+      "normalized_sha256": "62677f02b1cde13e3a68c427a52747c991934afd53e7276fb876a71eec7360a5"
+    },
+    ".github/ISSUE_TEMPLATE/feature-request.yml": {
+      "role": "index",
+      "sha256": "aba3e0e4a1a6dfa46c64a5dde0b9fa5c41db5d6fa6af27e453464e46884d90db",
+      "size": 1216,
+      "normalized_sha256": "aba3e0e4a1a6dfa46c64a5dde0b9fa5c41db5d6fa6af27e453464e46884d90db"
+    },
+    ".github/PULL_REQUEST_TEMPLATE.md": {
+      "role": "index",
+      "sha256": "d4e8cadabb92a2e19129cb6e50de23f131f509dc84ebea16d3286ea83dc1ad0e",
+      "size": 1044,
+      "normalized_sha256": "d4e8cadabb92a2e19129cb6e50de23f131f509dc84ebea16d3286ea83dc1ad0e"
+    },
+    ".github/dependabot.yml": {
+      "role": "index",
+      "sha256": "3fdc68a8878af0b753637b6380d613ca1c82653a7610310aad0b6aa1cf056ef9",
+      "size": 277,
+      "normalized_sha256": "3fdc68a8878af0b753637b6380d613ca1c82653a7610310aad0b6aa1cf056ef9"
+    },
+    ".github/workflows/ci.yml": {
+      "role": "index",
+      "sha256": "d853ec2eb53ab39c5da6efeccf7972d27974cfadd29662d6403e32c108d5a972",
+      "size": 4446,
+      "normalized_sha256": "d853ec2eb53ab39c5da6efeccf7972d27974cfadd29662d6403e32c108d5a972"
+    },
+    ".github/workflows/release.yml": {
+      "role": "index",
+      "sha256": "f14338119d91bf99602a0968b72a081eb40dc9a2f64437729501ee82b6373ec8",
+      "size": 4704,
+      "normalized_sha256": "f14338119d91bf99602a0968b72a081eb40dc9a2f64437729501ee82b6373ec8"
+    },
+    ".gitignore": {
+      "role": "index",
+      "sha256": "2ff82e227780a5aa71800690d6e5950a19ad2f94c816fc26d615ee54ffa9dc14",
+      "size": 697,
+      "normalized_sha256": "2ff82e227780a5aa71800690d6e5950a19ad2f94c816fc26d615ee54ffa9dc14"
+    },
+    "AGENTS.md": {
+      "role": "index",
+      "sha256": "ab7266ce23dc082964a0e0dd0ac755ec53497e2eb217607b3a04ca317627be3e",
+      "size": 14180,
+      "normalized_sha256": "ab7266ce23dc082964a0e0dd0ac755ec53497e2eb217607b3a04ca317627be3e"
+    },
+    "ARCHITECTURE.md": {
+      "role": "index",
+      "sha256": "722762fb9a177380404944b6516b0a68eb98f3c768274e4070b75b2d1bf2ed4c",
+      "size": 6428,
+      "normalized_sha256": "722762fb9a177380404944b6516b0a68eb98f3c768274e4070b75b2d1bf2ed4c"
+    },
+    "CHANGELOG.md": {
+      "role": "index",
+      "sha256": "b1ad934a9954ee10b503ebe8fc665275298c1e4ee5f9c30208240249f8d82bf7",
+      "size": 7384,
+      "normalized_sha256": "b1ad934a9954ee10b503ebe8fc665275298c1e4ee5f9c30208240249f8d82bf7"
+    },
+    "CONTRIBUTING.md": {
+      "role": "index",
+      "sha256": "1b1fd918dbbd711f2229286bed2b9dd1e19b50f4cc8bf079609a8b2075c23675",
+      "size": 2725,
+      "normalized_sha256": "1b1fd918dbbd711f2229286bed2b9dd1e19b50f4cc8bf079609a8b2075c23675"
+    },
+    "LICENSE": {
+      "role": "index",
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+      "size": 11357,
+      "normalized_sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+    },
+    "README.md": {
+      "role": "index",
+      "sha256": "570562e0474b8f41829e310be45a04d4981599056946b329020809b6b734abfb",
+      "size": 10466,
+      "normalized_sha256": "570562e0474b8f41829e310be45a04d4981599056946b329020809b6b734abfb"
+    },
+    "README_EN.md": {
+      "role": "index",
+      "sha256": "7e6b7889625ec3ad08518a826fe580adb1341ecf4c1f2bc922eb4267ac2a0d67",
+      "size": 8262,
+      "normalized_sha256": "7e6b7889625ec3ad08518a826fe580adb1341ecf4c1f2bc922eb4267ac2a0d67"
+    },
+    "SECURITY.md": {
+      "role": "index",
+      "sha256": "b38e369e26e9d1301f0a536eeb75f52d8630521b4a2fad5535349d40a9f4c7a7",
+      "size": 2536,
+      "normalized_sha256": "b38e369e26e9d1301f0a536eeb75f52d8630521b4a2fad5535349d40a9f4c7a7"
+    },
+    "VARIANT_MATRIX.md": {
+      "role": "index",
+      "sha256": "b4055845384aca38086c0fe5067d7555213fc5e774df3ce0cc16109de88d075c",
+      "size": 4359,
+      "normalized_sha256": "b4055845384aca38086c0fe5067d7555213fc5e774df3ce0cc16109de88d075c"
+    },
+    "agent-prompts/DIAGNOSE.md": {
+      "role": "index",
+      "sha256": "200025d14e864bb59de6052833b6bb66391aace57705ad96732828b64b9a5975",
+      "size": 2272,
+      "normalized_sha256": "200025d14e864bb59de6052833b6bb66391aace57705ad96732828b64b9a5975"
+    },
+    "agent-prompts/DIAGNOSE_EN.md": {
+      "role": "index",
+      "sha256": "4a241bdd58120574df55a6f1b79539dff01ccf45320aef1202cebdc008519e7d",
+      "size": 2302,
+      "normalized_sha256": "4a241bdd58120574df55a6f1b79539dff01ccf45320aef1202cebdc008519e7d"
+    },
+    "agent-prompts/INSTALL_CN.md": {
+      "role": "index",
+      "sha256": "961162f6cb6d93a88c79045e8fbd74148e00644ae178a034382bc35a6413af0e",
+      "size": 7254,
+      "normalized_sha256": "961162f6cb6d93a88c79045e8fbd74148e00644ae178a034382bc35a6413af0e"
+    },
+    "agent-prompts/INSTALL_EN.md": {
+      "role": "index",
+      "sha256": "fbb315d5e7d82e6f6c2827423d6e3f4b48d4de05c115e4197c01115d79d3b7d1",
+      "size": 6724,
+      "normalized_sha256": "fbb315d5e7d82e6f6c2827423d6e3f4b48d4de05c115e4197c01115d79d3b7d1"
+    },
+    "agent-prompts/UPGRADE_AND_ROLLBACK.md": {
+      "role": "index",
+      "sha256": "3f6c0ee1d4c444b9f9e24fc6e70d685a79ae809701e6931c19f80a14171829a9",
+      "size": 2863,
+      "normalized_sha256": "3f6c0ee1d4c444b9f9e24fc6e70d685a79ae809701e6931c19f80a14171829a9"
+    },
+    "agent-prompts/UPGRADE_AND_ROLLBACK_EN.md": {
+      "role": "index",
+      "sha256": "f9b617449fdfd75c0a1ffc842b1dd43d13181a652a959954ef0206f1e35bf4f0",
+      "size": 2923,
+      "normalized_sha256": "f9b617449fdfd75c0a1ffc842b1dd43d13181a652a959954ef0206f1e35bf4f0"
+    },
+    "aoci.code.txt": {
+      "role": "index",
+      "sha256": "12cbc237b863041b3ab7b6c6330091964cb014a20e624ec1f88de6056aed56c2",
+      "size": 21,
+      "normalized_sha256": "12cbc237b863041b3ab7b6c6330091964cb014a20e624ec1f88de6056aed56c2"
+    },
+    "aoci.meta.txt": {
+      "role": "index",
+      "sha256": "5ccd06dd2198435423141174e4f3eaed7e7645644070e0b5cc2e20dbc889172a",
+      "size": 2187,
+      "normalized_sha256": "5ccd06dd2198435423141174e4f3eaed7e7645644070e0b5cc2e20dbc889172a"
+    },
+    "aoci.txt": {
+      "role": "index",
+      "sha256": "ed03cc652f120ff5aaab248ba6d5c8c15a605b23ddeb1a2f98bda9454e37ba83",
+      "size": 308,
+      "normalized_sha256": "ed03cc652f120ff5aaab248ba6d5c8c15a605b23ddeb1a2f98bda9454e37ba83"
+    },
+    "assets/android/ic_launcher_adaptive_432.png": {
+      "role": "index",
+      "sha256": "2422ffb7ad2f13b1e2f73863a6f5041bce1e60c0c6df9579890b62ec59ec5f95",
+      "size": 124764
+    },
+    "assets/android/mipmap-hdpi/ic_launcher.png": {
+      "role": "index",
+      "sha256": "e5a0e234dcaf76a2b93a2042a313a050a7a7daa87744c237561944f1a6375d60",
+      "size": 6396
+    },
+    "assets/android/mipmap-mdpi/ic_launcher.png": {
+      "role": "index",
+      "sha256": "6943ae340f033006445062f2cff0f836f549b578b0872cce55a8a0bced863c76",
+      "size": 3313
+    },
+    "assets/android/mipmap-xhdpi/ic_launcher.png": {
+      "role": "index",
+      "sha256": "9eda96b2185f7c6a131261c54823664d6cfe93fab8aeef45df882bf7d5bc2f2b",
+      "size": 10572
+    },
+    "assets/android/mipmap-xxhdpi/ic_launcher.png": {
+      "role": "index",
+      "sha256": "b4f40c4f3e2c5ce6142aa07df97808705e930cf6b7a0464a70aba2880f4a2881",
+      "size": 21616
+    },
+    "assets/android/mipmap-xxxhdpi/ic_launcher.png": {
+      "role": "index",
+      "sha256": "8abaf462e280a752a2b8e722fb9146b3f8c14db89482dc492de185bf78aebb22",
+      "size": 36635
+    },
+    "assets/kernbox-icon-1024.png": {
+      "role": "index",
+      "sha256": "db7550695679931be3899d6194cd0fc769df81ba71e5261a44b3c1ceca02303a",
+      "size": 703352
+    },
+    "assets/kernbox-icon.png": {
+      "role": "index",
+      "sha256": "1c4088aa7ad33d9c0719b99f0248bc38ac400095b3577ea310c5272f2c920f97",
+      "size": 287206
+    },
+    "assets/kernbox-showcase-en-dark.png": {
+      "role": "index",
+      "sha256": "2fd786d7ba85f335b089a31c76cc4f8c9f9bd5f58a95e4301b42c58ae27d1c3c",
+      "size": 1510151
+    },
+    "assets/kernbox-showcase-en-light.png": {
+      "role": "index",
+      "sha256": "7a8ff21b7509d0996ce7e758cae4e2d0570b521853c69f048692f26f68b8a6de",
+      "size": 1460692
+    },
+    "assets/kernbox-showcase-zh-dark.png": {
+      "role": "index",
+      "sha256": "f3aa7db2ac16344f9d7d1d8db332afc481daf5018662125e0d81037708f1d598",
+      "size": 1539501
+    },
+    "assets/kernbox-showcase-zh-light.png": {
+      "role": "index",
+      "sha256": "3c29df93df0f1afcc43a15abc23b3e8329bbfba06a9b0aa15284451bd206fbff",
+      "size": 1482852
+    },
+    "assets/kernbox-showcase.png": {
+      "role": "index",
+      "sha256": "3c29df93df0f1afcc43a15abc23b3e8329bbfba06a9b0aa15284451bd206fbff",
+      "size": 1482852
+    },
+    "controller/AndroidManifest.xml": {
+      "role": "index",
+      "sha256": "67ee928d81219960eca500fd3b88070977ed954eded9ff69dce0e42c3ef849b3",
+      "size": 2119,
+      "normalized_sha256": "67ee928d81219960eca500fd3b88070977ed954eded9ff69dce0e42c3ef849b3"
+    },
+    "controller/build-controller.py": {
+      "role": "index",
+      "sha256": "5a776bbbfe7e682db5600a240482f37ebe55a7f9e84be5d2f2eb95d2272f1c7e",
+      "size": 9649,
+      "normalized_sha256": "5a776bbbfe7e682db5600a240482f37ebe55a7f9e84be5d2f2eb95d2272f1c7e"
+    },
+    "controller/java/com/sandbox/controller/AddAppSheet.java": {
+      "role": "index",
+      "sha256": "c0df9a15e42b6f44206bbaecbeba4085531ecb77559bc489aebd41845cf95702",
+      "size": 30248,
+      "normalized_sha256": "c0df9a15e42b6f44206bbaecbeba4085531ecb77559bc489aebd41845cf95702"
+    },
+    "controller/java/com/sandbox/controller/AppActionSheet.java": {
+      "role": "index",
+      "sha256": "6ba620f20db58cb4ac7b0330001f6f927665dfab08453d76446242fa27cfc979",
+      "size": 14390,
+      "normalized_sha256": "6ba620f20db58cb4ac7b0330001f6f927665dfab08453d76446242fa27cfc979"
+    },
+    "controller/java/com/sandbox/controller/BreathingHaloView.java": {
+      "role": "index",
+      "sha256": "00ffd76d3bf8351d1037b93a03a7c5ff9d43920a7a10da7dbe3f13e4ba0f40b5",
+      "size": 6551,
+      "normalized_sha256": "00ffd76d3bf8351d1037b93a03a7c5ff9d43920a7a10da7dbe3f13e4ba0f40b5"
+    },
+    "controller/java/com/sandbox/controller/BrokerClient.java": {
+      "role": "index",
+      "sha256": "e65c393267b887ebdca7fbee1633c01b8762bef9542215d23edf8a8917d81152",
+      "size": 6007,
+      "normalized_sha256": "e65c393267b887ebdca7fbee1633c01b8762bef9542215d23edf8a8917d81152"
+    },
+    "controller/java/com/sandbox/controller/BrokerProtocol.java": {
+      "role": "index",
+      "sha256": "9cc618fc02d0569e3cf5a83f454efab73edc1d43dbae2b68ebc8deca429365cf",
+      "size": 37017,
+      "normalized_sha256": "9cc618fc02d0569e3cf5a83f454efab73edc1d43dbae2b68ebc8deca429365cf"
+    },
+    "controller/java/com/sandbox/controller/CertUtil.java": {
+      "role": "index",
+      "sha256": "8810f9bc3e06d5389946262d0069625fca7528b43c696c254af3033f9b22a804",
+      "size": 2219,
+      "normalized_sha256": "8810f9bc3e06d5389946262d0069625fca7528b43c696c254af3033f9b22a804"
+    },
+    "controller/java/com/sandbox/controller/DiagnosticsSheet.java": {
+      "role": "index",
+      "sha256": "8e9ecefdcfd4ddbb6650e122b5c4b27db138ace75b951c2336b8ee0bf66dc76d",
+      "size": 21876,
+      "normalized_sha256": "8e9ecefdcfd4ddbb6650e122b5c4b27db138ace75b951c2336b8ee0bf66dc76d"
+    },
+    "controller/java/com/sandbox/controller/MainActivity.java": {
+      "role": "index",
+      "sha256": "bf521ad0acf1ddb62a21f9116fb4c2e158d91edf4b07d921ab263f4447690d75",
+      "size": 61208,
+      "normalized_sha256": "bf521ad0acf1ddb62a21f9116fb4c2e158d91edf4b07d921ab263f4447690d75"
+    },
+    "controller/java/com/sandbox/controller/Motion.java": {
+      "role": "index",
+      "sha256": "6ea46bd03d58872a4b6660298a0bb498ee14eae20b7b8e5be87df9774be01abe",
+      "size": 3535,
+      "normalized_sha256": "6ea46bd03d58872a4b6660298a0bb498ee14eae20b7b8e5be87df9774be01abe"
+    },
+    "controller/java/com/sandbox/controller/PlusMarkView.java": {
+      "role": "index",
+      "sha256": "c6c2c7055eca4ca8b2d0cdabf1324fd0b03eef6ae7d93de3fc85ddd7f61e724c",
+      "size": 1170,
+      "normalized_sha256": "c6c2c7055eca4ca8b2d0cdabf1324fd0b03eef6ae7d93de3fc85ddd7f61e724c"
+    },
+    "controller/java/com/sandbox/controller/SandboxAdminReceiver.java": {
+      "role": "index",
+      "sha256": "410d735cc0626865320074c0c6fa525c6578f421d1fe2e2932e3c7b57a8e70a8",
+      "size": 247,
+      "normalized_sha256": "410d735cc0626865320074c0c6fa525c6578f421d1fe2e2932e3c7b57a8e70a8"
+    },
+    "controller/java/com/sandbox/controller/SandboxTileService.java": {
+      "role": "index",
+      "sha256": "ce16c8c25ef7b59b9e5fb5772b4bd2bc533c34ebdf67c89b70ffc7c7a0f8cba6",
+      "size": 6627,
+      "normalized_sha256": "ce16c8c25ef7b59b9e5fb5772b4bd2bc533c34ebdf67c89b70ffc7c7a0f8cba6"
+    },
+    "controller/java/com/sandbox/controller/Strings.java": {
+      "role": "index",
+      "sha256": "15d1fa6e71f8dfc53a6d209ef05fed438243f1792d5bd06599a304169ad59068",
+      "size": 13209,
+      "normalized_sha256": "15d1fa6e71f8dfc53a6d209ef05fed438243f1792d5bd06599a304169ad59068"
+    },
+    "controller/java/com/sandbox/controller/ThemePalette.java": {
+      "role": "index",
+      "sha256": "a516384393d7770fbc2bc877bf2d7ce399930027b3849017fd474e24447e56a9",
+      "size": 7479,
+      "normalized_sha256": "a516384393d7770fbc2bc877bf2d7ce399930027b3849017fd474e24447e56a9"
+    },
+    "controller/res/drawable/ic_qs_kernbox.xml": {
+      "role": "index",
+      "sha256": "9824dd8548742c78c4aaf9d73adda3e40989afc17e163e74e9ec50a9487a9515",
+      "size": 557,
+      "normalized_sha256": "9824dd8548742c78c4aaf9d73adda3e40989afc17e163e74e9ec50a9487a9515"
+    },
+    "controller/res/values-night-v27/styles.xml": {
+      "role": "index",
+      "sha256": "6e534f3a2bfc52212cbb6ad92108149de40ff70e5b80415e27a6d52aa1d4f1a0",
+      "size": 624,
+      "normalized_sha256": "6e534f3a2bfc52212cbb6ad92108149de40ff70e5b80415e27a6d52aa1d4f1a0"
+    },
+    "controller/res/values-night/styles.xml": {
+      "role": "index",
+      "sha256": "794690b051709b4f563b23eb8e2e511d0ec095971594d5c8bec8e3d3c5458cac",
+      "size": 519,
+      "normalized_sha256": "794690b051709b4f563b23eb8e2e511d0ec095971594d5c8bec8e3d3c5458cac"
+    },
+    "controller/res/values-v27/styles.xml": {
+      "role": "index",
+      "sha256": "333768d46bca5498d51ec1c61bef5ad02e93985e8e0c95e299e53ec183bb3883",
+      "size": 628,
+      "normalized_sha256": "333768d46bca5498d51ec1c61bef5ad02e93985e8e0c95e299e53ec183bb3883"
+    },
+    "controller/res/values/styles.xml": {
+      "role": "index",
+      "sha256": "df9a3f49a4b3e414d08c0aec62258bd8f4e20600bbfa02e333233da49b3ee408",
+      "size": 524,
+      "normalized_sha256": "df9a3f49a4b3e414d08c0aec62258bd8f4e20600bbfa02e333233da49b3ee408"
+    },
+    "controller/res/xml/device_admin.xml": {
+      "role": "index",
+      "sha256": "0517b46c9ebcb28d0cc0545faadf3f2cbb755d503edbe7a5efade7124ce1d712",
+      "size": 56,
+      "normalized_sha256": "0517b46c9ebcb28d0cc0545faadf3f2cbb755d503edbe7a5efade7124ce1d712"
+    },
+    "controller/tests/BrokerProtocolHostTest.java": {
+      "role": "observe",
+      "sha256": "35ab97146fdea5a5a5e85a22c9fb509fe5da347deb56ea711da4b4499073bb37",
+      "size": 14463,
+      "normalized_sha256": "35ab97146fdea5a5a5e85a22c9fb509fe5da347deb56ea711da4b4499073bb37"
+    },
+    "docs/FAQ.md": {
+      "role": "index",
+      "sha256": "722d1b17df989346f6771be897c04850663648683be435a57dd17d9767ada710",
+      "size": 5954,
+      "normalized_sha256": "722d1b17df989346f6771be897c04850663648683be435a57dd17d9767ada710"
+    },
+    "docs/FAQ_EN.md": {
+      "role": "index",
+      "sha256": "a30b2d031d19e32344bd765bc062b27af00a8589a16a59c494e70bb00be428b9",
+      "size": 5559,
+      "normalized_sha256": "a30b2d031d19e32344bd765bc062b27af00a8589a16a59c494e70bb00be428b9"
+    },
+    "docs/TPROXY_INTEGRATION.md": {
+      "role": "index",
+      "sha256": "a719ce7b8eddd3911b941eeea4c13fe003934a520f506880778ab9b510f3f87e",
+      "size": 4792,
+      "normalized_sha256": "a719ce7b8eddd3911b941eeea4c13fe003934a520f506880778ab9b510f3f87e"
+    },
+    "docs/TPROXY_INTEGRATION_EN.md": {
+      "role": "index",
+      "sha256": "207296903339ce1d44f38ab530dba2626c3052323a9d07cd0e8f2280a36d9053",
+      "size": 4532,
+      "normalized_sha256": "207296903339ce1d44f38ab530dba2626c3052323a9d07cd0e8f2280a36d9053"
+    },
+    "guard/cmd/broker/broker_test.go": {
+      "role": "observe",
+      "sha256": "833f0fa03f14760728d9b21d0b0c2f0007e80e893abc5788df80c094a51cc29b",
+      "size": 6229,
+      "normalized_sha256": "833f0fa03f14760728d9b21d0b0c2f0007e80e893abc5788df80c094a51cc29b",
+      "format_sha256": "833f0fa03f14760728d9b21d0b0c2f0007e80e893abc5788df80c094a51cc29b",
+      "format_kind": "gofmt"
+    },
+    "guard/cmd/broker/main.go": {
+      "role": "index",
+      "sha256": "0347775a92b2d6eb1bbc18bfe2834468cd15ee1d63e7955b4256d53a1c6a1ac0",
+      "size": 5565,
+      "normalized_sha256": "0347775a92b2d6eb1bbc18bfe2834468cd15ee1d63e7955b4256d53a1c6a1ac0",
+      "format_sha256": "0347775a92b2d6eb1bbc18bfe2834468cd15ee1d63e7955b4256d53a1c6a1ac0",
+      "format_kind": "gofmt"
+    },
+    "guard/cmd/broker/testmode_test.go": {
+      "role": "observe",
+      "sha256": "37ca38c2598e52f7f85d82cb6c7fe1b9ea3c302132a7306961ac0eb6ecd1e216",
+      "size": 105,
+      "normalized_sha256": "37ca38c2598e52f7f85d82cb6c7fe1b9ea3c302132a7306961ac0eb6ecd1e216",
+      "format_sha256": "37ca38c2598e52f7f85d82cb6c7fe1b9ea3c302132a7306961ac0eb6ecd1e216",
+      "format_kind": "gofmt"
+    },
+    "guard/cmd/guard/main.go": {
+      "role": "index",
+      "sha256": "daf6c8ee3f963d5368d5fc6f5dd6a052cb86e322a7456903a7c164d2283802bc",
+      "size": 1352,
+      "normalized_sha256": "daf6c8ee3f963d5368d5fc6f5dd6a052cb86e322a7456903a7c164d2283802bc",
+      "format_sha256": "daf6c8ee3f963d5368d5fc6f5dd6a052cb86e322a7456903a7c164d2283802bc",
+      "format_kind": "gofmt"
+    },
+    "guard/go.mod": {
+      "role": "index",
+      "sha256": "93c4766297b72b172d3adf76c54ed2e0eb467afc55813a69e9d4d14458cbe645",
+      "size": 66,
+      "normalized_sha256": "93c4766297b72b172d3adf76c54ed2e0eb467afc55813a69e9d4d14458cbe645"
+    },
+    "guard/go.sum": {
+      "role": "observe",
+      "sha256": "a59a745ae47290596f2c84070d4c16576a1145df8708b5a97dbe8d848dd6cb60",
+      "size": 153,
+      "normalized_sha256": "a59a745ae47290596f2c84070d4c16576a1145df8708b5a97dbe8d848dd6cb60"
+    },
+    "guard/internal/android/android_test.go": {
+      "role": "observe",
+      "sha256": "3481c12ef3f4dffafd79d71de9412872586b976a082ad98b1f1f4df2c53b99ed",
+      "size": 11478,
+      "normalized_sha256": "3481c12ef3f4dffafd79d71de9412872586b976a082ad98b1f1f4df2c53b99ed",
+      "format_sha256": "63d4fe8f0e663198ba24fbeb44e5d61039a17a7ed306c04ba1261cc728d51720",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/android/bloat.go": {
+      "role": "index",
+      "sha256": "95b9a145fc688477d374714bcba240375c5641cb917bbd71b2cb802df8a1cc4c",
+      "size": 7322,
+      "normalized_sha256": "95b9a145fc688477d374714bcba240375c5641cb917bbd71b2cb802df8a1cc4c",
+      "format_sha256": "95b9a145fc688477d374714bcba240375c5641cb917bbd71b2cb802df8a1cc4c",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/android/bloat_test.go": {
+      "role": "observe",
+      "sha256": "3b2a2beaa5e6e6577f858b282b8d613cb90a1359d803a70566941aa3c79ac7cf",
+      "size": 3734,
+      "normalized_sha256": "3b2a2beaa5e6e6577f858b282b8d613cb90a1359d803a70566941aa3c79ac7cf",
+      "format_sha256": "3b2a2beaa5e6e6577f858b282b8d613cb90a1359d803a70566941aa3c79ac7cf",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/android/hideapps.go": {
+      "role": "index",
+      "sha256": "4772099d09da44c4513800142de72b847d94539bdcd25912280a506b5db2b6ce",
+      "size": 550,
+      "normalized_sha256": "4772099d09da44c4513800142de72b847d94539bdcd25912280a506b5db2b6ce",
+      "format_sha256": "4772099d09da44c4513800142de72b847d94539bdcd25912280a506b5db2b6ce",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/android/hideapps_hyperos.go": {
+      "role": "index",
+      "sha256": "4c3743110a7b8943c8913a5cd7753a683e6857c6d583af15e3a420c829fad94e",
+      "size": 7574,
+      "normalized_sha256": "4c3743110a7b8943c8913a5cd7753a683e6857c6d583af15e3a420c829fad94e",
+      "format_sha256": "4c3743110a7b8943c8913a5cd7753a683e6857c6d583af15e3a420c829fad94e",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/android/hideapps_hyperos_test.go": {
+      "role": "observe",
+      "sha256": "1b0495cdd6b878b92ebad1a4020670dff46773a169481513d24f8ff07d735f76",
+      "size": 1722,
+      "normalized_sha256": "1b0495cdd6b878b92ebad1a4020670dff46773a169481513d24f8ff07d735f76",
+      "format_sha256": "1b0495cdd6b878b92ebad1a4020670dff46773a169481513d24f8ff07d735f76",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/android/hideapps_noop.go": {
+      "role": "index",
+      "sha256": "3bfb52c2621c56dc1879921d642a78561af6d774da587e76bfaeee3900df7fad",
+      "size": 521,
+      "normalized_sha256": "3bfb52c2621c56dc1879921d642a78561af6d774da587e76bfaeee3900df7fad",
+      "format_sha256": "3bfb52c2621c56dc1879921d642a78561af6d774da587e76bfaeee3900df7fad",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/android/hideapps_noop_test.go": {
+      "role": "observe",
+      "sha256": "a2b9fbeb7071b6cfbeb235179ef1cdf4269197510bb3d636e8745aa070e0fc63",
+      "size": 387,
+      "normalized_sha256": "a2b9fbeb7071b6cfbeb235179ef1cdf4269197510bb3d636e8745aa070e0fc63",
+      "format_sha256": "a2b9fbeb7071b6cfbeb235179ef1cdf4269197510bb3d636e8745aa070e0fc63",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/android/hideapps_v252_test.go": {
+      "role": "observe",
+      "sha256": "53976ec7023d96d3f9846f69f04ab06a546748e3b86f9094fc669625fcd9db01",
+      "size": 1541,
+      "normalized_sha256": "53976ec7023d96d3f9846f69f04ab06a546748e3b86f9094fc669625fcd9db01",
+      "format_sha256": "1f4c943d21d953fb16336a9f3c30320744f975f48da5d32ac9c7b9eba3f347df",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/android/identity.go": {
+      "role": "index",
+      "sha256": "b289046be215090e3255b8146ccd08b3e68d5fc505712198aa0a2c7c49d8c61a",
+      "size": 24931,
+      "normalized_sha256": "b289046be215090e3255b8146ccd08b3e68d5fc505712198aa0a2c7c49d8c61a",
+      "format_sha256": "b289046be215090e3255b8146ccd08b3e68d5fc505712198aa0a2c7c49d8c61a",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/android/millet.go": {
+      "role": "index",
+      "sha256": "a1596a96573cc9c93759e9bf56c093dd950257e2ab1ed0671fae6b0930404157",
+      "size": 8307,
+      "normalized_sha256": "a1596a96573cc9c93759e9bf56c093dd950257e2ab1ed0671fae6b0930404157",
+      "format_sha256": "a1596a96573cc9c93759e9bf56c093dd950257e2ab1ed0671fae6b0930404157",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/android/proc_kill_compat_linux.go": {
+      "role": "index",
+      "sha256": "95450cfbdc0ecb518a0068552c3602af82358303a48c1a18c800ab8eb3e37b66",
+      "size": 2060,
+      "normalized_sha256": "95450cfbdc0ecb518a0068552c3602af82358303a48c1a18c800ab8eb3e37b66",
+      "format_sha256": "95450cfbdc0ecb518a0068552c3602af82358303a48c1a18c800ab8eb3e37b66",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/android/proc_kill_linux.go": {
+      "role": "index",
+      "sha256": "41ed7ed0826a0528209aa67795be6fc6f712f8385a528086b93cca600cd5e589",
+      "size": 1251,
+      "normalized_sha256": "41ed7ed0826a0528209aa67795be6fc6f712f8385a528086b93cca600cd5e589",
+      "format_sha256": "41ed7ed0826a0528209aa67795be6fc6f712f8385a528086b93cca600cd5e589",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/android/proc_kill_other.go": {
+      "role": "index",
+      "sha256": "f30e9f4da5054353562ff12a8c3f0bccd09093d9f17f9fe4c4853fe7972137c4",
+      "size": 177,
+      "normalized_sha256": "f30e9f4da5054353562ff12a8c3f0bccd09093d9f17f9fe4c4853fe7972137c4",
+      "format_sha256": "f30e9f4da5054353562ff12a8c3f0bccd09093d9f17f9fe4c4853fe7972137c4",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/android/proc_mem.go": {
+      "role": "index",
+      "sha256": "439fb931056902a0bb6af48829b46d0dc976eb16cf480e35c4370251e0ba1f78",
+      "size": 6245,
+      "normalized_sha256": "439fb931056902a0bb6af48829b46d0dc976eb16cf480e35c4370251e0ba1f78",
+      "format_sha256": "439fb931056902a0bb6af48829b46d0dc976eb16cf480e35c4370251e0ba1f78",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/android/proc_mem_compat_linux.go": {
+      "role": "index",
+      "sha256": "874e48b2285149ffa98af08f1299e18f98e4d82e4cf20f2cb8fb55e5061e00ba",
+      "size": 954,
+      "normalized_sha256": "874e48b2285149ffa98af08f1299e18f98e4d82e4cf20f2cb8fb55e5061e00ba",
+      "format_sha256": "874e48b2285149ffa98af08f1299e18f98e4d82e4cf20f2cb8fb55e5061e00ba",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/android/proc_mem_linux.go": {
+      "role": "index",
+      "sha256": "ea611b75848f4a03d7b5745aac412b04b6ac967ddf6860f35b87c365d14e5b7a",
+      "size": 2959,
+      "normalized_sha256": "ea611b75848f4a03d7b5745aac412b04b6ac967ddf6860f35b87c365d14e5b7a",
+      "format_sha256": "ea611b75848f4a03d7b5745aac412b04b6ac967ddf6860f35b87c365d14e5b7a",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/android/proc_mem_other.go": {
+      "role": "index",
+      "sha256": "bf70ad8a442fd227e55f912539620ec14572a473b6377df54316fe8321111e89",
+      "size": 394,
+      "normalized_sha256": "bf70ad8a442fd227e55f912539620ec14572a473b6377df54316fe8321111e89",
+      "format_sha256": "bf70ad8a442fd227e55f912539620ec14572a473b6377df54316fe8321111e89",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/android/sandbox_apps.go": {
+      "role": "index",
+      "sha256": "b6fc690d0b9be1c0699435cf79548271ac2925033fe6d5e87dcdf8de4a742b83",
+      "size": 18113,
+      "normalized_sha256": "b6fc690d0b9be1c0699435cf79548271ac2925033fe6d5e87dcdf8de4a742b83",
+      "format_sha256": "fd6d6fb2d0c4940839ec6bd0d2eac9383ecb6f1ea1fc7cbccc426b8eeed6265b",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/android/sandbox_apps_linux.go": {
+      "role": "index",
+      "sha256": "c1038b8baba17a9ec44fa848d4bc81aaf09fa91865a00f2dfcb8fc3906caa769",
+      "size": 438,
+      "normalized_sha256": "c1038b8baba17a9ec44fa848d4bc81aaf09fa91865a00f2dfcb8fc3906caa769",
+      "format_sha256": "c1038b8baba17a9ec44fa848d4bc81aaf09fa91865a00f2dfcb8fc3906caa769",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/android/sandbox_apps_other.go": {
+      "role": "index",
+      "sha256": "b2e60457c2747215bc811f02955c6aa7e7d83b53c5a04c70373f38e83fd96132",
+      "size": 609,
+      "normalized_sha256": "b2e60457c2747215bc811f02955c6aa7e7d83b53c5a04c70373f38e83fd96132",
+      "format_sha256": "b2e60457c2747215bc811f02955c6aa7e7d83b53c5a04c70373f38e83fd96132",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/android/sandbox_apps_test.go": {
+      "role": "observe",
+      "sha256": "5df0e488ce3b9384979a0852f8e440b76775ca35593e9ff08c06df91deb9a23c",
+      "size": 14812,
+      "normalized_sha256": "5df0e488ce3b9384979a0852f8e440b76775ca35593e9ff08c06df91deb9a23c",
+      "format_sha256": "73ac5e1e02cc258550b4438b7b10a49df1d59f9cecf0b27cd0841e78c883ab5c",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/android/testmode_test.go": {
+      "role": "observe",
+      "sha256": "d8ff77047b332db9d1672e00c2a610daac87cab39658954e14561bcc38c7ad3e",
+      "size": 108,
+      "normalized_sha256": "d8ff77047b332db9d1672e00c2a610daac87cab39658954e14561bcc38c7ad3e",
+      "format_sha256": "d8ff77047b332db9d1672e00c2a610daac87cab39658954e14561bcc38c7ad3e",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/android/tproxy.go": {
+      "role": "index",
+      "sha256": "f1393c6ed18fad6c6469630ebc5bc878722589d654032289f543965ff14048da",
+      "size": 4492,
+      "normalized_sha256": "f1393c6ed18fad6c6469630ebc5bc878722589d654032289f543965ff14048da",
+      "format_sha256": "f1393c6ed18fad6c6469630ebc5bc878722589d654032289f543965ff14048da",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/android/tproxy_test.go": {
+      "role": "observe",
+      "sha256": "4491f66b60333dd873bf05a3b9258fc4848aa429497d1bab21d4862bd62e0650",
+      "size": 2565,
+      "normalized_sha256": "4491f66b60333dd873bf05a3b9258fc4848aa429497d1bab21d4862bd62e0650",
+      "format_sha256": "4491f66b60333dd873bf05a3b9258fc4848aa429497d1bab21d4862bd62e0650",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/android/user_lifecycle.go": {
+      "role": "index",
+      "sha256": "8d2c9ddc349083b585cdf6648c0dedcdc7e89011917b7bd468d588cf8353399c",
+      "size": 55212,
+      "normalized_sha256": "8d2c9ddc349083b585cdf6648c0dedcdc7e89011917b7bd468d588cf8353399c",
+      "format_sha256": "8d2c9ddc349083b585cdf6648c0dedcdc7e89011917b7bd468d588cf8353399c",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/android/user_lifecycle_e1_test.go": {
+      "role": "observe",
+      "sha256": "815262bb0f6419eed0e483d1a8a8fff5713fafb47f30a78882b6ee0c068cf7c5",
+      "size": 6503,
+      "normalized_sha256": "815262bb0f6419eed0e483d1a8a8fff5713fafb47f30a78882b6ee0c068cf7c5",
+      "format_sha256": "2685331048beef4c4443e7a273fea23a879847c48d10323bfc2c4feea312d078",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/android/user_lifecycle_test.go": {
+      "role": "observe",
+      "sha256": "a1d204ebbdd481f9e5f665bf60752cbb14cdb4d04ed8e8b89d89c1f363bd36bf",
+      "size": 19575,
+      "normalized_sha256": "a1d204ebbdd481f9e5f665bf60752cbb14cdb4d04ed8e8b89d89c1f363bd36bf",
+      "format_sha256": "a1d204ebbdd481f9e5f665bf60752cbb14cdb4d04ed8e8b89d89c1f363bd36bf",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/android/user_lifecycle_v250_test.go": {
+      "role": "observe",
+      "sha256": "aa4eec71c77e0e0da5971eca100e13182a6d930decbda83807ffaf5b8557f5c7",
+      "size": 15200,
+      "normalized_sha256": "aa4eec71c77e0e0da5971eca100e13182a6d930decbda83807ffaf5b8557f5c7",
+      "format_sha256": "8f863db943e5ac276dc001cb1b15939755346f6d80aa2179cdee28a7ec32dd96",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/android/user_lifecycle_v251_test.go": {
+      "role": "observe",
+      "sha256": "f0877d38f40c3984341cac3ab582c00787a559ad244e2fc30ad1672d5900ea3c",
+      "size": 14788,
+      "normalized_sha256": "f0877d38f40c3984341cac3ab582c00787a559ad244e2fc30ad1672d5900ea3c",
+      "format_sha256": "f0877d38f40c3984341cac3ab582c00787a559ad244e2fc30ad1672d5900ea3c",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/android/user_lifecycle_v252_test.go": {
+      "role": "observe",
+      "sha256": "8582e46e214d18dbfaeff3bd54cf81b53e7c356f3ba48d8c8088efaf576ac7ff",
+      "size": 12994,
+      "normalized_sha256": "8582e46e214d18dbfaeff3bd54cf81b53e7c356f3ba48d8c8088efaf576ac7ff",
+      "format_sha256": "8582e46e214d18dbfaeff3bd54cf81b53e7c356f3ba48d8c8088efaf576ac7ff",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/apkcert/apkcert.go": {
+      "role": "index",
+      "sha256": "064756f76d2b9914803ecf2a89bb04b9eff3add2afb4b65d277331b6f724141a",
+      "size": 10642,
+      "normalized_sha256": "064756f76d2b9914803ecf2a89bb04b9eff3add2afb4b65d277331b6f724141a",
+      "format_sha256": "064756f76d2b9914803ecf2a89bb04b9eff3add2afb4b65d277331b6f724141a",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/apkcert/apkcert_test.go": {
+      "role": "observe",
+      "sha256": "3775515b466900ea17e1b6b933dd582d074216be70eaf62964991fd0024fd655",
+      "size": 2932,
+      "normalized_sha256": "3775515b466900ea17e1b6b933dd582d074216be70eaf62964991fd0024fd655",
+      "format_sha256": "3775515b466900ea17e1b6b933dd582d074216be70eaf62964991fd0024fd655",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/buildinfo/buildinfo.go": {
+      "role": "index",
+      "sha256": "e6801c35c69dec46ae94e978005f162fa95e97c5d8915eb43fdc5c5d7e2959c5",
+      "size": 1553,
+      "normalized_sha256": "e6801c35c69dec46ae94e978005f162fa95e97c5d8915eb43fdc5c5d7e2959c5",
+      "format_sha256": "e6801c35c69dec46ae94e978005f162fa95e97c5d8915eb43fdc5c5d7e2959c5",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/buildinfo/buildinfo_k419.go": {
+      "role": "index",
+      "sha256": "e3c0173476a7f35ec11af2d2196b2d803d3b1d157a9fc17e4a64e5b3e9fb6998",
+      "size": 153,
+      "normalized_sha256": "e3c0173476a7f35ec11af2d2196b2d803d3b1d157a9fc17e4a64e5b3e9fb6998",
+      "format_sha256": "e3c0173476a7f35ec11af2d2196b2d803d3b1d157a9fc17e4a64e5b3e9fb6998",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/buildinfo/buildinfo_k510.go": {
+      "role": "index",
+      "sha256": "aab95940f330ba131d5d8a18c25c9e7b4694214f13099e419c8c0fd68715dce0",
+      "size": 158,
+      "normalized_sha256": "aab95940f330ba131d5d8a18c25c9e7b4694214f13099e419c8c0fd68715dce0",
+      "format_sha256": "aab95940f330ba131d5d8a18c25c9e7b4694214f13099e419c8c0fd68715dce0",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/buildinfo/buildinfo_tproxy.go": {
+      "role": "index",
+      "sha256": "2ce9a585205f96ccbb2c1d171c22194a8bf71200dd2d8dccd78f9f0d366ddddb",
+      "size": 118,
+      "normalized_sha256": "2ce9a585205f96ccbb2c1d171c22194a8bf71200dd2d8dccd78f9f0d366ddddb",
+      "format_sha256": "2ce9a585205f96ccbb2c1d171c22194a8bf71200dd2d8dccd78f9f0d366ddddb",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/buildinfo/buildinfo_vpn.go": {
+      "role": "index",
+      "sha256": "e42c3730d16e09d170d9b43dacb66e051081bcfccad0f34181cdda8b9e1cc113",
+      "size": 128,
+      "normalized_sha256": "e42c3730d16e09d170d9b43dacb66e051081bcfccad0f34181cdda8b9e1cc113",
+      "format_sha256": "e42c3730d16e09d170d9b43dacb66e051081bcfccad0f34181cdda8b9e1cc113",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/contracts/contracts.go": {
+      "role": "index",
+      "sha256": "68a07907329de8d6a5439b576e1a8afb6a14a5dd02c89facc0ab2d891102ee84",
+      "size": 17682,
+      "normalized_sha256": "68a07907329de8d6a5439b576e1a8afb6a14a5dd02c89facc0ab2d891102ee84",
+      "format_sha256": "96b4fbc7864b062257acdf4812efeec072c1f0675fd7fab4f3e383f1fdcb4c72",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/daemon/alert.go": {
+      "role": "index",
+      "sha256": "83249011419d65fb6083e96082f25a6dcd41810308ce1322556c0f4c045fff9b",
+      "size": 4890,
+      "normalized_sha256": "83249011419d65fb6083e96082f25a6dcd41810308ce1322556c0f4c045fff9b",
+      "format_sha256": "83249011419d65fb6083e96082f25a6dcd41810308ce1322556c0f4c045fff9b",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/daemon/daemon.go": {
+      "role": "index",
+      "sha256": "8b0b9f5eaf0fb6e8861f24b85149b8100996d2717cea2eecd684f96610a8eb59",
+      "size": 126979,
+      "normalized_sha256": "8b0b9f5eaf0fb6e8861f24b85149b8100996d2717cea2eecd684f96610a8eb59",
+      "format_sha256": "9e473104864484517a05894a13d928d12a1b1275cbd279de7ffae9055a855c85",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/daemon/daemon_p0_test.go": {
+      "role": "observe",
+      "sha256": "b4362e775905c1d717926ac7f6b69d9906e0fd399b2714848febe4d301b4e55f",
+      "size": 9100,
+      "normalized_sha256": "b4362e775905c1d717926ac7f6b69d9906e0fd399b2714848febe4d301b4e55f",
+      "format_sha256": "5d76add58a4a473cd44c649aa3a9fb5d73095213796ff34fc4268fc8f7c35808",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/daemon/daemon_rpc_test.go": {
+      "role": "observe",
+      "sha256": "eb175877c1b12d1e316a2e005e036a600b28051bf798bb538a40096a179d69c0",
+      "size": 15805,
+      "normalized_sha256": "eb175877c1b12d1e316a2e005e036a600b28051bf798bb538a40096a179d69c0",
+      "format_sha256": "1e947beaf88854360cda379e63029f6eafd8746c0c945baedcf4938e6a0e03a6",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/daemon/daemon_v230_test.go": {
+      "role": "observe",
+      "sha256": "3e80a53df0f6be807f501d6fcaed795b3f5ae2f6c01dc648250c2937033ac9a6",
+      "size": 8630,
+      "normalized_sha256": "3e80a53df0f6be807f501d6fcaed795b3f5ae2f6c01dc648250c2937033ac9a6",
+      "format_sha256": "cefce3a52424216b46ce86de3611c168f41d5907b879b1d773db698c63c2902a",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/daemon/daemon_v240_test.go": {
+      "role": "observe",
+      "sha256": "a0c6360c4b17ab21327b1af526692e54da4a76320ddb79b827f8e68e9934170d",
+      "size": 29902,
+      "normalized_sha256": "a0c6360c4b17ab21327b1af526692e54da4a76320ddb79b827f8e68e9934170d",
+      "format_sha256": "4911919ad5bd344b8077b793d32073ce90500de9fe7caf8eb0c21e923ceda90e",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/daemon/daemon_v250_test.go": {
+      "role": "observe",
+      "sha256": "00efa79d80f3370b60aefe0b08115a482f0395587bae91e7a3516cd140055370",
+      "size": 11954,
+      "normalized_sha256": "00efa79d80f3370b60aefe0b08115a482f0395587bae91e7a3516cd140055370",
+      "format_sha256": "45a3fd9509ba4eec16cde3a5e8aef0c344e4514617d60217d33a0e2ca6c5726a",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/daemon/daemon_v251_test.go": {
+      "role": "observe",
+      "sha256": "e06d8a495b226e6f826878442992e0af13adeb41e1b663418e130c25a7572f6a",
+      "size": 23387,
+      "normalized_sha256": "e06d8a495b226e6f826878442992e0af13adeb41e1b663418e130c25a7572f6a",
+      "format_sha256": "0c3472c2b23966ec8591ede24945589d6a7e0ac09850f2f48d9ee697a4a49e1f",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/daemon/daemon_v252_test.go": {
+      "role": "observe",
+      "sha256": "2368eb8e27b13cb8cbf12b553b04f838869eb5534789e3aff82b163ea9f99dc7",
+      "size": 16336,
+      "normalized_sha256": "2368eb8e27b13cb8cbf12b553b04f838869eb5534789e3aff82b163ea9f99dc7",
+      "format_sha256": "682c1f5a2ea7acc735bdc6311b354021b8377b5da647301bc15b483720bc4a6d",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/daemon/daemon_variant_test.go": {
+      "role": "observe",
+      "sha256": "bed045a9129a54a55ddfdbdb1420ebfe8f130c2073821a70d6f532a28351dbfc",
+      "size": 11102,
+      "normalized_sha256": "bed045a9129a54a55ddfdbdb1420ebfe8f130c2073821a70d6f532a28351dbfc",
+      "format_sha256": "bed045a9129a54a55ddfdbdb1420ebfe8f130c2073821a70d6f532a28351dbfc",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/daemon/daemon_vpn_test.go": {
+      "role": "observe",
+      "sha256": "df0a7b1e35c015e2cdf74aa403664d56e1a22fbdff846fa28d3c30b361c18826",
+      "size": 14141,
+      "normalized_sha256": "df0a7b1e35c015e2cdf74aa403664d56e1a22fbdff846fa28d3c30b361c18826",
+      "format_sha256": "f6690b54e9ac8913351d65c0f07e5dc5e8b4a22f9388c70ac1190117ee7cf79d",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/daemon/fence.go": {
+      "role": "index",
+      "sha256": "a458ced723fe04859732f0a36d801cb99e3815f073a19c5a29b34721bd761324",
+      "size": 12196,
+      "normalized_sha256": "a458ced723fe04859732f0a36d801cb99e3815f073a19c5a29b34721bd761324",
+      "format_sha256": "a458ced723fe04859732f0a36d801cb99e3815f073a19c5a29b34721bd761324",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/daemon/fence_test.go": {
+      "role": "observe",
+      "sha256": "2e846e18af69fd30a492930b7d320256995f4014718ec72126f1e966a4b634dd",
+      "size": 6407,
+      "normalized_sha256": "2e846e18af69fd30a492930b7d320256995f4014718ec72126f1e966a4b634dd",
+      "format_sha256": "2e846e18af69fd30a492930b7d320256995f4014718ec72126f1e966a4b634dd",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/daemon/mihomo_flush.go": {
+      "role": "index",
+      "sha256": "00d50cdfd288531ae983f13199c899c16d97d349012d96344b4a7bb28cba325e",
+      "size": 5915,
+      "normalized_sha256": "00d50cdfd288531ae983f13199c899c16d97d349012d96344b4a7bb28cba325e",
+      "format_sha256": "00d50cdfd288531ae983f13199c899c16d97d349012d96344b4a7bb28cba325e",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/daemon/mihomo_flush_test.go": {
+      "role": "observe",
+      "sha256": "9a128834769047d4cc82529b02c6c57ef5b2cba45083afba02d1ce3803640422",
+      "size": 3889,
+      "normalized_sha256": "9a128834769047d4cc82529b02c6c57ef5b2cba45083afba02d1ce3803640422",
+      "format_sha256": "b3a8652ed1c33b5ed4c7b78a8ffe061c0996948247dbea91f83c7a10435ef197",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/daemon/perf_cfg.go": {
+      "role": "index",
+      "sha256": "fa0452ceff182b8ba66852d3a07fabb753c2b8ac88864db13c6cdd5e3786937a",
+      "size": 4911,
+      "normalized_sha256": "fa0452ceff182b8ba66852d3a07fabb753c2b8ac88864db13c6cdd5e3786937a",
+      "format_sha256": "fa0452ceff182b8ba66852d3a07fabb753c2b8ac88864db13c6cdd5e3786937a",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/daemon/stealth_cfg.go": {
+      "role": "index",
+      "sha256": "8b784f67f4c830728e0362798b1b1ba000930feb2be76c7f3880130260083c99",
+      "size": 18001,
+      "normalized_sha256": "8b784f67f4c830728e0362798b1b1ba000930feb2be76c7f3880130260083c99",
+      "format_sha256": "8b784f67f4c830728e0362798b1b1ba000930feb2be76c7f3880130260083c99",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/daemon/testmode_test.go": {
+      "role": "observe",
+      "sha256": "fd49ba3240a45f4f81219203ef788cd35394dedb8f752611c72167c31b94c263",
+      "size": 107,
+      "normalized_sha256": "fd49ba3240a45f4f81219203ef788cd35394dedb8f752611c72167c31b94c263",
+      "format_sha256": "fd49ba3240a45f4f81219203ef788cd35394dedb8f752611c72167c31b94c263",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/daemon/watch_linux.go": {
+      "role": "index",
+      "sha256": "ab5392b5bc76b67769595645cbd93bb7d7d5b99d8ab0566f8098a30eae63f8c6",
+      "size": 10103,
+      "normalized_sha256": "ab5392b5bc76b67769595645cbd93bb7d7d5b99d8ab0566f8098a30eae63f8c6",
+      "format_sha256": "678309ddf3732a5fe561fa2ce57d6fbf142da4c09fa3ad198089aef37f5be158",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/daemon/watch_other.go": {
+      "role": "index",
+      "sha256": "657dc149f0f1ac8031653207fd2c4bf3fe96501a8ae3780ab46bdb3edaf30e42",
+      "size": 919,
+      "normalized_sha256": "657dc149f0f1ac8031653207fd2c4bf3fe96501a8ae3780ab46bdb3edaf30e42",
+      "format_sha256": "91e3731ea710a2c0d3b5510b700c7060b8296882ef9fb87d2dc4f2ee140172cb",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/netfilter/apply.go": {
+      "role": "index",
+      "sha256": "2b0d8f4223ae6f2ef87557fce9806e5c55a8e237dc7f9c4f3f3ec37707e8ff86",
+      "size": 12512,
+      "normalized_sha256": "2b0d8f4223ae6f2ef87557fce9806e5c55a8e237dc7f9c4f3f3ec37707e8ff86",
+      "format_sha256": "2b0d8f4223ae6f2ef87557fce9806e5c55a8e237dc7f9c4f3f3ec37707e8ff86",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/netfilter/apply_test.go": {
+      "role": "observe",
+      "sha256": "660cf8c2f7e6c1bdba33d91e0d1857572e82f92f14002be9dd01a50e40075758",
+      "size": 2412,
+      "normalized_sha256": "660cf8c2f7e6c1bdba33d91e0d1857572e82f92f14002be9dd01a50e40075758",
+      "format_sha256": "660cf8c2f7e6c1bdba33d91e0d1857572e82f92f14002be9dd01a50e40075758",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/netfilter/rules.go": {
+      "role": "index",
+      "sha256": "a7dacce816bce091f6f9bdc663c5fafa3ec6bb478aae07d3eb6b26019287471f",
+      "size": 15733,
+      "normalized_sha256": "a7dacce816bce091f6f9bdc663c5fafa3ec6bb478aae07d3eb6b26019287471f",
+      "format_sha256": "57d77a25d66408a93d36bd21c465ed9eaa07c2d09bf4ad1fac00b4f508458fd9",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/netfilter/rules_tproxy_test.go": {
+      "role": "observe",
+      "sha256": "9f0952201cceeaabd44bcc697ae1a2c4c3ed7f74949cb00002e295a16da7f3ae",
+      "size": 7461,
+      "normalized_sha256": "9f0952201cceeaabd44bcc697ae1a2c4c3ed7f74949cb00002e295a16da7f3ae",
+      "format_sha256": "9f0952201cceeaabd44bcc697ae1a2c4c3ed7f74949cb00002e295a16da7f3ae",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/netfilter/rules_v250_test.go": {
+      "role": "observe",
+      "sha256": "4c4b3acb46845a99ca382a62922509028d5c09bf0e1edec402b9936b2feb6207",
+      "size": 11526,
+      "normalized_sha256": "4c4b3acb46845a99ca382a62922509028d5c09bf0e1edec402b9936b2feb6207",
+      "format_sha256": "4c4b3acb46845a99ca382a62922509028d5c09bf0e1edec402b9936b2feb6207",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/netfilter/rules_v251_test.go": {
+      "role": "observe",
+      "sha256": "3127185b888f0c205c2c2e1380457e7e60503e97005e630c72a8a9393c9f1839",
+      "size": 2731,
+      "normalized_sha256": "3127185b888f0c205c2c2e1380457e7e60503e97005e630c72a8a9393c9f1839",
+      "format_sha256": "3127185b888f0c205c2c2e1380457e7e60503e97005e630c72a8a9393c9f1839",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/netfilter/rules_vpn.go": {
+      "role": "index",
+      "sha256": "6a39340ad69c671433f16c21ce57323600369d8f4d181245bf1d82c216d26fc3",
+      "size": 3624,
+      "normalized_sha256": "6a39340ad69c671433f16c21ce57323600369d8f4d181245bf1d82c216d26fc3",
+      "format_sha256": "6a39340ad69c671433f16c21ce57323600369d8f4d181245bf1d82c216d26fc3",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/netfilter/rules_vpn_stub.go": {
+      "role": "index",
+      "sha256": "b9a0dbf50b5cd7521397e810006188775c5a55a74dc105e59af72e17ca8c244c",
+      "size": 266,
+      "normalized_sha256": "b9a0dbf50b5cd7521397e810006188775c5a55a74dc105e59af72e17ca8c244c",
+      "format_sha256": "b9a0dbf50b5cd7521397e810006188775c5a55a74dc105e59af72e17ca8c244c",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/netfilter/rules_vpn_test.go": {
+      "role": "observe",
+      "sha256": "7f88d4ca2d1c68d4f733aaa1dc372b64b82943bc569bafad85732d0a1830a30e",
+      "size": 4324,
+      "normalized_sha256": "7f88d4ca2d1c68d4f733aaa1dc372b64b82943bc569bafad85732d0a1830a30e",
+      "format_sha256": "7f88d4ca2d1c68d4f733aaa1dc372b64b82943bc569bafad85732d0a1830a30e",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/netfilter/testmode_test.go": {
+      "role": "observe",
+      "sha256": "4e8bc02aa4037a8cb99513702c274a1170ac298b040aff7d2ef5842aafb87997",
+      "size": 110,
+      "normalized_sha256": "4e8bc02aa4037a8cb99513702c274a1170ac298b040aff7d2ef5842aafb87997",
+      "format_sha256": "4e8bc02aa4037a8cb99513702c274a1170ac298b040aff7d2ef5842aafb87997",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/oem/oem.go": {
+      "role": "index",
+      "sha256": "410aac9b1d15ad0cd4ed3e731897770736331bdc8b3abfe3c80189107ecafff9",
+      "size": 1113,
+      "normalized_sha256": "410aac9b1d15ad0cd4ed3e731897770736331bdc8b3abfe3c80189107ecafff9",
+      "format_sha256": "410aac9b1d15ad0cd4ed3e731897770736331bdc8b3abfe3c80189107ecafff9",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/oem/oem_aosp.go": {
+      "role": "index",
+      "sha256": "fb04b200b36e3d232088f3871d20e1cc12dacfc8fe9e9610a10134a94cc232dd",
+      "size": 215,
+      "normalized_sha256": "fb04b200b36e3d232088f3871d20e1cc12dacfc8fe9e9610a10134a94cc232dd",
+      "format_sha256": "fb04b200b36e3d232088f3871d20e1cc12dacfc8fe9e9610a10134a94cc232dd",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/oem/oem_generic.go": {
+      "role": "index",
+      "sha256": "9349894c286e269c46c9f5314c837e2b700c7512941bda318a9987aa6b15c423",
+      "size": 268,
+      "normalized_sha256": "9349894c286e269c46c9f5314c837e2b700c7512941bda318a9987aa6b15c423",
+      "format_sha256": "9349894c286e269c46c9f5314c837e2b700c7512941bda318a9987aa6b15c423",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/oem/oem_hyperos.go": {
+      "role": "index",
+      "sha256": "2d2cab06d32c0e30955e366024a700cb338e256c490f126733736a6f9da6fcc4",
+      "size": 2096,
+      "normalized_sha256": "2d2cab06d32c0e30955e366024a700cb338e256c490f126733736a6f9da6fcc4",
+      "format_sha256": "2d2cab06d32c0e30955e366024a700cb338e256c490f126733736a6f9da6fcc4",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/oem/oem_oneui.go": {
+      "role": "index",
+      "sha256": "d78044922d1442994ba083274e54b3d8ce2b98c6f3943f81d2640320260d65dd",
+      "size": 888,
+      "normalized_sha256": "d78044922d1442994ba083274e54b3d8ce2b98c6f3943f81d2640320260d65dd",
+      "format_sha256": "d78044922d1442994ba083274e54b3d8ce2b98c6f3943f81d2640320260d65dd",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/oem/oem_oplus.go": {
+      "role": "index",
+      "sha256": "0f8ac26f99598ca76328032abcb21974353df8e2423c5bec511c605f1c89af3d",
+      "size": 784,
+      "normalized_sha256": "0f8ac26f99598ca76328032abcb21974353df8e2423c5bec511c605f1c89af3d",
+      "format_sha256": "0f8ac26f99598ca76328032abcb21974353df8e2423c5bec511c605f1c89af3d",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/oem/oem_test.go": {
+      "role": "observe",
+      "sha256": "62abbc53d3b973a828663e9b9be59d717afe0f2146203371b0448c2253f79c46",
+      "size": 1319,
+      "normalized_sha256": "62abbc53d3b973a828663e9b9be59d717afe0f2146203371b0448c2253f79c46",
+      "format_sha256": "62abbc53d3b973a828663e9b9be59d717afe0f2146203371b0448c2253f79c46",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/rpc/rpc_test.go": {
+      "role": "observe",
+      "sha256": "8cca4f12f829d050bcf59a8756fe8a031ae1baf59e4f15868935742a1c288ed3",
+      "size": 3617,
+      "normalized_sha256": "8cca4f12f829d050bcf59a8756fe8a031ae1baf59e4f15868935742a1c288ed3",
+      "format_sha256": "8cca4f12f829d050bcf59a8756fe8a031ae1baf59e4f15868935742a1c288ed3",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/rpc/server.go": {
+      "role": "index",
+      "sha256": "f9899927c0180350cff5ab72bea9b16cdc43325578135d64ff915f2b64ac759a",
+      "size": 10342,
+      "normalized_sha256": "f9899927c0180350cff5ab72bea9b16cdc43325578135d64ff915f2b64ac759a",
+      "format_sha256": "f9899927c0180350cff5ab72bea9b16cdc43325578135d64ff915f2b64ac759a",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/rpc/testmode_test.go": {
+      "role": "observe",
+      "sha256": "812f7c83b934803805ba14bd708a53b5b85130c0b56ab7bb1289256074856474",
+      "size": 104,
+      "normalized_sha256": "812f7c83b934803805ba14bd708a53b5b85130c0b56ab7bb1289256074856474",
+      "format_sha256": "812f7c83b934803805ba14bd708a53b5b85130c0b56ab7bb1289256074856474",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/sysio/atomic.go": {
+      "role": "index",
+      "sha256": "a3cdb796a6d77790fb4f1e54e4a7a572bdbb30949855a7d42def3da40f639851",
+      "size": 1836,
+      "normalized_sha256": "a3cdb796a6d77790fb4f1e54e4a7a572bdbb30949855a7d42def3da40f639851",
+      "format_sha256": "a3cdb796a6d77790fb4f1e54e4a7a572bdbb30949855a7d42def3da40f639851",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/sysio/atomic_rename.go": {
+      "role": "index",
+      "sha256": "041d625c344512c4378dcf3f67e729d3f52271a1eccde8687608078ebe760070",
+      "size": 591,
+      "normalized_sha256": "041d625c344512c4378dcf3f67e729d3f52271a1eccde8687608078ebe760070",
+      "format_sha256": "041d625c344512c4378dcf3f67e729d3f52271a1eccde8687608078ebe760070",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/sysio/atomic_v251_test.go": {
+      "role": "observe",
+      "sha256": "a0abebd41522105fcb00ac411cf140bb123314b32725746d990bff08f946daa0",
+      "size": 750,
+      "normalized_sha256": "a0abebd41522105fcb00ac411cf140bb123314b32725746d990bff08f946daa0",
+      "format_sha256": "a0abebd41522105fcb00ac411cf140bb123314b32725746d990bff08f946daa0",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/sysio/openat2.go": {
+      "role": "index",
+      "sha256": "b85bc775302efad3b92b9f008f7046a4fb76ff565a8a9fc9a7caad76f620666b",
+      "size": 4367,
+      "normalized_sha256": "b85bc775302efad3b92b9f008f7046a4fb76ff565a8a9fc9a7caad76f620666b",
+      "format_sha256": "b85bc775302efad3b92b9f008f7046a4fb76ff565a8a9fc9a7caad76f620666b",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/sysio/openat2_linux.go": {
+      "role": "index",
+      "sha256": "149089a34d97bf80f9c6bb8b70a94e2114b139f3fca9931473e22de1bb5f8384",
+      "size": 1007,
+      "normalized_sha256": "149089a34d97bf80f9c6bb8b70a94e2114b139f3fca9931473e22de1bb5f8384",
+      "format_sha256": "149089a34d97bf80f9c6bb8b70a94e2114b139f3fca9931473e22de1bb5f8384",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/sysio/openat2_linux_test.go": {
+      "role": "observe",
+      "sha256": "802fc411f36e460cacd82bbc142094c2e6a29e35abe3c47e448b145a78169c13",
+      "size": 617,
+      "normalized_sha256": "802fc411f36e460cacd82bbc142094c2e6a29e35abe3c47e448b145a78169c13",
+      "format_sha256": "802fc411f36e460cacd82bbc142094c2e6a29e35abe3c47e448b145a78169c13",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/sysio/openat2_other.go": {
+      "role": "index",
+      "sha256": "fac0fd782dc7ceee9eb38cfa4d57422b694d2b73ccc6a98299a5885a5f38fdf6",
+      "size": 2454,
+      "normalized_sha256": "fac0fd782dc7ceee9eb38cfa4d57422b694d2b73ccc6a98299a5885a5f38fdf6",
+      "format_sha256": "fac0fd782dc7ceee9eb38cfa4d57422b694d2b73ccc6a98299a5885a5f38fdf6",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/sysio/openat2_test.go": {
+      "role": "observe",
+      "sha256": "768921202a755163f242eb955012b6ca04f4542413c403081bf45b3301dff4f7",
+      "size": 6277,
+      "normalized_sha256": "768921202a755163f242eb955012b6ca04f4542413c403081bf45b3301dff4f7",
+      "format_sha256": "768921202a755163f242eb955012b6ca04f4542413c403081bf45b3301dff4f7",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/sysio/openat_common_linux.go": {
+      "role": "index",
+      "sha256": "9c56d78043795b668e8601befb1e0d1887db6d4cd3880cf9917f3d1922fcf4fc",
+      "size": 6332,
+      "normalized_sha256": "9c56d78043795b668e8601befb1e0d1887db6d4cd3880cf9917f3d1922fcf4fc",
+      "format_sha256": "9c56d78043795b668e8601befb1e0d1887db6d4cd3880cf9917f3d1922fcf4fc",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/sysio/openat_compat_linux.go": {
+      "role": "index",
+      "sha256": "a6ccf59f92a67fd47bf310ef2079b7922c936be233c60c0e04a410d7d37a6fb3",
+      "size": 2311,
+      "normalized_sha256": "a6ccf59f92a67fd47bf310ef2079b7922c936be233c60c0e04a410d7d37a6fb3",
+      "format_sha256": "a6ccf59f92a67fd47bf310ef2079b7922c936be233c60c0e04a410d7d37a6fb3",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/sysio/peercred_linux.go": {
+      "role": "index",
+      "sha256": "f350667f0cf65b9a69396c77dbefdcbfccc411b058e0e8192449ebaa9fbc7896",
+      "size": 1350,
+      "normalized_sha256": "f350667f0cf65b9a69396c77dbefdcbfccc411b058e0e8192449ebaa9fbc7896",
+      "format_sha256": "f350667f0cf65b9a69396c77dbefdcbfccc411b058e0e8192449ebaa9fbc7896",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/sysio/peercred_other.go": {
+      "role": "index",
+      "sha256": "7f39ec422340dec230f2327a12e77e5a04b5fba15d886537e323c4f5f34a1a1c",
+      "size": 351,
+      "normalized_sha256": "7f39ec422340dec230f2327a12e77e5a04b5fba15d886537e323c4f5f34a1a1c",
+      "format_sha256": "7f39ec422340dec230f2327a12e77e5a04b5fba15d886537e323c4f5f34a1a1c",
+      "format_kind": "gofmt"
+    },
+    "guard/internal/sysio/testmode_test.go": {
+      "role": "observe",
+      "sha256": "72cd3e53c804a4d41d0f8edfaaed137e102a70e3e4352e955ee53343c54da4bc",
+      "size": 61,
+      "normalized_sha256": "72cd3e53c804a4d41d0f8edfaaed137e102a70e3e4352e955ee53343c54da4bc",
+      "format_sha256": "72cd3e53c804a4d41d0f8edfaaed137e102a70e3e4352e955ee53343c54da4bc",
+      "format_kind": "gofmt"
+    },
+    "packaging/common/action.sh.tmpl": {
+      "role": "index",
+      "sha256": "8eff62f23543746c2b1aa3425d54706c1df16cafa50b06a7d140fd1cc999f26e",
+      "size": 1305,
+      "normalized_sha256": "8eff62f23543746c2b1aa3425d54706c1df16cafa50b06a7d140fd1cc999f26e"
+    },
+    "packaging/common/customize.sh.tmpl": {
+      "role": "index",
+      "sha256": "bd679980cab3fe9b31e96ccf2ab3544034e93480a0d34c750c95af29e947dfb0",
+      "size": 2949,
+      "normalized_sha256": "bd679980cab3fe9b31e96ccf2ab3544034e93480a0d34c750c95af29e947dfb0"
+    },
+    "packaging/common/defaults/perf.json": {
+      "role": "index",
+      "sha256": "e9d118f3492b04b34cbcba398701972c1893e168e362d7fa6d4fe57c461e263f",
+      "size": 400,
+      "normalized_sha256": "e9d118f3492b04b34cbcba398701972c1893e168e362d7fa6d4fe57c461e263f"
+    },
+    "packaging/common/defaults/stealth.json": {
+      "role": "index",
+      "sha256": "f4caef6d286a60587ac9f2447cc4908f0be1f44206d1a3970ba5d143e5724129",
+      "size": 693,
+      "normalized_sha256": "f4caef6d286a60587ac9f2447cc4908f0be1f44206d1a3970ba5d143e5724129"
+    },
+    "packaging/common/module.prop.tmpl": {
+      "role": "index",
+      "sha256": "c236698edb4f93703b690e02abf3c0d316835709d20c903178ce663a2b2efdd3",
+      "size": 340,
+      "normalized_sha256": "c236698edb4f93703b690e02abf3c0d316835709d20c903178ce663a2b2efdd3"
+    },
+    "packaging/common/post-fs-data.sh.tmpl": {
+      "role": "index",
+      "sha256": "553ac3f528da56719bf3d67ce019d0e46b4d8e18dd1146bae6238e7306f95fd4",
+      "size": 5174,
+      "normalized_sha256": "553ac3f528da56719bf3d67ce019d0e46b4d8e18dd1146bae6238e7306f95fd4"
+    },
+    "packaging/common/service.sh.tmpl": {
+      "role": "index",
+      "sha256": "4e7ddd7c23641719b319fef155e65c92fe968b31a0fc8264578314ae3435f033",
+      "size": 16039,
+      "normalized_sha256": "4e7ddd7c23641719b319fef155e65c92fe968b31a0fc8264578314ae3435f033"
+    },
+    "packaging/common/uninstall.sh.tmpl": {
+      "role": "index",
+      "sha256": "3eff9d53971c0eb7451c846ed3f024d2619f0aec6b928affa98677286710702f",
+      "size": 2048,
+      "normalized_sha256": "3eff9d53971c0eb7451c846ed3f024d2619f0aec6b928affa98677286710702f"
+    },
+    "packaging/pack_variant.py": {
+      "role": "index",
+      "sha256": "cc17012e35e5ab7c89999f524b453ef8a2feee46e28126645c2aa2a56221f822",
+      "size": 7521,
+      "normalized_sha256": "cc17012e35e5ab7c89999f524b453ef8a2feee46e28126645c2aa2a56221f822"
+    },
+    "packaging/sepolicy/apatch.rule": {
+      "role": "index",
+      "sha256": "bd7de6e227b91d35c9e48aced80f2f12a92e6ce0c49217a76b5a8b67a02e6b4d",
+      "size": 4004,
+      "normalized_sha256": "bd7de6e227b91d35c9e48aced80f2f12a92e6ce0c49217a76b5a8b67a02e6b4d"
+    },
+    "packaging/sepolicy/ksu.rule": {
+      "role": "index",
+      "sha256": "8d642db69f4393cdf40beea5a5df7bc29feddee756852934c4dd745ce75fe640",
+      "size": 3980,
+      "normalized_sha256": "8d642db69f4393cdf40beea5a5df7bc29feddee756852934c4dd745ce75fe640"
+    },
+    "packaging/sepolicy/ksu_legacy.rule": {
+      "role": "index",
+      "sha256": "8d642db69f4393cdf40beea5a5df7bc29feddee756852934c4dd745ce75fe640",
+      "size": 3980,
+      "normalized_sha256": "8d642db69f4393cdf40beea5a5df7bc29feddee756852934c4dd745ce75fe640"
+    },
+    "packaging/sepolicy/magisk.rule": {
+      "role": "index",
+      "sha256": "604228f2efe559faa895af2bbcc6608f764c806a13fdac1f8bd13eaefa963f1e",
+      "size": 3521,
+      "normalized_sha256": "604228f2efe559faa895af2bbcc6608f764c806a13fdac1f8bd13eaefa963f1e"
+    },
+    "presets/de-telekom.json": {
+      "role": "index",
+      "sha256": "40de6e9243ca8b1b8378a0f01b8c8542ca79fd09c065dcb003afd6e249264825",
+      "size": 451,
+      "normalized_sha256": "40de6e9243ca8b1b8378a0f01b8c8542ca79fd09c065dcb003afd6e249264825"
+    },
+    "presets/jp-docomo.json": {
+      "role": "index",
+      "sha256": "467234d6ffe4b990580273f271e056827b59a6544cfc5e761efec888bd96cb46",
+      "size": 447,
+      "normalized_sha256": "467234d6ffe4b990580273f271e056827b59a6544cfc5e761efec888bd96cb46"
+    },
+    "presets/neutral.json": {
+      "role": "index",
+      "sha256": "ff909f07dfaefa9274907fec2ecff3adc560d47af254053b4e9ec568234c2270",
+      "size": 405,
+      "normalized_sha256": "ff909f07dfaefa9274907fec2ecff3adc560d47af254053b4e9ec568234c2270"
+    },
+    "presets/sg-singtel.json": {
+      "role": "index",
+      "sha256": "5e6daf1e02ed5189b54421e43262a9b4af343d9aad0771940c435c0020ea88e2",
+      "size": 446,
+      "normalized_sha256": "5e6daf1e02ed5189b54421e43262a9b4af343d9aad0771940c435c0020ea88e2"
+    },
+    "presets/uk-ee.json": {
+      "role": "index",
+      "sha256": "5bb9723c34831a40c8076d3f4de14c1ffc47b7666f7f51b30c8fc072f2bd7345",
+      "size": 430,
+      "normalized_sha256": "5bb9723c34831a40c8076d3f4de14c1ffc47b7666f7f51b30c8fc072f2bd7345"
+    },
+    "presets/us-tmobile.json": {
+      "role": "index",
+      "sha256": "30521af1c7c7a7936b8b9217cdc42b0a17bf79ffd835d39009b85c04e7b39583",
+      "size": 455,
+      "normalized_sha256": "30521af1c7c7a7936b8b9217cdc42b0a17bf79ffd835d39009b85c04e7b39583"
+    },
+    "stealth/build.py": {
+      "role": "index",
+      "sha256": "b15fd958c7b55f26a915c573af47cf0b1f5539de22ebcef74b59be1852862860",
+      "size": 10031,
+      "normalized_sha256": "b15fd958c7b55f26a915c573af47cf0b1f5539de22ebcef74b59be1852862860"
+    },
+    "stealth/java/com/sandbox/stealth/BinderInterceptionPolicy.java": {
+      "role": "index",
+      "sha256": "31dc6e29801514fcf22ec89abc488752015ad2ab75df1b0bcfba8f83e6524efb",
+      "size": 25315,
+      "normalized_sha256": "31dc6e29801514fcf22ec89abc488752015ad2ab75df1b0bcfba8f83e6524efb"
+    },
+    "stealth/java/com/sandbox/stealth/SandboxBinderWrapper.java": {
+      "role": "index",
+      "sha256": "0191160209f1408309c37feb7029ae209a67e0d2552a3f37cb67f332e731cd7e",
+      "size": 57453,
+      "normalized_sha256": "0191160209f1408309c37feb7029ae209a67e0d2552a3f37cb67f332e731cd7e"
+    },
+    "stealth/java/com/sandbox/stealth/StealthConfig.java": {
+      "role": "index",
+      "sha256": "876f8dc022c0c9371d8ff23bc00fffb3ae53019831e5e0c08f8d49af227e32dd",
+      "size": 18417,
+      "normalized_sha256": "876f8dc022c0c9371d8ff23bc00fffb3ae53019831e5e0c08f8d49af227e32dd"
+    },
+    "stealth/java/com/sandbox/stealth/SystemServerHook.java": {
+      "role": "index",
+      "sha256": "5df61bd7a157e06de6264bb925514476717b1728385f3f5c017004c72fb28c45",
+      "size": 11249,
+      "normalized_sha256": "5df61bd7a157e06de6264bb925514476717b1728385f3f5c017004c72fb28c45"
+    },
+    "stealth/jni/stealth_logic.hpp": {
+      "role": "index",
+      "sha256": "d28f2b93463e0cb3fa54ec8607fca981d96ee6e53a431bfc0140837a6472fb52",
+      "size": 26236,
+      "normalized_sha256": "d28f2b93463e0cb3fa54ec8607fca981d96ee6e53a431bfc0140837a6472fb52"
+    },
+    "stealth/jni/stealth_module.cpp": {
+      "role": "index",
+      "sha256": "8066e2aae3d06772f7f3ca225d7df767dfd153f53d110f8b4c4dea9024da173c",
+      "size": 40263,
+      "normalized_sha256": "8066e2aae3d06772f7f3ca225d7df767dfd153f53d110f8b4c4dea9024da173c"
+    },
+    "stealth/jni/zygisk.hpp": {
+      "role": "index",
+      "sha256": "fc6523882c0f8659b4fcd1e04ffb07d3a948090e5a8c08817af6e2b506a078d0",
+      "size": 15712,
+      "normalized_sha256": "fc6523882c0f8659b4fcd1e04ffb07d3a948090e5a8c08817af6e2b506a078d0"
+    },
+    "stealth/tests/StealthHookHostTest.java": {
+      "role": "observe",
+      "sha256": "2a4515f852ca4cf6df7c361045d91fad98ff9d4896042bb29d559db2ba6cad9b",
+      "size": 33379,
+      "normalized_sha256": "2a4515f852ca4cf6df7c361045d91fad98ff9d4896042bb29d559db2ba6cad9b"
+    },
+    "stealth/tests/stealth_logic_test.cpp": {
+      "role": "observe",
+      "sha256": "6e4ed8efe968b1b1b1afe7bd72384e104bb24a8d3c43e757cbe4b96d3346079b",
+      "size": 14387,
+      "normalized_sha256": "6e4ed8efe968b1b1b1afe7bd72384e104bb24a8d3c43e757cbe4b96d3346079b"
+    },
+    "tools/build_matrix.ps1": {
+      "role": "index",
+      "sha256": "68e896c97dc64cab51271d0c95f7c5baa830cceb6e448f6f7db77844b3d12a7e",
+      "size": 1035,
+      "normalized_sha256": "68e896c97dc64cab51271d0c95f7c5baa830cceb6e448f6f7db77844b3d12a7e"
+    },
+    "tools/build_matrix.py": {
+      "role": "index",
+      "sha256": "07c4be8cce4a515c40c53b0c06f946f4a92452678918aa6321e5330a429172ef",
+      "size": 8014,
+      "normalized_sha256": "07c4be8cce4a515c40c53b0c06f946f4a92452678918aa6321e5330a429172ef"
+    },
+    "tools/probe_device.ps1": {
+      "role": "index",
+      "sha256": "3c7a97698a2517ce79f828d21f35433994192eb70f387c6bd0620622f5441395",
+      "size": 10311,
+      "normalized_sha256": "3c7a97698a2517ce79f828d21f35433994192eb70f387c6bd0620622f5441395"
+    },
+    "tools/probe_device.sh": {
+      "role": "index",
+      "sha256": "66f1178d847caf9ca2a20a4b29bf19ae118f15a2261dd92b63e97275343fb080",
+      "size": 7970,
+      "normalized_sha256": "66f1178d847caf9ca2a20a4b29bf19ae118f15a2261dd92b63e97275343fb080"
+    },
+    "tools/select_variant.py": {
+      "role": "index",
+      "sha256": "f83dcc28ab165359e8e07cd7f047404766d71ff1e57a2eeeb29a632bd31a133a",
+      "size": 14163,
+      "normalized_sha256": "f83dcc28ab165359e8e07cd7f047404766d71ff1e57a2eeeb29a632bd31a133a"
+    },
+    "tools/test_packaging.py": {
+      "role": "observe",
+      "sha256": "ac1e5d382d908a72585a28060366000361695816d196d21242d77c5e0b938dd5",
+      "size": 3737,
+      "normalized_sha256": "ac1e5d382d908a72585a28060366000361695816d196d21242d77c5e0b938dd5"
+    },
+    "tools/test_privacy_leak.py": {
+      "role": "observe",
+      "sha256": "9cb4bd28569a32349f18b64703b9cc71cdbccf9f1d1d8afe8d3dd4c25164862b",
+      "size": 2016,
+      "normalized_sha256": "9cb4bd28569a32349f18b64703b9cc71cdbccf9f1d1d8afe8d3dd4c25164862b"
+    },
+    "tools/test_select_variant.py": {
+      "role": "observe",
+      "sha256": "cc1f2a93713e6ea0acf0bcdcae7ac621577ad965b24edfd14f794654001ef19d",
+      "size": 11666,
+      "normalized_sha256": "cc1f2a93713e6ea0acf0bcdcae7ac621577ad965b24edfd14f794654001ef19d"
+    },
+    "tools/verify_privacy_leak.py": {
+      "role": "index",
+      "sha256": "81c3d7fef6c8cc12c5db20d4f377e6cafbb667d3171f2d23997e04917be09a27",
+      "size": 4680,
+      "normalized_sha256": "81c3d7fef6c8cc12c5db20d4f377e6cafbb667d3171f2d23997e04917be09a27"
+    },
+    "verify/AndroidManifest.xml": {
+      "role": "index",
+      "sha256": "6a2ac05d178b063d354c261c736d53503637afd685997eb5719a8e073f00dfa0",
+      "size": 991,
+      "normalized_sha256": "6a2ac05d178b063d354c261c736d53503637afd685997eb5719a8e073f00dfa0"
+    },
+    "verify/IsolatedProbeService.java": {
+      "role": "index",
+      "sha256": "e7eeb71444a56f824f7c7c8ef201c25b6447963753ae0642508a588dfa00d1d6",
+      "size": 2291,
+      "normalized_sha256": "e7eeb71444a56f824f7c7c8ef201c25b6447963753ae0642508a588dfa00d1d6"
+    },
+    "verify/KeyMintAttestationProbe.java": {
+      "role": "index",
+      "sha256": "65a245dcdf6ad65af86ace9b8a5ae791279dbb529a779989bc4c88a3c56d2da4",
+      "size": 11955,
+      "normalized_sha256": "65a245dcdf6ad65af86ace9b8a5ae791279dbb529a779989bc4c88a3c56d2da4"
+    },
+    "verify/NetworkProbe.java": {
+      "role": "index",
+      "sha256": "7943b6f1ec4ca9d2e5b50d7d3ea75f3cc0dc6e6904d49ef076675b803154d760",
+      "size": 43919,
+      "normalized_sha256": "7943b6f1ec4ca9d2e5b50d7d3ea75f3cc0dc6e6904d49ef076675b803154d760"
+    },
+    "verify/ProcHygieneScanner.java": {
+      "role": "index",
+      "sha256": "3fcd94a82f2e5cffbd5d532c5f5e404363d670b4ba842de807e7c7a4e0107ddf",
+      "size": 11498,
+      "normalized_sha256": "3fcd94a82f2e5cffbd5d532c5f5e404363d670b4ba842de807e7c7a4e0107ddf"
+    },
+    "verify/build-probe.py": {
+      "role": "index",
+      "sha256": "5132567f23df79c5c51739c80cf0a73490da6d4ecf2a9233288d5f7dee13abb9",
+      "size": 8848,
+      "normalized_sha256": "5132567f23df79c5c51739c80cf0a73490da6d4ecf2a9233288d5f7dee13abb9"
+    }
+  },
+  "managed_scope": {
+    "version": "managed-scope-baseline/v1",
+    "policy_identity": "e0f548d87fe5462c412a1c54409871a60ddf2ae5c30609258ff8739fdfcc8e76",
+    "observe_change_policy": "review_required",
+    "budget_policy_identity": "15e9b37a6c57e9bf03c9df3d0d049eb5b9a7f5540f9d34960408114e2538a32d",
+    "budget_policy": {
+      "version": "cognition-budget-policy/v1",
+      "mode": "enforce",
+      "whole_index": {
+        "target_tokens": 200000,
+        "warning_tokens": 300000,
+        "max_tokens": 400000
+      },
+      "r": [
+        {
+          "min_c": 1,
+          "max_c": 4,
+          "target_tokens": 25,
+          "max_tokens": 50
+        },
+        {
+          "min_c": 5,
+          "max_c": 7,
+          "target_tokens": 45,
+          "max_tokens": 90
+        },
+        {
+          "min_c": 8,
+          "max_c": 8,
+          "target_tokens": 70,
+          "max_tokens": 140
+        },
+        {
+          "min_c": 9,
+          "max_c": 9,
+          "target_tokens": 90,
+          "max_tokens": 180
+        }
+      ],
+      "s": [
+        {
+          "min_c": 1,
+          "max_c": 4,
+          "target_tokens": 20,
+          "max_tokens": 40
+        },
+        {
+          "min_c": 5,
+          "max_c": 7,
+          "target_tokens": 40,
+          "max_tokens": 80
+        },
+        {
+          "min_c": 8,
+          "max_c": 8,
+          "target_tokens": 70,
+          "max_tokens": 140
+        },
+        {
+          "min_c": 9,
+          "max_c": 9,
+          "target_tokens": 100,
+          "max_tokens": 200
+        }
+      ]
+    },
+    "apply_authorization_mode": "auto"
+  }
+}

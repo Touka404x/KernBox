@@ -421,3 +421,100 @@ func TestV252FlushSandboxConnectionsParallel(t *testing.T) {
 	}
 }
 
+func TestV252AuditedDaemonRegressions(t *testing.T) {
+	// 1. OpReloadConfig preserves existing "allow" quic_udp443_mode when request omits it.
+	dir := t.TempDir()
+	pkgList := filepath.Join(dir, "packages.list")
+	if err := os.WriteFile(pkgList, []byte("com.sandbox.controller 10376 0 /data/user/0/com.sandbox.controller default 0 0\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	pol := testPolicy()
+	pol.Mode = contracts.ModeTProxy
+	pol.TProxyPort = contracts.DefaultTProxyPort
+	pol.TProxyMark = contracts.DefaultTProxyMark
+	d := &Daemon{
+		runner:           &v252RecorderRunner{},
+		policy:           pol,
+		policyLoaded:     true,
+		paused:           true,
+		workCfgDir:       dir,
+		packagesListPath: pkgList,
+	}
+	first := d.HandleRPC(context.Background(), contracts.RPCRequest{
+		ID:     "q-1",
+		Op:     contracts.OpReloadConfig,
+		Config: &contracts.RPCConfigOverrides{QuicUDP443Mode: "allow"},
+	})
+	if !first.OK {
+		t.Fatalf("initial OpReloadConfig failed: %+v", first)
+	}
+	second := d.HandleRPC(context.Background(), contracts.RPCRequest{
+		ID:     "q-2",
+		Op:     contracts.OpReloadConfig,
+		Config: &contracts.RPCConfigOverrides{LogLevel: "info"},
+	})
+	if !second.OK {
+		t.Fatalf("second OpReloadConfig failed: %+v", second)
+	}
+	if got := second.Data.(map[string]any)["quic_udp443_mode"]; got != "allow" {
+		t.Fatalf("expected omitted quic_udp443_mode to preserve 'allow', got %v", got)
+	}
+
+	// 2. OpLaunchApp in VPN mode must fail-closed (not launch) when reconcile leaves gate blocked.
+	vpnPol := testPolicy()
+	vpnPol.Mode = contracts.ModeVPN
+	vpnLaunchRunner := &v252RecorderRunner{}
+	dVPN := &Daemon{
+		runner:        vpnLaunchRunner,
+		policy:        vpnPol,
+		policyLoaded:  true,
+		paused:        true,
+		state:         StateBlockedLocked,
+		lastError:     "vpn missing",
+		reconcileCh:   make(chan reconcileReq, 1),
+		desiredStatePath: filepath.Join(dir, "desired.json"),
+	}
+	go func() {
+		r := <-dVPN.reconcileCh
+		dVPN.mu.Lock()
+		dVPN.state = StateBlockedLocked
+		dVPN.lastError = "vpn service inactive"
+		dVPN.mu.Unlock()
+		if r.reply != nil {
+			r.reply <- nil
+		}
+	}()
+	launchResp := dVPN.HandleRPC(context.Background(), contracts.RPCRequest{
+		ID:  "lvpn-1",
+		Op:  contracts.OpLaunchApp,
+		Pkg: "com.example.app",
+	})
+	if launchResp.OK || !strings.Contains(launchResp.Error, "vpn service inactive") {
+		t.Fatalf("expected VPN launch fail-closed error, got %+v", launchResp)
+	}
+	if got := vpnLaunchRunner.countPrefix("am start"); got != 0 {
+		t.Fatalf("must not invoke am start when VPN gate stayed closed, calls=%d", got)
+	}
+
+	// 3. HandleCtl("pause-sandbox") propagates reconcile errors instead of returning "paused", nil.
+	dPause := &Daemon{
+		runner:             &v252RecorderRunner{},
+		policy:             vpnPol,
+		policyLoaded:       true,
+		paused:             false,
+		reconcileCh:        make(chan reconcileReq, 1),
+		desiredStatePath:   filepath.Join(dir, "desired_pause.json"),
+		packagesListPath:   pkgList,
+		hibernatedPkgsPath: filepath.Join(dir, "hib_pause.json"),
+	}
+	go func() {
+		r := <-dPause.reconcileCh
+		if r.reply != nil {
+			r.reply <- errors.New("reconcile exploded")
+		}
+	}()
+	if _, err := dPause.HandleCtl(context.Background(), "pause-sandbox", nil); err == nil || !strings.Contains(err.Error(), "reconcile exploded") {
+		t.Fatalf("expected HandleCtl(pause-sandbox) to propagate reconcile error, got %v", err)
+	}
+}
+

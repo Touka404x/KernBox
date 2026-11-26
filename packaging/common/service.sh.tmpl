@@ -97,15 +97,15 @@ post_boot_alert() {
     if [ -f "$stamp" ]; then
         return 0
     fi
+    : > "$stamp" 2>/dev/null || true
     (
         local w=0
         while [ "$w" -lt 30 ] && [ "$(getprop sys.boot_completed 2>/dev/null || true)" != "1" ]; do
             sleep 2
             w=$((w + 1))
         done
-        if [ ! -f "$stamp" ]; then
-            : > "$stamp" 2>/dev/null || true
-            cmd notification post -S bigtext -t "KernBox 启动异常" "$tag" "$msg" >/dev/null 2>&1 || true
+        if ! cmd notification post -S bigtext -t "KernBox 启动异常" "$tag" "$msg" >/dev/null 2>&1; then
+            rm -f "$stamp" 2>/dev/null || true
         fi
     ) </dev/null >/dev/null 2>&1 9>&- &
 }
@@ -138,7 +138,7 @@ prepare_env() {
         chmod 0700 "$BROKER_BIN"
         if ! chcon u:object_r:sandbox_broker_exec:s0 "$BROKER_BIN" 2>/dev/null; then
             BROKER_SELINUX_OK=0
-            echo "warn: chcon sandbox_broker_exec failed; starting sandbox_guard in degraded mode" > "$GUARD_HOME/service.status"
+            echo "warn: chcon sandbox_broker_exec failed; starting sandbox_guard in degraded mode" >> "$GUARD_HOME/service.status"
             post_boot_alert "kernbox_broker_selinux" "sandbox_broker SELinux 标签配置失败，控制端 App 将无法连接"
         fi
     else
@@ -185,8 +185,10 @@ if [ "${1:-}" = "restart" ] || [ "${1:-}" = "--restart" ]; then
 fi
 
 if [ "${1:-}" != "--daemon" ]; then
+    mkdir -p "$GUARD_HOME"
+    : > "$GUARD_HOME/service.status" 2>/dev/null || true
     prepare_env || exit 1
-    "$GUARD_BIN" ctl boot > "$GUARD_HOME/service.status" 2>&1 || true
+    "$GUARD_BIN" ctl boot >> "$GUARD_HOME/service.status" 2>&1 || true
 
     if [ -n "$BB" ] && [ -x "$BB" ]; then
         ASH_STANDALONE=1 nohup "$BB" setsid "$BB" sh "$MODDIR/service.sh" --daemon </dev/null >/dev/null 2>&1 &
@@ -245,8 +247,12 @@ echo "$$" > "$GUARD_HOME/service.pid"
     while [ "$bn" -lt 120 ] && [ ! -e "$MODDIR/disable" ] && [ ! -e "$MODDIR/remove" ]; do
         protect_oom_pidfile "$GUARD_HOME/guard.pid" "$GUARD_BIN"
         protect_oom_pidfile "$GUARD_HOME/broker-svc.pid" "$BROKER_BIN"
+        local custom_proxy_dir=""
+        if [ -r "$GUARD_HOME/policy.json" ]; then
+            custom_proxy_dir=$(sed -n 's/.*"proxy_base_dir"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$GUARD_HOME/policy.json" 2>/dev/null | head -n 1)
+        fi
         protect_oom_pidfile "/data/adb/sandbox_proxy/core.pid" "/data/adb/sandbox_proxy/mihomo"
-        protect_oom_pidfile "/data/adb/legend_proxy/core.pid" "/data/adb/legend_proxy/mihomo"
+        [ -n "$custom_proxy_dir" ] && protect_oom_pidfile "$custom_proxy_dir/core.pid" "$custom_proxy_dir/mihomo"
         if [ "$boot_cleared" = 0 ] && [ "$(getprop sys.boot_completed 2>/dev/null || true)" = "1" ]; then
             tmp_tries="$GUARD_HOME/stealth_boot_tries.tmp.$$"
             echo 0 > "$tmp_tries"
@@ -272,7 +278,7 @@ echo "$$" > "$GUARD_HOME/service.pid"
                 fi
             fi
             if [ -f "$GUARD_HOME/guard.pid" ] && [ -f "$GUARD_HOME/broker-svc.pid" ]; then
-                if [ -f "/data/adb/sandbox_proxy/core.pid" ] || [ -f "/data/adb/legend_proxy/core.pid" ] || [ "$post_boot_ticks" -ge 15 ]; then
+                if [ -f "/data/adb/sandbox_proxy/core.pid" ] || { [ -n "$custom_proxy_dir" ] && [ -f "$custom_proxy_dir/core.pid" ]; } || [ "$post_boot_ticks" -ge 15 ]; then
                     break
                 fi
             fi
@@ -390,17 +396,21 @@ supervise_proc() {
         fi
 
         log_sup "$name exited rc=$rc after ${elapsed}s; respawning in ${backoff}s"
-        sleep "$backoff"
+        local sl=0
+        while [ "$sl" -lt "$backoff" ] && [ "$STOPPING" = 0 ] && [ ! -e "$MODDIR/disable" ] && [ ! -e "$MODDIR/remove" ]; do
+            sleep 1
+            sl=$((sl + 1))
+        done
         backoff=$((backoff * 2))
         [ "$backoff" -gt 30 ] && backoff=30
     done
 }
 
-supervise_proc "guard" "$GUARD_BIN" "supervise" "$GUARD_HOME/guard-svc.pid" "" &
+supervise_proc "guard" "$GUARD_BIN" "supervise" "$GUARD_HOME/guard-svc.pid" "" 9>&- &
 GUARD_SUP_PID=$!
 
 if [ "$BROKER_SELINUX_OK" = 1 ]; then
-    supervise_proc "broker" "$BROKER_BIN" "" "$GUARD_HOME/broker-svc.pid" "/dev/socket/sandbox_priv/guard.sock" &
+    supervise_proc "broker" "$BROKER_BIN" "" "$GUARD_HOME/broker-svc.pid" "/dev/socket/sandbox_priv/guard.sock" 9>&- &
     BROKER_SUP_PID=$!
     wait "$GUARD_SUP_PID" "$BROKER_SUP_PID"
 else

@@ -517,8 +517,19 @@ func RemoveBatch(current Save, hook GateHook) string {
 
 func GateInstalled(current Save, hook GateHook, expected []string) bool {
 	rules := current.Rules[hook.Builtin]
-	idx := hookIndex(rules, hook)
-	if len(rules) <= idx || rules[idx] != "-j "+hook.Chain {
+	remaining := make([]string, 0, len(rules))
+	foundIdx := -1
+	for _, r := range rules {
+		if jumpTarget(r) == hook.Chain {
+			if foundIdx == -1 {
+				foundIdx = len(remaining)
+			}
+			continue
+		}
+		remaining = append(remaining, r)
+	}
+	idx := hookIndex(remaining, hook)
+	if foundIdx != idx || len(rules) <= idx || rules[idx] != "-j "+hook.Chain {
 		return false
 	}
 	jumps := 0

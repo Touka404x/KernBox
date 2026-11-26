@@ -26,9 +26,17 @@ verify/__pycache__/
 local.properties
 signing.properties
 
+# AOCI local runtime state & machine-local host MCP configs
+.aoci/*
+!.aoci/config.json
+!.aoci/baseline.json
+!.aoci/curation.json
+.mcp.json
+.claude/
+.codex/
+opencode.json
+
 # Legacy / local-only workspace directories preserved outside oss-main tracking
-.aoci/
-aoci*.txt
 build-history/
 lean-staging/
 native-out/

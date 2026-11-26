@@ -34,6 +34,11 @@ var baseProtectedSandboxPackages = map[string]bool{
 	"com.google.android.permissioncontroller":   true,
 	"com.android.packageinstaller":              true,
 	"com.google.android.packageinstaller":       true,
+	"com.google.android.ext.services":           true,
+	"com.android.ext.services":                  true,
+	"com.android.remoteprovisioner":             true,
+	"com.lbe.security.miui":                     true,
+	"com.miui.securitycore":                     true,
 	"com.android.providers.media.module":        true,
 	"com.android.providers.media":               true,
 	"com.android.documentsui":                   true,
@@ -207,23 +212,34 @@ func RestoreSandboxBloat(ctx context.Context, r Runner, userID int, statePath st
 	}
 
 	u := strconv.Itoa(userID)
-	var reEnabled []string
+	wasRecorded := len(st.Packages) > 0
+	var reEnabled, failedPkgs []string
 	for _, pkg := range targets {
 		if !contracts.ValidPackageName(pkg) {
 			continue
 		}
 		if _, err := r.Run(ctx, 3*time.Second, "", "pm", "enable", "--user", u, pkg); err == nil {
 			reEnabled = append(reEnabled, pkg)
+		} else if wasRecorded {
+			failedPkgs = append(failedPkgs, pkg)
 		}
+	}
+	var persistPkgs []string
+	if len(failedPkgs) > 0 {
+		persistPkgs = failedPkgs
 	}
 	_ = writePrunedState(statePath, PrunedState{
 		UserID:    userID,
-		Packages:  nil,
+		Packages:  persistPkgs,
 		UpdatedAt: time.Now().UTC().Format(time.RFC3339),
 	})
-	return BloatActionResult{
+	res := BloatActionResult{
 		UserID:   userID,
 		Packages: reEnabled,
 		Mode:     "restore",
-	}, nil
+	}
+	if wasRecorded && len(failedPkgs) > 0 && len(reEnabled) == 0 {
+		return res, fmt.Errorf("failed to re-enable pruned packages: %s", strings.Join(failedPkgs, ","))
+	}
+	return res, nil
 }

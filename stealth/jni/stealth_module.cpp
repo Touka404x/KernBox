@@ -608,6 +608,61 @@ void clearJniException(JNIEnv* env) {
     }
 }
 
+jstring newJniStringSafe(JNIEnv* env, const std::string& s) {
+    if (!env) return nullptr;
+    bool ascii_safe = true;
+    for (unsigned char c : s) {
+        if (c == 0 || c >= 0x80) {
+            ascii_safe = false;
+            break;
+        }
+    }
+    if (ascii_safe) {
+        jstring out = env->NewStringUTF(s.c_str());
+        if (!out || env->ExceptionCheck()) {
+            clearJniException(env);
+            return nullptr;
+        }
+        return out;
+    }
+    jbyteArray arr = env->NewByteArray(static_cast<jsize>(s.size()));
+    if (!arr || env->ExceptionCheck()) {
+        clearJniException(env);
+        return nullptr;
+    }
+    env->SetByteArrayRegion(arr, 0, static_cast<jsize>(s.size()),
+                            reinterpret_cast<const jbyte*>(s.data()));
+    if (env->ExceptionCheck()) {
+        clearJniException(env);
+        env->DeleteLocalRef(arr);
+        return nullptr;
+    }
+    jclass str_cls = env->FindClass("java/lang/String");
+    if (!str_cls || env->ExceptionCheck()) {
+        clearJniException(env);
+        env->DeleteLocalRef(arr);
+        return nullptr;
+    }
+    jmethodID ctor = env->GetMethodID(str_cls, "<init>", "([BLjava/lang/String;)V");
+    jstring utf8 = env->NewStringUTF("UTF-8");
+    if (!ctor || !utf8 || env->ExceptionCheck()) {
+        clearJniException(env);
+        if (utf8) env->DeleteLocalRef(utf8);
+        env->DeleteLocalRef(str_cls);
+        env->DeleteLocalRef(arr);
+        return nullptr;
+    }
+    auto res = static_cast<jstring>(env->NewObject(str_cls, ctor, arr, utf8));
+    env->DeleteLocalRef(utf8);
+    env->DeleteLocalRef(str_cls);
+    env->DeleteLocalRef(arr);
+    if (!res || env->ExceptionCheck()) {
+        clearJniException(env);
+        return nullptr;
+    }
+    return res;
+}
+
 void injectDexAndInstallSystemHook(JNIEnv* env, const char* process_name) {
     if (!env || g_cfg_json.empty()) return;
     if (env->PushLocalFrame(32) != 0) {
@@ -626,33 +681,40 @@ void injectDexAndInstallSystemHook(JNIEnv* env, const char* process_name) {
     if (!dex_bytes) { clearJniException(env); env->PopLocalFrame(nullptr); return; }
     env->SetByteArrayRegion(dex_bytes, 0, static_cast<jsize>(kStealthAgentDexLen),
                             reinterpret_cast<const jbyte*>(kStealthAgentDex));
+    if (env->ExceptionCheck()) { clearJniException(env); env->PopLocalFrame(nullptr); return; }
 
     jclass bb_cls = env->FindClass("java/nio/ByteBuffer");
-    if (!bb_cls) { clearJniException(env); env->PopLocalFrame(nullptr); return; }
+    if (!bb_cls || env->ExceptionCheck()) { clearJniException(env); env->PopLocalFrame(nullptr); return; }
     jmethodID wrap_mid = env->GetStaticMethodID(bb_cls, "wrap", "([B)Ljava/nio/ByteBuffer;");
-    if (!wrap_mid) { clearJniException(env); env->PopLocalFrame(nullptr); return; }
+    if (!wrap_mid || env->ExceptionCheck()) { clearJniException(env); env->PopLocalFrame(nullptr); return; }
     jobject dex_buf = env->CallStaticObjectMethod(bb_cls, wrap_mid, dex_bytes);
     if (env->ExceptionCheck() || !dex_buf) { clearJniException(env); env->PopLocalFrame(nullptr); return; }
 
     jclass loader_cls = env->FindClass("dalvik/system/InMemoryDexClassLoader");
-    if (!loader_cls) { clearJniException(env); env->PopLocalFrame(nullptr); return; }
+    if (!loader_cls || env->ExceptionCheck()) { clearJniException(env); env->PopLocalFrame(nullptr); return; }
     jmethodID ctor_mid = env->GetMethodID(loader_cls, "<init>", "(Ljava/nio/ByteBuffer;Ljava/lang/ClassLoader;)V");
-    if (!ctor_mid) { clearJniException(env); env->PopLocalFrame(nullptr); return; }
+    if (!ctor_mid || env->ExceptionCheck()) { clearJniException(env); env->PopLocalFrame(nullptr); return; }
     jobject mem_cl = env->NewObject(loader_cls, ctor_mid, dex_buf, parent_cl);
     if (env->ExceptionCheck() || !mem_cl) { clearJniException(env); env->PopLocalFrame(nullptr); return; }
 
     jmethodID load_mid = env->GetMethodID(cl_cls, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;");
-    if (!load_mid) { clearJniException(env); env->PopLocalFrame(nullptr); return; }
-    jstring hook_name = env->NewStringUTF("com.sandbox.stealth.SystemServerHook");
+    if (!load_mid || env->ExceptionCheck()) { clearJniException(env); env->PopLocalFrame(nullptr); return; }
+    jstring hook_name = newJniStringSafe(env, "com.sandbox.stealth.SystemServerHook");
+    if (!hook_name) { clearJniException(env); env->PopLocalFrame(nullptr); return; }
     auto hook_cls = static_cast<jclass>(env->CallObjectMethod(mem_cl, load_mid, hook_name));
     if (env->ExceptionCheck() || !hook_cls) { clearJniException(env); env->PopLocalFrame(nullptr); return; }
 
     jmethodID install_mid = env->GetStaticMethodID(
         hook_cls, "install", "(Ljava/lang/String;Ljava/lang/String;)Z");
-    if (!install_mid) { clearJniException(env); env->PopLocalFrame(nullptr); return; }
+    if (!install_mid || env->ExceptionCheck()) { clearJniException(env); env->PopLocalFrame(nullptr); return; }
 
-    jstring json_str = env->NewStringUTF(g_cfg_json.c_str());
-    jstring proc_str = env->NewStringUTF(process_name);
+    jstring json_str = newJniStringSafe(env, g_cfg_json);
+    jstring proc_str = newJniStringSafe(env, process_name ? process_name : "");
+    if (!json_str || !proc_str || env->ExceptionCheck()) {
+        clearJniException(env);
+        env->PopLocalFrame(nullptr);
+        return;
+    }
     jboolean ok = env->CallStaticBooleanMethod(hook_cls, install_mid, json_str, proc_str);
     if (env->ExceptionCheck()) {
         clearJniException(env);
@@ -673,28 +735,36 @@ void applyJavaTimezoneAndLocale(JNIEnv* env, const stealth::StealthConfig& cfg) 
 
     if (cfg.spoof_timezone && !cfg.timezone.empty()) {
         jclass tz_cls = env->FindClass("java/util/TimeZone");
-        if (tz_cls) {
+        if (tz_cls && !env->ExceptionCheck()) {
             jmethodID get_tz = env->GetStaticMethodID(tz_cls, "getTimeZone", "(Ljava/lang/String;)Ljava/util/TimeZone;");
-            jmethodID set_tz = env->GetStaticMethodID(tz_cls, "setDefault", "(Ljava/util/TimeZone;)V");
-            if (get_tz && set_tz) {
-                jstring tz_id = env->NewStringUTF(cfg.timezone.c_str());
-                jobject tz_obj = env->CallStaticObjectMethod(tz_cls, get_tz, tz_id);
-                if (!env->ExceptionCheck() && tz_obj) {
-                    env->CallStaticVoidMethod(tz_cls, set_tz, tz_obj);
+            if (get_tz && !env->ExceptionCheck()) {
+                jmethodID set_tz = env->GetStaticMethodID(tz_cls, "setDefault", "(Ljava/util/TimeZone;)V");
+                if (set_tz && !env->ExceptionCheck()) {
+                    jstring tz_id = newJniStringSafe(env, cfg.timezone);
+                    if (tz_id) {
+                        jobject tz_obj = env->CallStaticObjectMethod(tz_cls, get_tz, tz_id);
+                        if (!env->ExceptionCheck() && tz_obj) {
+                            env->CallStaticVoidMethod(tz_cls, set_tz, tz_obj);
+                        }
+                    }
                 }
             }
         }
         clearJniException(env);
 
         jclass icu_tz_cls = env->FindClass("android/icu/util/TimeZone");
-        if (icu_tz_cls) {
+        if (icu_tz_cls && !env->ExceptionCheck()) {
             jmethodID get_icu_tz = env->GetStaticMethodID(icu_tz_cls, "getTimeZone", "(Ljava/lang/String;)Landroid/icu/util/TimeZone;");
-            jmethodID set_icu_tz = env->GetStaticMethodID(icu_tz_cls, "setDefault", "(Landroid/icu/util/TimeZone;)V");
-            if (get_icu_tz && set_icu_tz) {
-                jstring tz_id = env->NewStringUTF(cfg.timezone.c_str());
-                jobject tz_obj = env->CallStaticObjectMethod(icu_tz_cls, get_icu_tz, tz_id);
-                if (!env->ExceptionCheck() && tz_obj) {
-                    env->CallStaticVoidMethod(icu_tz_cls, set_icu_tz, tz_obj);
+            if (get_icu_tz && !env->ExceptionCheck()) {
+                jmethodID set_icu_tz = env->GetStaticMethodID(icu_tz_cls, "setDefault", "(Landroid/icu/util/TimeZone;)V");
+                if (set_icu_tz && !env->ExceptionCheck()) {
+                    jstring tz_id = newJniStringSafe(env, cfg.timezone);
+                    if (tz_id) {
+                        jobject tz_obj = env->CallStaticObjectMethod(icu_tz_cls, get_icu_tz, tz_id);
+                        if (!env->ExceptionCheck() && tz_obj) {
+                            env->CallStaticVoidMethod(icu_tz_cls, set_icu_tz, tz_obj);
+                        }
+                    }
                 }
             }
         }
@@ -703,42 +773,54 @@ void applyJavaTimezoneAndLocale(JNIEnv* env, const stealth::StealthConfig& cfg) 
 
     if (cfg.spoof_locale && !cfg.locale.empty()) {
         jclass loc_cls = env->FindClass("java/util/Locale");
-        if (loc_cls) {
+        if (loc_cls && !env->ExceptionCheck()) {
             jmethodID for_tag = env->GetStaticMethodID(loc_cls, "forLanguageTag", "(Ljava/lang/String;)Ljava/util/Locale;");
-            jmethodID set_def = env->GetStaticMethodID(loc_cls, "setDefault", "(Ljava/util/Locale;)V");
-            if (for_tag && set_def) {
-                jstring tag = env->NewStringUTF(cfg.locale.c_str());
-                jobject loc_obj = env->CallStaticObjectMethod(loc_cls, for_tag, tag);
-                if (!env->ExceptionCheck() && loc_obj) {
-                    env->CallStaticVoidMethod(loc_cls, set_def, loc_obj);
+            if (for_tag && !env->ExceptionCheck()) {
+                jmethodID set_def = env->GetStaticMethodID(loc_cls, "setDefault", "(Ljava/util/Locale;)V");
+                if (set_def && !env->ExceptionCheck()) {
+                    jstring tag = newJniStringSafe(env, cfg.locale);
+                    if (tag) {
+                        jobject loc_obj = env->CallStaticObjectMethod(loc_cls, for_tag, tag);
+                        if (!env->ExceptionCheck() && loc_obj) {
+                            env->CallStaticVoidMethod(loc_cls, set_def, loc_obj);
+                        }
+                    }
                 }
             }
         }
         clearJniException(env);
 
         jclass uloc_cls = env->FindClass("android/icu/util/ULocale");
-        if (uloc_cls) {
+        if (uloc_cls && !env->ExceptionCheck()) {
             jmethodID for_utag = env->GetStaticMethodID(uloc_cls, "forLanguageTag", "(Ljava/lang/String;)Landroid/icu/util/ULocale;");
-            jmethodID set_udef = env->GetStaticMethodID(uloc_cls, "setDefault", "(Landroid/icu/util/ULocale;)V");
-            if (for_utag && set_udef) {
-                jstring tag = env->NewStringUTF(cfg.locale.c_str());
-                jobject uloc_obj = env->CallStaticObjectMethod(uloc_cls, for_utag, tag);
-                if (!env->ExceptionCheck() && uloc_obj) {
-                    env->CallStaticVoidMethod(uloc_cls, set_udef, uloc_obj);
+            if (for_utag && !env->ExceptionCheck()) {
+                jmethodID set_udef = env->GetStaticMethodID(uloc_cls, "setDefault", "(Landroid/icu/util/ULocale;)V");
+                if (set_udef && !env->ExceptionCheck()) {
+                    jstring tag = newJniStringSafe(env, cfg.locale);
+                    if (tag) {
+                        jobject uloc_obj = env->CallStaticObjectMethod(uloc_cls, for_utag, tag);
+                        if (!env->ExceptionCheck() && uloc_obj) {
+                            env->CallStaticVoidMethod(uloc_cls, set_udef, uloc_obj);
+                        }
+                    }
                 }
             }
         }
         clearJniException(env);
 
         jclass ll_cls = env->FindClass("android/os/LocaleList");
-        if (ll_cls) {
+        if (ll_cls && !env->ExceptionCheck()) {
             jmethodID for_tags = env->GetStaticMethodID(ll_cls, "forLanguageTags", "(Ljava/lang/String;)Landroid/os/LocaleList;");
-            jmethodID set_ll = env->GetStaticMethodID(ll_cls, "setDefault", "(Landroid/os/LocaleList;)V");
-            if (for_tags && set_ll) {
-                jstring tags = env->NewStringUTF(cfg.locale.c_str());
-                jobject ll_obj = env->CallStaticObjectMethod(ll_cls, for_tags, tags);
-                if (!env->ExceptionCheck() && ll_obj) {
-                    env->CallStaticVoidMethod(ll_cls, set_ll, ll_obj);
+            if (for_tags && !env->ExceptionCheck()) {
+                jmethodID set_ll = env->GetStaticMethodID(ll_cls, "setDefault", "(Landroid/os/LocaleList;)V");
+                if (set_ll && !env->ExceptionCheck()) {
+                    jstring tags = newJniStringSafe(env, cfg.locale);
+                    if (tags) {
+                        jobject ll_obj = env->CallStaticObjectMethod(ll_cls, for_tags, tags);
+                        if (!env->ExceptionCheck() && ll_obj) {
+                            env->CallStaticVoidMethod(ll_cls, set_ll, ll_obj);
+                        }
+                    }
                 }
             }
         }
@@ -749,15 +831,19 @@ void applyJavaTimezoneAndLocale(JNIEnv* env, const stealth::StealthConfig& cfg) 
         std::string country;
         stealth::detail::splitLocaleTag(cfg.locale, cfg.device_region, lang, country);
         jclass sys_cls = env->FindClass("java/lang/System");
-        if (sys_cls) {
+        if (sys_cls && !env->ExceptionCheck()) {
             jmethodID set_prop = env->GetStaticMethodID(
                 sys_cls, "setProperty", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;");
-            if (set_prop) {
+            if (set_prop && !env->ExceptionCheck()) {
                 auto setSysProp = [&](const char* k, const std::string& v) {
                     if (v.empty()) return;
-                    jstring jk = env->NewStringUTF(k);
-                    jstring jv = env->NewStringUTF(v.c_str());
-                    jobject prev = env->CallStaticObjectMethod(sys_cls, set_prop, jk, jv);
+                    jstring jk = newJniStringSafe(env, k);
+                    jstring jv = newJniStringSafe(env, v);
+                    jobject prev = nullptr;
+                    if (jk && jv && !env->ExceptionCheck()) {
+                        prev = env->CallStaticObjectMethod(sys_cls, set_prop, jk, jv);
+                    }
+                    clearJniException(env);
                     if (prev) env->DeleteLocalRef(prev);
                     if (jk) env->DeleteLocalRef(jk);
                     if (jv) env->DeleteLocalRef(jv);
@@ -809,6 +895,13 @@ public:
         const char* raw_name = nullptr;
         if (args->nice_name != nullptr) {
             raw_name = env_->GetStringUTFChars(args->nice_name, nullptr);
+            if (!raw_name || env_->ExceptionCheck()) {
+                clearJniException(env_);
+                if (raw_name != nullptr) {
+                    env_->ReleaseStringUTFChars(args->nice_name, raw_name);
+                    raw_name = nullptr;
+                }
+            }
         }
         std::string proc_name = raw_name ? raw_name : "";
         if (raw_name != nullptr) {

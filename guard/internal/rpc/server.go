@@ -251,7 +251,12 @@ func handleGuardConn(parent context.Context, conn net.Conn, handler Handler) {
 		writeResp(conn, contracts.RPCResponse{OK: false, Error: err.Error(), Data: map[string]any{}})
 		return
 	}
-	cctx, cancel := context.WithTimeout(parent, 30*time.Second)
+	reqTimeout := 30 * time.Second
+	if req.Op == contracts.OpInstallApk {
+		reqTimeout = 120 * time.Second
+		_ = conn.SetDeadline(time.Now().Add(125 * time.Second))
+	}
+	cctx, cancel := context.WithTimeout(parent, reqTimeout)
 	defer cancel()
 	resp := handler.HandleRPC(cctx, req)
 	if resp.ID == "" {
@@ -318,7 +323,12 @@ func ServeRootCtl(ctx context.Context, sockPath string, handler CtlHandler) (fun
 						_ = json.NewEncoder(c).Encode(CtlResponse{OK: false, Error: err.Error()})
 						return
 					}
-					cctx, cancel := context.WithTimeout(ctx, 25*time.Second)
+					ctlTimeout := 25 * time.Second
+					if req.Cmd == "install-apk" || req.Cmd == "boot" {
+						ctlTimeout = 120 * time.Second
+						_ = c.SetDeadline(time.Now().Add(125 * time.Second))
+					}
+					cctx, cancel := context.WithTimeout(ctx, ctlTimeout)
 					defer cancel()
 					out, err := handler.HandleCtl(cctx, req.Cmd, req.Args)
 					if err != nil {
@@ -344,7 +354,11 @@ func SendRootCtl(sockPath, cmd string, args ...string) (string, error) {
 		return "", err
 	}
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
+	deadline := 30 * time.Second
+	if cmd == "install-apk" || cmd == "boot" {
+		deadline = 125 * time.Second
+	}
+	_ = conn.SetDeadline(time.Now().Add(deadline))
 	b, err := json.Marshal(CtlRequest{Cmd: cmd, Args: args})
 	if err != nil {
 		return "", err

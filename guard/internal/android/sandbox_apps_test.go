@@ -54,13 +54,14 @@ func TestStopSandboxAppsExcludesBridgePackage(t *testing.T) {
 		t.Fatalf("expected >=5 stopped packages, got %d", stopped)
 	}
 	joined := strings.Join(r.calls, "\n")
-	if strings.Contains(joined, "am force-stop --user 10 "+contracts.DefaultWorkPackage) {
-		t.Fatalf("must exclude bridge package from force-stop, got:\n%s", joined)
+	if strings.Contains(joined, "am stop-app --user 10 "+contracts.DefaultWorkPackage) ||
+		strings.Contains(joined, "am force-stop --user 10 "+contracts.DefaultWorkPackage) {
+		t.Fatalf("must exclude bridge package from stop-app/force-stop, got:\n%s", joined)
 	}
-	if !strings.Contains(joined, "am force-stop --user 10 com.google.android.apps.bard") ||
-		!strings.Contains(joined, "am force-stop --user 10 com.example.jp") ||
-		!strings.Contains(joined, "am force-stop --user 10 com.android.vending") {
-		t.Fatalf("expected force-stop for Google & user apps, got:\n%s", joined)
+	if !strings.Contains(joined, "am stop-app --user 10 com.google.android.apps.bard") ||
+		!strings.Contains(joined, "am stop-app --user 10 com.example.jp") ||
+		!strings.Contains(joined, "am stop-app --user 10 com.android.vending") {
+		t.Fatalf("expected stop-app for Google & user apps, got:\n%s", joined)
 	}
 }
 

@@ -128,6 +128,8 @@ type Daemon struct {
 	appliedLockPath    string
 
 	mu                 sync.Mutex
+	stealthMu          sync.Mutex
+	nfMu               sync.Mutex
 	policy             contracts.Policy
 	policyLoaded       bool
 	cachedID           *android.VerifiedIdentity
@@ -625,11 +627,20 @@ func (d *Daemon) applyPolicyNetfilterLock(p contracts.Policy) {
 	if d.nf == nil {
 		return
 	}
+	d.nfMu.Lock()
+	defer d.nfMu.Unlock()
 	if d.nf.LockPath == "" || d.nf.LockPath == contracts.SharedLockPath || d.nf.LockPath == d.appliedLockPath {
 		target := p.EffectiveNetfilterLockPath()
 		d.nf.LockPath = target
 		d.appliedLockPath = target
 	}
+}
+
+func (d *Daemon) getWatchers() *InotifyWatcher {
+	d.mu.Lock()
+	w := d.watchers
+	d.mu.Unlock()
+	return w
 }
 
 func (d *Daemon) writeExemption(ex contracts.ExemptionV1) error {
@@ -801,22 +812,31 @@ func (d *Daemon) Supervise() int {
 		d.log.Printf("StartInotifyWatcher: %v", err)
 		return 1
 	}
-	d.watchers = ino
 	d.mu.Lock()
+	d.watchers = ino
 	cid := d.cachedID
+	loadedInit := d.policyLoaded
+	pausedInit := d.paused
+	polInit := d.policy
 	if d.timerRefreshCh == nil {
 		d.timerRefreshCh = make(chan struct{}, 1)
 	}
 	timerRefresh := d.timerRefreshCh
 	d.mu.Unlock()
+	if loadedInit && d.sandboxAckPath == "" {
+		ino.EnsureProxyBaseWatch(filepath.Dir(polInit.EffectiveProxyAckPath()))
+	}
 	if cid != nil {
-		pkg := contracts.DefaultWorkPackage
-		d.mu.Lock()
-		if d.policyLoaded {
-			pkg = d.policy.EffectiveCallerPackage()
+		pkg := polInit.EffectiveCallerPackage()
+		if !loadedInit {
+			pkg = contracts.DefaultWorkPackage
 		}
-		d.mu.Unlock()
 		ino.EnsureWorkFilesWatch(cid.UserID, cid.ClientUID, pkg)
+	}
+	if loadedInit && !pausedInit {
+		if rerr := d.reconcileOnce(ctx, reconcileReq{}); rerr != nil {
+			d.log.Printf("post-watch reconcile: %v", rerr)
+		}
 	}
 	defer ino.Close()
 
@@ -871,6 +891,8 @@ func (d *Daemon) Supervise() int {
 	armTimers := func() {
 		d.mu.Lock()
 		ackDead := d.ackWaitDeadlineNs
+		ackBlocked := d.ackWaitBlocked
+		ackBlockedAt := d.ackWaitBlockedAt
 		fence := d.fence
 		nextKick := d.kickNextAt
 		graceUntil := d.switchGraceUntilNs
@@ -885,6 +907,12 @@ func (d *Daemon) Supervise() int {
 		nowNs := d.nowMonoNs()
 		if ackDead > 0 {
 			rem := time.Duration(ackDead - nowNs)
+			if rem < time.Millisecond {
+				rem = time.Millisecond
+			}
+			resetTimer(&ackT, &ackTimer, rem)
+		} else if ackBlocked && !ackBlockedAt.IsZero() && loadedNow && !pausedNow {
+			rem := time.Until(ackBlockedAt.Add(10 * time.Second))
 			if rem < time.Millisecond {
 				rem = time.Millisecond
 			}
@@ -955,6 +983,7 @@ func (d *Daemon) Supervise() int {
 			return 0
 		case err := <-ch.Fail:
 			d.log.Printf("watcher fail: %v", err)
+			d.closeGatesOnShutdown(ctx)
 			return 1
 		case <-ch.RouteWake:
 			if routeDebounce == nil {
@@ -1016,7 +1045,7 @@ func (d *Daemon) Supervise() int {
 			armTimers()
 		case <-ackTimer:
 			ackTimer = nil
-			_ = d.reconcileOnce(ctx, reconcileReq{})
+			_ = d.reconcileOnce(ctx, reconcileReq{clearAckBlock: d.shouldClearAckBlockOnWake()})
 			armTimers()
 		case <-fenceTimer:
 			fenceTimer = nil
@@ -1135,8 +1164,8 @@ func (d *Daemon) reconcileOnce(ctx context.Context, req reconcileReq) error {
 		d.mu.Unlock()
 		return nil
 	}
-	if d.watchers != nil && d.sandboxAckPath == "" {
-		d.watchers.EnsureProxyBaseWatch(filepath.Dir(policy.EffectiveProxyAckPath()))
+	if w := d.getWatchers(); w != nil && d.sandboxAckPath == "" {
+		w.EnsureProxyBaseWatch(filepath.Dir(policy.EffectiveProxyAckPath()))
 	}
 
 	if req.syncHide {
@@ -1166,8 +1195,8 @@ func (d *Daemon) reconcileOnce(ctx context.Context, req reconcileReq) error {
 			d.mu.Lock()
 			d.cachedID = &verified
 			d.mu.Unlock()
-			if d.watchers != nil {
-				d.watchers.EnsureWorkFilesWatch(verified.UserID, verified.ClientUID, policy.EffectiveCallerPackage())
+			if w := d.getWatchers(); w != nil {
+				w.EnsureWorkFilesWatch(verified.UserID, verified.ClientUID, policy.EffectiveCallerPackage())
 			}
 			_ = android.EnsureWorkPermissions(ctx, d.runner, verified.UserID, policy.EffectiveCallerPackage())
 			if d.stealthConfigPath != "" || runtime.GOOS == "linux" {
@@ -1250,7 +1279,9 @@ func (d *Daemon) reconcileOnce(ctx context.Context, req reconcileReq) error {
 		}
 	}
 
+	d.nfMu.Lock()
 	extCap, err := d.nf.DetectProxyCapture(ctx, policy.ProxySkipPrefix)
+	d.nfMu.Unlock()
 	if err != nil {
 		d.log.Printf("detect proxy capture: %v", err)
 		if policy.ProxySkipPrefix != "" {
@@ -1288,6 +1319,8 @@ func (d *Daemon) reconcileOnce(ctx context.Context, req reconcileReq) error {
 			dec.OpenGate = false
 			dec.ArmRawDrop = extCap
 			dec.NextState = StateBlockedLocked
+			dec.StartAckWait = false
+			dec.ClearAckDeadline = true
 		} else {
 			d.mu.Lock()
 			exCopy := dec.NewExemption
@@ -1336,9 +1369,11 @@ func (d *Daemon) reconcileOnce(ctx context.Context, req reconcileReq) error {
 	}
 
 	appliedOK := true
-	if err := d.nf.ApplyOrVerify(ctx, gateSpec, false); err != nil {
+	d.nfMu.Lock()
+	applyErr := d.nf.ApplyOrVerify(ctx, gateSpec, false)
+	if applyErr != nil {
 		if d.log != nil {
-			d.log.Printf("netfilter apply failed: %v", err)
+			d.log.Printf("netfilter apply failed: %v", applyErr)
 		}
 		// Attempt safe closed gate fallback (preserving RawDrop arming if external proxy capture is active).
 		gateSpec.Open = false
@@ -1347,9 +1382,14 @@ func (d *Daemon) reconcileOnce(ctx context.Context, req reconcileReq) error {
 		if ferr := d.nf.ApplyOrVerify(ctx, gateSpec, false); ferr != nil {
 			appliedOK = false
 		}
+	}
+	d.nfMu.Unlock()
+	if applyErr != nil {
 		dec.NextState = StateBlockedLocked
 		dec.OpenGate = false
 		dec.ArmRawDrop = extCap
+		dec.StartAckWait = false
+		dec.ClearAckDeadline = true
 
 		if (dec.WriteExemption && dec.NewExemption.State == "open") || (curEx != nil && curEx.State == "open") {
 			nextGen := lastGen
@@ -1370,7 +1410,7 @@ func (d *Daemon) reconcileOnce(ctx context.Context, req reconcileReq) error {
 		}
 
 		d.mu.Lock()
-		d.lastError = err.Error()
+		d.lastError = applyErr.Error()
 		d.mu.Unlock()
 	}
 
@@ -1415,6 +1455,7 @@ func (d *Daemon) reconcileOnce(ctx context.Context, req reconcileReq) error {
 		d.kickAttempts = 0
 		d.kickNextAt = time.Time{}
 		d.lastError = ""
+		d.ackWaitBlocked = false
 		d.ackWaitBlockedAt = time.Time{}
 		d.ackWaitBlockedPID = 0
 		if d.bootAlert != "" && !d.hasPersistentBootIssueLocked() {
@@ -1502,9 +1543,14 @@ func (d *Daemon) closeGatesOnShutdown(ctx context.Context) {
 	defer cancel()
 	ex := BuildBlockedExemption(policy, d.bootID, 0, gen+1)
 	_ = d.writeExemption(ex)
-	extCap, _ := d.nf.DetectProxyCapture(sctx, policy.ProxySkipPrefix)
+	d.nfMu.Lock()
+	extCap, err := d.nf.DetectProxyCapture(sctx, policy.ProxySkipPrefix)
+	if err != nil && policy.ProxySkipPrefix != "" {
+		extCap = true
+	}
 	spec := closedGateSpec(policy, extCap)
 	_ = d.nf.ApplyOrVerify(sctx, spec, false)
+	d.nfMu.Unlock()
 	_ = ctx
 }
 
@@ -1831,8 +1877,18 @@ func (d *Daemon) maybeFlushOnRouteChange(ctx context.Context, lastFP *string, la
 }
 
 func (d *Daemon) bootMaintain(ctx context.Context, enforceDeepPause bool) {
-	for i := 0; i < 20; i++ {
+	for i := 0; i < 45; i++ {
 		if out, err := d.runner.Run(ctx, 2*time.Second, "", "getprop", "sys.boot_completed"); err == nil && strings.TrimSpace(out) == "1" {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(2 * time.Second):
+		}
+	}
+	for i := 0; i < 15; i++ {
+		if _, err := d.runner.Run(ctx, 2*time.Second, "", "cmd", "package", "list", "packages", "--user", "0", "android"); err == nil {
 			break
 		}
 		select {
@@ -1916,7 +1972,7 @@ func (d *Daemon) maybePruneBloatOnBoot(ctx context.Context) {
 	if !stillNeed {
 		return
 	}
-	if res, perr := android.PruneSandboxBloat(ctx, d.runner, policy.UserID, d.resolvedPrunedPath(), policy.EffectiveCallerPackage()); perr == nil {
+	if res, perr := android.PruneSandboxBloat(ctx, d.runner, policy.UserID, d.resolvedPrunedPath(), policy.EffectiveCallerPackage(), policy.EffectiveAdminPackage()); perr == nil {
 		d.mu.Lock()
 		d.bloatPrunedOnce = true
 		d.mu.Unlock()
@@ -1953,12 +2009,13 @@ func (d *Daemon) enforcePausedAtBootLocked(ctx context.Context) {
 				pkgList = d.packagesListPath
 			}
 			if effMode == PauseModeHot {
-				if frozen, serr := android.HotFreezeSandboxUserWithOpts(ctx, d.runner, policy.UserID, d.resolvedHibernatedPath(), pkgList, d.cgroupRoot, policy.EffectiveCallerPackage()); serr == nil {
+				if frozen, serr := android.HotFreezeSandboxUserWithOpts(ctx, d.runner, policy.UserID, d.resolvedHibernatedPath(), pkgList, d.cgroupRoot, policy.EffectiveCallerPackage(), policy.EffectiveAdminPackage()); serr == nil {
 					d.log.Printf("enforced boot hot-freeze on user %d (%d UIDs frozen)", policy.UserID, frozen)
 					d.notifyTimerRefresh()
 				} else {
 					lifeOpts := android.LifecycleOptions{
 						CallerPackage:       policy.EffectiveCallerPackage(),
+						AdminPackage:        policy.EffectiveAdminPackage(),
 						PackagesListPath:    pkgList,
 						CgroupRoot:          d.cgroupRoot,
 						SkipAppOpsForFrozen: perf.SkipAppOpsForFrozen,
@@ -1970,6 +2027,7 @@ func (d *Daemon) enforcePausedAtBootLocked(ctx context.Context) {
 			} else {
 				lifeOpts := android.LifecycleOptions{
 					CallerPackage:       policy.EffectiveCallerPackage(),
+					AdminPackage:        policy.EffectiveAdminPackage(),
 					PackagesListPath:    pkgList,
 					CgroupRoot:          d.cgroupRoot,
 					SkipAppOpsForFrozen: perf.SkipAppOpsForFrozen,
@@ -2150,7 +2208,7 @@ func (d *Daemon) scheduleMaintenance(policy contracts.Policy, restoreRemaining b
 			return
 		}
 		if doPrune {
-			if res, perr := android.PruneSandboxBloat(ctxBg, d.runner, pol.UserID, d.resolvedPrunedPath(), pol.EffectiveCallerPackage()); perr == nil {
+			if res, perr := android.PruneSandboxBloat(ctxBg, d.runner, pol.UserID, d.resolvedPrunedPath(), pol.EffectiveCallerPackage(), pol.EffectiveAdminPackage()); perr == nil {
 				d.mu.Lock()
 				d.bloatPrunedOnce = true
 				d.mu.Unlock()
@@ -2189,6 +2247,7 @@ func (d *Daemon) startTProxySandboxWithPriorityTraced(ctx context.Context, polic
 	perf := d.getPerfConfig()
 	lifeOpts := android.LifecycleOptions{
 		CallerPackage:       policy.EffectiveCallerPackage(),
+		AdminPackage:        policy.EffectiveAdminPackage(),
 		PackagesListPath:    d.packagesListPath,
 		CgroupRoot:          d.cgroupRoot,
 		SkipAppOpsForFrozen: perf.SkipAppOpsForFrozen,
@@ -2236,6 +2295,7 @@ func (d *Daemon) startTProxySandboxWithPriorityTraced(ctx context.Context, polic
 	}
 
 	tThaw := time.Now()
+	_ = android.ThawAllUserCgroups(d.cgroupRoot, policy.UserID)
 	_, remaining, _ := android.RestoreHibernatedPriorityEx(ctx, d.runner, policy.UserID, d.resolvedHibernatedPath(), priorityPkgs, lifeOpts)
 	thawUs = time.Since(tThaw).Microseconds()
 	restoreUs = thawUs
@@ -2438,9 +2498,10 @@ func (d *Daemon) pauseSandboxLifecycleLocked(ctx context.Context, policy contrac
 		}
 		switch mode {
 		case PauseModeHot:
-			if frozen, err := android.HotFreezeSandboxUserWithOpts(ctx, d.runner, policy.UserID, d.resolvedHibernatedPath(), pkgList, d.cgroupRoot, callerPkg); err != nil {
+			if frozen, err := android.HotFreezeSandboxUserWithOpts(ctx, d.runner, policy.UserID, d.resolvedHibernatedPath(), pkgList, d.cgroupRoot, callerPkg, policy.EffectiveAdminPackage()); err != nil {
 				lifeOpts := android.LifecycleOptions{
 					CallerPackage:       callerPkg,
+					AdminPackage:        policy.EffectiveAdminPackage(),
 					PackagesListPath:    pkgList,
 					CgroupRoot:          d.cgroupRoot,
 					SkipAppOpsForFrozen: perf.SkipAppOpsForFrozen,
@@ -2456,6 +2517,7 @@ func (d *Daemon) pauseSandboxLifecycleLocked(ctx context.Context, policy contrac
 		case PauseModeDeep:
 			lifeOpts := android.LifecycleOptions{
 				CallerPackage:       callerPkg,
+				AdminPackage:        policy.EffectiveAdminPackage(),
 				PackagesListPath:    pkgList,
 				CgroupRoot:          d.cgroupRoot,
 				SkipAppOpsForFrozen: perf.SkipAppOpsForFrozen,
@@ -2466,7 +2528,7 @@ func (d *Daemon) pauseSandboxLifecycleLocked(ctx context.Context, policy contrac
 				d.log.Printf("deep hibernated sandbox user %d on pause (%d user apps hibernated, FBE unlocked)", policy.UserID, hibernated)
 			}
 		default:
-			if stopped, err := android.StopSandboxApps(ctx, d.runner, policy.UserID, callerPkg); err != nil {
+			if stopped, err := android.StopSandboxApps(ctx, d.runner, policy.UserID, callerPkg, policy.EffectiveAdminPackage()); err != nil {
 				d.log.Printf("stop sandbox apps on pause: %v", err)
 			} else {
 				d.log.Printf("stopped %d sandbox background apps on pause (user=%d)", stopped, policy.UserID)
@@ -2490,26 +2552,27 @@ func (d *Daemon) pauseSandboxLifecycleLocked(ctx context.Context, policy contrac
 	}
 }
 
-func (d *Daemon) pauseSandboxWork(ctx context.Context, loaded bool, policy contracts.Policy) {
-	d.pauseSandboxWorkWithMode(ctx, loaded, policy, false)
+func (d *Daemon) pauseSandboxWork(ctx context.Context, loaded bool, policy contracts.Policy) error {
+	return d.pauseSandboxWorkWithMode(ctx, loaded, policy, false)
 }
 
-func (d *Daemon) pauseSandboxWorkWithMode(ctx context.Context, loaded bool, policy contracts.Policy, directReconcile bool) {
-	d.pauseSandboxWorkWithExplicitMode(ctx, loaded, policy, directReconcile, "")
+func (d *Daemon) pauseSandboxWorkWithMode(ctx context.Context, loaded bool, policy contracts.Policy, directReconcile bool) error {
+	return d.pauseSandboxWorkWithExplicitMode(ctx, loaded, policy, directReconcile, "")
 }
 
-func (d *Daemon) pauseSandboxWorkWithExplicitMode(ctx context.Context, loaded bool, policy contracts.Policy, directReconcile bool, modeOverride string) {
+func (d *Daemon) pauseSandboxWorkWithExplicitMode(ctx context.Context, loaded bool, policy contracts.Policy, directReconcile bool, modeOverride string) error {
 	// Close kernel gates first (fail-closed) before tearing down sockets or stopping user processes.
 	req := reconcileReq{clearAckBlock: true}
+	var err error
 	if directReconcile {
-		_ = d.reconcileOnce(ctx, req)
+		err = d.reconcileOnce(ctx, req)
 	} else {
-		_ = d.requestReconcile(ctx, req)
+		err = d.requestReconcile(ctx, req)
 	}
-	if !loaded {
-		return
+	if loaded {
+		d.pauseSandboxLifecycleLocked(ctx, policy, modeOverride)
 	}
-	d.pauseSandboxLifecycleLocked(ctx, policy, modeOverride)
+	return err
 }
 
 // HandleRPC serves the whitelisted RPCs forwarded by sandbox_broker on guard.sock.
@@ -2606,12 +2669,14 @@ func (d *Daemon) HandleRPC(ctx context.Context, req contracts.RPCRequest) contra
 		if err != nil {
 			return contracts.RPCResponse{ID: req.ID, OK: false, Error: err.Error(), Data: map[string]any{}}
 		}
-		d.pauseSandboxWork(ctx, loaded, policy)
+		if perr := d.pauseSandboxWork(ctx, loaded, policy); perr != nil {
+			return contracts.RPCResponse{ID: req.ID, OK: false, Error: perr.Error(), Data: d.buildStatusData(ctx)}
+		}
 		return contracts.RPCResponse{ID: req.ID, OK: true, Error: "", Data: d.buildStatusData(ctx)}
 
 	case contracts.OpReloadConfig:
 		d.mu.Lock()
-		loaded, policy, gen, pgen := d.policyLoaded, d.policy, d.lastGen, d.lastPendingGen
+		loaded, policy, gen, pgen, lastVPN := d.policyLoaded, d.policy, d.lastGen, d.lastPendingGen, d.lastVPNStatus
 		d.mu.Unlock()
 		if !loaded {
 			return contracts.RPCResponse{ID: req.ID, OK: false, Error: "policy not pinned", Data: map[string]any{}}
@@ -2625,7 +2690,23 @@ func (d *Daemon) HandleRPC(ctx context.Context, req contracts.RPCRequest) contra
 				return contracts.RPCResponse{ID: req.ID, OK: false, Error: err.Error(), Data: map[string]any{}}
 			}
 		}
+		cfgDir := d.workCfgDir
+		if cfgDir == "" {
+			cfgDir = contracts.WorkCfgDir
+		}
+		cfgPath := filepath.Join(cfgDir, fmt.Sprintf("u%d.pending.json", policy.UserID))
 		quicMode := "reject"
+		if lastVPN != nil && (lastVPN.QUICUDP443Mode == "allow" || lastVPN.QUICUDP443Mode == "reject") {
+			quicMode = lastVPN.QUICUDP443Mode
+		}
+		if existing, err := readPendingConfig(cfgPath); err == nil {
+			if existing.Generation > pgen {
+				pgen = existing.Generation
+			}
+			if existing.QuicUDP443Mode == "allow" || existing.QuicUDP443Mode == "reject" {
+				quicMode = existing.QuicUDP443Mode
+			}
+		}
 		logLevel := "warning"
 		if req.Config != nil {
 			if req.Config.QuicUDP443Mode != "" {
@@ -2634,14 +2715,6 @@ func (d *Daemon) HandleRPC(ctx context.Context, req contracts.RPCRequest) contra
 			if req.Config.LogLevel != "" {
 				logLevel = req.Config.LogLevel
 			}
-		}
-		cfgDir := d.workCfgDir
-		if cfgDir == "" {
-			cfgDir = contracts.WorkCfgDir
-		}
-		cfgPath := filepath.Join(cfgDir, fmt.Sprintf("u%d.pending.json", policy.UserID))
-		if existing, err := readPendingConfig(cfgPath); err == nil && existing.Generation > pgen {
-			pgen = existing.Generation
 		}
 		if gen > pgen {
 			pgen = gen
@@ -2736,8 +2809,22 @@ func (d *Daemon) HandleRPC(ctx context.Context, req contracts.RPCRequest) contra
 				}
 			} else {
 				tRec := time.Now()
-				_ = d.requestReconcile(ctx, reconcileReq{clearAckBlock: true, invalidateID: true})
+				if err := d.requestReconcile(ctx, reconcileReq{clearAckBlock: true, invalidateID: true}); err != nil {
+					return contracts.RPCResponse{ID: req.ID, OK: false, Error: err.Error(), Data: d.buildStatusData(ctx)}
+				}
+				d.mu.Lock()
+				opened := d.state == StateOpen
+				lastErr := d.lastError
+				curSt := d.state
+				d.mu.Unlock()
 				reconcileUs = time.Since(tRec).Microseconds()
+				if !opened {
+					msg := strings.TrimSpace(lastErr)
+					if msg == "" {
+						msg = fmt.Sprintf("sandbox gate did not open (state=%s)", curSt)
+					}
+					return contracts.RPCResponse{ID: req.ID, OK: false, Error: msg, Data: d.buildStatusData(ctx)}
+				}
 			}
 		} else if policy.IsTProxy() {
 			fastPath = true
@@ -2747,9 +2834,11 @@ func (d *Daemon) HandleRPC(ctx context.Context, req contracts.RPCRequest) contra
 				d.lifecycleMu.Lock()
 				var remaining []string
 				if !d.isPaused() {
+					_ = android.ThawAllUserCgroups(d.cgroupRoot, policy.UserID)
 					tThaw := time.Now()
 					lifeOpts := android.LifecycleOptions{
 						CallerPackage:       policy.EffectiveCallerPackage(),
+						AdminPackage:        policy.EffectiveAdminPackage(),
 						PackagesListPath:    d.packagesListPath,
 						CgroupRoot:          d.cgroupRoot,
 						SkipAppOpsForFrozen: perf.SkipAppOpsForFrozen,
@@ -2763,6 +2852,12 @@ func (d *Daemon) HandleRPC(ctx context.Context, req contracts.RPCRequest) contra
 				if len(remaining) > 0 && !d.isPaused() {
 					d.scheduleMaintenance(policy, true)
 				}
+			} else if !d.isPaused() {
+				d.lifecycleMu.Lock()
+				if !d.isPaused() {
+					_ = android.ThawAllUserCgroups(d.cgroupRoot, policy.UserID)
+				}
+				d.lifecycleMu.Unlock()
 			}
 		} else {
 			fastPath = true
@@ -2778,44 +2873,73 @@ func (d *Daemon) HandleRPC(ctx context.Context, req contracts.RPCRequest) contra
 			}
 		}
 		if !fastPath && req.Pkg != "" && d.runner != nil {
-			go android.PrewarmSandboxAppCodePath(context.Background(), d.runner, policy.UserID, req.Pkg)
+			d.mu.Lock()
+			shuttingDown := d.shuttingDown
+			parentCtx := d.superviseCtx
+			if !shuttingDown {
+				d.maintWg.Add(1)
+			}
+			d.mu.Unlock()
+			if !shuttingDown {
+				if parentCtx == nil {
+					parentCtx = context.Background()
+				}
+				go func(targetPkg string, userID int) {
+					defer d.maintWg.Done()
+					pctx, pcancel := context.WithTimeout(parentCtx, 8*time.Second)
+					defer pcancel()
+					android.PrewarmSandboxAppCodePath(pctx, d.runner, userID, targetPkg)
+				}(req.Pkg, policy.UserID)
+			}
 		}
 
 		tLaunch := time.Now()
 		var launchErr error
 		if req.Activity != "" {
 			launchErr = android.LaunchSandboxAppAsRoot(ctx, d.runner, policy.UserID, req.Pkg, req.Activity)
-		} else if cachedComp := d.cachedLauncher(req.Pkg); cachedComp != "" {
-			launchErr = android.LaunchComponentAsRoot(ctx, d.runner, policy.UserID, cachedComp)
-			if launchErr != nil {
-				d.evictCachedLauncher(req.Pkg)
-				d.mu.Lock()
-				d.userUnlockedBoot = false
-				d.mu.Unlock()
-				timeout := d.userWakeTimeout
-				if timeout <= 0 {
-					timeout = 5 * time.Second
-				}
-				if uerr := android.StartSandboxUserAndWait(ctx, d.runner, policy.UserID, timeout); uerr == nil {
-					d.mu.Lock()
-					d.userUnlockedBoot = true
-					d.mu.Unlock()
-				}
-				if resolved, rerr := android.ResolveLauncherComponent(ctx, d.runner, policy.UserID, req.Pkg); rerr == nil {
-					if launchErr = android.LaunchComponentAsRoot(ctx, d.runner, policy.UserID, resolved); launchErr == nil {
-						d.setCachedLauncher(req.Pkg, resolved)
-					}
-				} else {
-					launchErr = rerr
+		} else {
+			handledCompanion := false
+			if req.Pkg != "" {
+				var fallbackErr error
+				handledCompanion, fallbackErr = android.LaunchViaCompanionFallbackIfHostStopped(ctx, d.runner, policy.UserID, req.Pkg)
+				if handledCompanion {
+					launchErr = fallbackErr
 				}
 			}
-		} else {
-			if resolved, rerr := android.ResolveLauncherComponent(ctx, d.runner, policy.UserID, req.Pkg); rerr == nil {
-				if launchErr = android.LaunchComponentAsRoot(ctx, d.runner, policy.UserID, resolved); launchErr == nil {
-					d.setCachedLauncher(req.Pkg, resolved)
+			if !handledCompanion {
+				if cachedComp := d.cachedLauncher(req.Pkg); cachedComp != "" {
+					launchErr = android.LaunchComponentAsRoot(ctx, d.runner, policy.UserID, cachedComp)
+					if launchErr != nil {
+						d.evictCachedLauncher(req.Pkg)
+						d.mu.Lock()
+						d.userUnlockedBoot = false
+						d.mu.Unlock()
+						timeout := d.userWakeTimeout
+						if timeout <= 0 {
+							timeout = 5 * time.Second
+						}
+						if uerr := android.StartSandboxUserAndWait(ctx, d.runner, policy.UserID, timeout); uerr == nil {
+							d.mu.Lock()
+							d.userUnlockedBoot = true
+							d.mu.Unlock()
+						}
+						if resolved, rerr := android.ResolveLauncherComponent(ctx, d.runner, policy.UserID, req.Pkg); rerr == nil {
+							if launchErr = android.LaunchComponentAsRoot(ctx, d.runner, policy.UserID, resolved); launchErr == nil {
+								d.setCachedLauncher(req.Pkg, resolved)
+							}
+						} else {
+							launchErr = rerr
+						}
+					}
+				} else {
+					if resolved, rerr := android.ResolveLauncherComponent(ctx, d.runner, policy.UserID, req.Pkg); rerr == nil {
+						if launchErr = android.LaunchComponentAsRoot(ctx, d.runner, policy.UserID, resolved); launchErr == nil {
+							d.setCachedLauncher(req.Pkg, resolved)
+						}
+					} else {
+						launchErr = rerr
+					}
 				}
-			} else {
-				launchErr = rerr
 			}
 		}
 		launchUs := time.Since(tLaunch).Microseconds()
@@ -2944,8 +3068,8 @@ func (d *Daemon) HandleCtl(ctx context.Context, cmd string, args []string) (stri
 		d.mu.Unlock()
 		d.invalidateStatusCaches()
 		d.applyPolicyNetfilterLock(p)
-		if d.watchers != nil && d.sandboxAckPath == "" {
-			d.watchers.EnsureProxyBaseWatch(filepath.Dir(p.EffectiveProxyAckPath()))
+		if w := d.getWatchers(); w != nil && d.sandboxAckPath == "" {
+			w.EnsureProxyBaseWatch(filepath.Dir(p.EffectiveProxyAckPath()))
 		}
 		if err := d.requestReconcile(ctx, reconcileReq{clearAckBlock: true, invalidateID: true, refreshCert: true, syncHide: true}); err != nil {
 			return "", err
@@ -3009,7 +3133,7 @@ func (d *Daemon) HandleCtl(ctx context.Context, cmd string, args []string) (stri
 		if !loaded {
 			return "", errors.New("policy not pinned")
 		}
-		res, err := android.PruneSandboxBloat(ctx, d.runner, policy.UserID, d.resolvedPrunedPath(), policy.EffectiveCallerPackage())
+		res, err := android.PruneSandboxBloat(ctx, d.runner, policy.UserID, d.resolvedPrunedPath(), policy.EffectiveCallerPackage(), policy.EffectiveAdminPackage())
 		if err != nil {
 			return "", err
 		}
@@ -3142,13 +3266,20 @@ func (d *Daemon) HandleCtl(ctx context.Context, cmd string, args []string) (stri
 		return string(b), nil
 
 	case "block", "pause-sandbox", "pause-hot":
-		loaded, policy, _ := d.setDesiredPaused(true, false, true)
+		loaded, policy, err := d.setDesiredPaused(true, false, true)
+		if err != nil {
+			return "", err
+		}
 		if cmd == "pause-hot" {
-			d.pauseSandboxWorkWithExplicitMode(ctx, loaded, policy, false, PauseModeHot)
+			if err := d.pauseSandboxWorkWithExplicitMode(ctx, loaded, policy, false, PauseModeHot); err != nil {
+				return "", err
+			}
 			return "hot-paused", nil
 		}
 		if cmd == "pause-sandbox" {
-			d.pauseSandboxWork(ctx, loaded, policy)
+			if err := d.pauseSandboxWork(ctx, loaded, policy); err != nil {
+				return "", err
+			}
 			return "paused", nil
 		}
 		if err := d.requestReconcile(ctx, reconcileReq{clearAckBlock: true}); err != nil {
@@ -3621,7 +3752,10 @@ func RunCtl(args []string) error {
 		_ = SyncPerfConfig(contracts.PerfConfigPath)
 		bootD := &Daemon{}
 		_, _ = bootD.SyncStealthConfig(p, prevClientUID)
-		extCap, _ := nf.DetectProxyCapture(ctx, p.ProxySkipPrefix)
+		extCap, derr := nf.DetectProxyCapture(ctx, p.ProxySkipPrefix)
+		if derr != nil && p.ProxySkipPrefix != "" {
+			extCap = true
+		}
 		spec := closedGateSpec(p, extCap)
 		if err := nf.ApplyOrVerify(ctx, spec, false); err != nil {
 			return err
@@ -3681,7 +3815,10 @@ func RunCtl(args []string) error {
 		_ = removeIfExist(contracts.UpgradeFencePath)
 		if p, err := ReadPolicy(); err == nil {
 			nf.LockPath = p.EffectiveNetfilterLockPath()
-			extCap, _ := nf.DetectProxyCapture(ctx, p.ProxySkipPrefix)
+			extCap, derr := nf.DetectProxyCapture(ctx, p.ProxySkipPrefix)
+		if derr != nil && p.ProxySkipPrefix != "" {
+			extCap = true
+		}
 			_ = nf.ApplyOrVerify(ctx, closedGateSpec(p, extCap), false)
 		}
 		fmt.Println("upgrading fence cleared (offline)")
@@ -4226,7 +4363,10 @@ func RunCtl(args []string) error {
 		if b, err := json.Marshal(ex); err == nil {
 			_ = sysio.WriteAtomic(exPath, append(b, '\n'), sysio.WriteAtomicOptions{Perm: 0600, UID: 0, GID: 0})
 		}
-		extCap, _ := nf.DetectProxyCapture(ctx, p.ProxySkipPrefix)
+		extCap, derr := nf.DetectProxyCapture(ctx, p.ProxySkipPrefix)
+		if derr != nil && p.ProxySkipPrefix != "" {
+			extCap = true
+		}
 		if err := nf.ApplyOrVerify(ctx, closedGateSpec(p, extCap), false); err != nil {
 			return err
 		}

@@ -185,8 +185,8 @@ func TestAdminPackageExcludedFromSandboxAppsAndProtectedFromStopRemove(t *testin
 
 func TestPolicyGuardChainValidation(t *testing.T) {
 	p := testPolicy()
-	p.GuardChainOut = "LGC_PRIVACY"
-	p.GuardChainPost = "LGC_EGRESS"
+	p.GuardChainOut = "CUSTOM_PRIVACY"
+	p.GuardChainPost = "CUSTOM_EGRESS"
 	if err := p.NormalizeAndValidate(); err != nil {
 		t.Fatalf("expected valid guard chains accepted, got %v", err)
 	}

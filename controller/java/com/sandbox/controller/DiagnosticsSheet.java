@@ -425,11 +425,20 @@ public final class DiagnosticsSheet extends FrameLayout {
         executor.execute(new Runnable() {
             @Override
             public void run() {
-                final BrokerProtocol.RpcResponse resp = broker.reloadConfig(nextMode, "");
+                BrokerProtocol.RpcResponse r;
+                try {
+                    r = broker.reloadConfig(nextMode, "");
+                } catch (Throwable t) {
+                    r = BrokerProtocol.RpcResponse.error("", String.valueOf(t.getMessage()), false);
+                }
+                final BrokerProtocol.RpcResponse resp = r;
                 mainHandler.post(new Runnable() {
                     @Override
                     public void run() {
                         quicToggleBtn.setEnabled(true);
+                        if (!isAttachedToWindow()) {
+                            return;
+                        }
                         if (resp.ok) {
                             quicMode = nextMode;
                             quicToggleBtn.setText("reject".equals(quicMode)
@@ -450,11 +459,20 @@ public final class DiagnosticsSheet extends FrameLayout {
         executor.execute(new Runnable() {
             @Override
             public void run() {
-                final BrokerProtocol.RpcResponse resp = broker.syncHideApps();
+                BrokerProtocol.RpcResponse r;
+                try {
+                    r = broker.syncHideApps();
+                } catch (Throwable t) {
+                    r = BrokerProtocol.RpcResponse.error("", String.valueOf(t.getMessage()), false);
+                }
+                final BrokerProtocol.RpcResponse resp = r;
                 mainHandler.post(new Runnable() {
                     @Override
                     public void run() {
                         syncHideBtn.setEnabled(true);
+                        if (!isAttachedToWindow()) {
+                            return;
+                        }
                         if (resp.ok) {
                             callback.onToast(strings.diagSyncedHideApps(), false);
                         } else {
@@ -477,7 +495,13 @@ public final class DiagnosticsSheet extends FrameLayout {
         executor.execute(new Runnable() {
             @Override
             public void run() {
-                final BrokerProtocol.RpcResponse resp = broker.runProbe();
+                BrokerProtocol.RpcResponse r;
+                try {
+                    r = broker.runProbe();
+                } catch (Throwable t) {
+                    r = BrokerProtocol.RpcResponse.error("", String.valueOf(t.getMessage()), false);
+                }
+                final BrokerProtocol.RpcResponse resp = r;
                 mainHandler.post(new Runnable() {
                     @Override
                     public void run() {
@@ -485,6 +509,9 @@ public final class DiagnosticsSheet extends FrameLayout {
                         probeBtn.setText(strings.diagRunProbe());
                         probeBtn.setEnabled(true);
                         probeBtn.setAlpha(1f);
+                        if (!isAttachedToWindow()) {
+                            return;
+                        }
                         if (resp.ok) {
                             bindSnapshot(resp.snapshot, true);
                             callback.onSnapshotRefreshed(resp.snapshot);

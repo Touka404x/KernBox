@@ -60,24 +60,23 @@ func vpnRulesFor(family int, hook GateHook, spec GateSpec) ([]string, error) {
 					s.UplinkIf, endpoint, port, s.ClientUID, outerMark, outerMask))
 			}
 		}
-		if family == 4 || !spec.IPv6Enabled {
+		// VPN mode has no IPv6 tunnel; always fail-closed for family == 6 even if IPv6Enabled is set.
+		rules = append(rules,
+			ownerMatch+" -p tcp -j REJECT --reject-with tcp-reset",
+			ownerMatch+" -j REJECT",
+		)
+		if family == 4 {
 			rules = append(rules,
-				ownerMatch+" -p tcp -j REJECT --reject-with tcp-reset",
-				ownerMatch+" -j REJECT",
+				fmt.Sprintf("-d %s/32 -p tcp --dport 53 -j REJECT --reject-with tcp-reset", portal),
+				fmt.Sprintf("-d %s/32 -p udp --dport 53 -j REJECT", portal),
+				fmt.Sprintf("-d %s/32 -p tcp --dport 853 -j REJECT --reject-with tcp-reset", portal),
 			)
-			if family == 4 {
-				rules = append(rules,
-					fmt.Sprintf("-d %s/32 -p tcp --dport 53 -j REJECT --reject-with tcp-reset", portal),
-					fmt.Sprintf("-d %s/32 -p udp --dport 53 -j REJECT", portal),
-					fmt.Sprintf("-d %s/32 -p tcp --dport 853 -j REJECT --reject-with tcp-reset", portal),
-				)
-			}
-			if vpnMark != "" {
-				rules = append(rules,
-					vpnMark+" -p tcp -j REJECT --reject-with tcp-reset",
-					vpnMark+" -j REJECT",
-				)
-			}
+		}
+		if vpnMark != "" {
+			rules = append(rules,
+				vpnMark+" -p tcp -j REJECT --reject-with tcp-reset",
+				vpnMark+" -j REJECT",
+			)
 		}
 		return rules, nil
 
@@ -96,18 +95,16 @@ func vpnRulesFor(family int, hook GateHook, spec GateSpec) ([]string, error) {
 					s.UplinkIf, endpoint, port, s.ClientUID, outerMark, outerMask))
 			}
 		}
-		if family == 4 || !spec.IPv6Enabled {
-			rules = append(rules, ownerMatch+" -j DROP")
-			if family == 4 {
-				rules = append(rules,
-					fmt.Sprintf("-d %s/32 -p udp --dport 53 -j DROP", portal),
-					fmt.Sprintf("-d %s/32 -p tcp --dport 53 -j DROP", portal),
-					fmt.Sprintf("-d %s/32 -p tcp --dport 853 -j DROP", portal),
-				)
-			}
-			if vpnMark != "" {
-				rules = append(rules, vpnMark+" -j DROP")
-			}
+		rules = append(rules, ownerMatch+" -j DROP")
+		if family == 4 {
+			rules = append(rules,
+				fmt.Sprintf("-d %s/32 -p udp --dport 53 -j DROP", portal),
+				fmt.Sprintf("-d %s/32 -p tcp --dport 53 -j DROP", portal),
+				fmt.Sprintf("-d %s/32 -p tcp --dport 853 -j DROP", portal),
+			)
+		}
+		if vpnMark != "" {
+			rules = append(rules, vpnMark+" -j DROP")
 		}
 		return rules, nil
 	}

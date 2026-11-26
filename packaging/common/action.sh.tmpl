@@ -15,9 +15,27 @@ if [ ! -x "$GUARD_BIN" ]; then
 fi
 
 if [ ! -S /dev/socket/sandbox_priv/guard.sock ]; then
+    w=0
+    if [ -f /data/adb/sandbox_guard/service.pid ]; then
+        svc_pid=$(cat /data/adb/sandbox_guard/service.pid 2>/dev/null || true)
+        case "$svc_pid" in
+            ''|*[!0-9]*) ;;
+            *)
+                if kill -0 "$svc_pid" 2>/dev/null; then
+                    while [ "$w" -lt 20 ] && [ ! -S /dev/socket/sandbox_priv/guard.sock ]; do
+                        sleep 0.1
+                        w=$((w + 1))
+                    done
+                fi
+                ;;
+        esac
+    fi
+fi
+
+if [ ! -S /dev/socket/sandbox_priv/guard.sock ]; then
     echo "- Daemon socket offline; starting service.sh..."
     if [ -f "$MODDIR/service.sh" ]; then
-        sh "$MODDIR/service.sh" >/dev/null 2>&1 || true
+        sh "$MODDIR/service.sh" --daemon >/dev/null 2>&1 || true
     fi
     w=0
     while [ "$w" -lt 20 ] && [ ! -S /dev/socket/sandbox_priv/guard.sock ]; do
@@ -30,11 +48,11 @@ status_out=$("$GUARD_BIN" ctl status 2>&1 || true)
 case "$status_out" in
     *'"paused": true'*|*'"paused":true'*)
         echo "- Sandbox is PAUSED; resuming..."
-        "$GUARD_BIN" ctl resume
+        "$GUARD_BIN" ctl start-sandbox
         ;;
     *'"state"'*)
         echo "- Sandbox is ACTIVE; pausing & hibernating..."
-        "$GUARD_BIN" ctl pause
+        "$GUARD_BIN" ctl pause-sandbox
         ;;
     *)
         echo "! Unable to query sandbox status:"

@@ -279,6 +279,8 @@ func ResolvePackageUIDForUser(packagesListPath string, userID int, targetPkg str
 // SyncStealthConfig maintains stealth.json preserving existing overrides while updating
 // sandbox_user_id, exempt_work_uid, and exempt_uids.
 func (d *Daemon) SyncStealthConfig(policy contracts.Policy, clientUID int) (StealthConfig, error) {
+	d.stealthMu.Lock()
+	defer d.stealthMu.Unlock()
 	cfgPath, runtimePath, _ := d.resolvedStealthPaths()
 	pkgList := contracts.PackagesListPath
 	if d.packagesListPath != "" {
@@ -343,6 +345,8 @@ func (d *Daemon) ReadStealthStatus() map[string]any {
 }
 
 func (d *Daemon) ToggleStealth(enable bool) (StealthConfig, error) {
+	d.stealthMu.Lock()
+	defer d.stealthMu.Unlock()
 	cfgPath, runtimePath, disabledFlag := d.resolvedStealthPaths()
 	if enable {
 		_ = removeIfExist(disabledFlag)
@@ -450,6 +454,9 @@ func (d *Daemon) ApplyPresetFile(ctx context.Context, presetPath string) (Stealt
 	if p.Timezone != nil && strings.ContainsAny(*p.Timezone, "\x00\r\n;&|$`") {
 		return StealthConfig{}, fmt.Errorf("invalid preset timezone %q", *p.Timezone)
 	}
+
+	d.stealthMu.Lock()
+	defer d.stealthMu.Unlock()
 
 	d.mu.Lock()
 	loaded := d.policyLoaded

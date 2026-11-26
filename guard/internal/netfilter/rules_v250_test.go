@@ -16,11 +16,13 @@ type v250TableState struct {
 }
 
 type v250IPTablesMock struct {
-	mu              sync.Mutex
-	tables          map[int]map[string]*v250TableState
-	saveAllCalls    map[int]int
-	saveTableCalls  map[int]int
-	restoreCalls    map[int]int
+	mu             sync.Mutex
+	tables         map[int]map[string]*v250TableState
+	saveAllCalls   map[int]int
+	saveTableCalls map[int]int
+	restoreCalls   map[int]int
+	ipRules        []string
+	ipRoutes       map[string]string
 }
 
 func newV250IPTablesMock() *v250IPTablesMock {
@@ -39,6 +41,7 @@ func newV250IPTablesMock() *v250IPTablesMock {
 		saveAllCalls:   map[int]int{},
 		saveTableCalls: map[int]int{},
 		restoreCalls:   map[int]int{},
+		ipRoutes:       map[string]string{},
 	}
 }
 
@@ -154,10 +157,61 @@ func (m *v250IPTablesMock) Run(_ context.Context, _ time.Duration, stdin string,
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if name == "ip" {
-		if len(args) >= 4 && args[1] == "rule" && args[2] == "show" {
-			return "0:\tfrom all lookup local\n32766:\tfrom all lookup main\n", nil
+		if len(args) >= 3 && args[0] == "-4" && args[1] == "rule" && args[2] == "show" {
+			var b strings.Builder
+			b.WriteString("0:\tfrom all lookup local\n")
+			for _, r := range m.ipRules {
+				b.WriteString(r)
+				b.WriteByte('\n')
+			}
+			b.WriteString("32766:\tfrom all lookup main\n")
+			return b.String(), nil
 		}
-		if len(args) >= 4 && args[1] == "route" && args[2] == "show" {
+		if len(args) >= 7 && args[0] == "-4" && args[1] == "rule" && args[2] == "add" {
+			// ip -4 rule add fwmark <mark> pref <pref> lookup <table>
+			var fw, pref, tbl string
+			for i := 3; i+1 < len(args); i++ {
+				switch args[i] {
+				case "fwmark":
+					fw = args[i+1]
+				case "pref":
+					pref = args[i+1]
+				case "lookup":
+					tbl = args[i+1]
+				}
+			}
+			if pref != "" && fw != "" && tbl != "" {
+				m.ipRules = append(m.ipRules, fmt.Sprintf("%s:\tfrom all fwmark %s lookup %s", pref, fw, tbl))
+			}
+			return "", nil
+		}
+		if len(args) >= 5 && args[0] == "-4" && args[1] == "rule" && args[2] == "del" && args[3] == "pref" {
+			pref := args[4]
+			deleted := false
+			kept := make([]string, 0, len(m.ipRules))
+			for _, r := range m.ipRules {
+				if !deleted && strings.HasPrefix(r, pref+":") {
+					deleted = true
+					continue
+				}
+				kept = append(kept, r)
+			}
+			m.ipRules = kept
+			return "", nil
+		}
+		if len(args) >= 5 && args[0] == "-4" && args[1] == "route" && args[2] == "show" && args[3] == "table" {
+			return m.ipRoutes[args[4]], nil
+		}
+		if len(args) >= 8 && args[0] == "-4" && args[1] == "route" && args[2] == "replace" {
+			tbl := ""
+			for i := 3; i+1 < len(args); i++ {
+				if args[i] == "table" {
+					tbl = args[i+1]
+				}
+			}
+			if tbl != "" {
+				m.ipRoutes[tbl] = "local default dev lo scope host\n"
+			}
 			return "", nil
 		}
 		return "", nil
@@ -255,5 +309,57 @@ func TestApplyOrVerifySingleSaveAndSingleRestoreBatching(t *testing.T) {
 	}
 	if mock.restoreCalls[4] != 1 || mock.restoreCalls[6] != 1 {
 		t.Fatalf("expected 0 extra restores on inspect, got v4=%d v6=%d", mock.restoreCalls[4], mock.restoreCalls[6])
+	}
+
+	// Inspect must fail when TProxy ip rule pref 2025 or route table 2027 goes missing.
+	savedRules := append([]string(nil), mock.ipRules...)
+	mock.ipRules = nil
+	if err := ctrl.ApplyOrVerify(ctx, spec, true); err == nil {
+		t.Fatal("expected inspect error when TProxy ip rule pref 2025 is missing")
+	}
+	mock.ipRules = savedRules
+	savedRoute := mock.ipRoutes["2027"]
+	mock.ipRoutes["2027"] = ""
+	if err := ctrl.ApplyOrVerify(ctx, spec, true); err == nil {
+		t.Fatal("expected inspect error when TProxy local route in table 2027 is missing")
+	}
+	mock.ipRoutes["2027"] = savedRoute
+}
+
+func TestGateInstalledDetectsMisplacedJumpAndEnsureTProxyClearsStalePref(t *testing.T) {
+	spec := testTProxySpecOpen()
+	spec.GuardChainOut = "SB_GUARD_OUT"
+	hooks := GateHooksFor(spec)
+	filterHook := hooks[1]
+	expected, err := RulesFor(4, filterHook, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Correct order: SB_GUARD_OUT then SBW_OUTPUT.
+	validSave := ParseSave("*filter\n:OUTPUT ACCEPT [0:0]\n:" + filterHook.Chain + " - [0:0]\n-A OUTPUT -j SB_GUARD_OUT\n-A OUTPUT -j " + filterHook.Chain + "\n")
+	validSave.Rules[filterHook.Chain] = expected
+	if !GateInstalled(validSave, filterHook, expected) {
+		t.Fatal("expected GateInstalled=true when jump follows GuardChainOut")
+	}
+	// Misplaced: SBW_OUTPUT appears before SB_GUARD_OUT -> GateInstalled MUST return false!
+	misplacedSave := ParseSave("*filter\n:OUTPUT ACCEPT [0:0]\n:" + filterHook.Chain + " - [0:0]\n-A OUTPUT -j " + filterHook.Chain + "\n-A OUTPUT -j SB_GUARD_OUT\n")
+	misplacedSave.Rules[filterHook.Chain] = expected
+	if GateInstalled(misplacedSave, filterHook, expected) {
+		t.Fatal("expected GateInstalled=false when jump precedes GuardChainOut")
+	}
+
+	// Stale pref 2025 rule sharing pref with valid rule must be replaced cleanly.
+	dir := t.TempDir()
+	mock := newV250IPTablesMock()
+	mock.ipRules = []string{
+		"2025:\tfrom all fwmark 0x99/0xffff lookup 2027",
+		"2025:\tfrom all fwmark 0x1a/0xffff lookup 2027",
+	}
+	ctrl := &Controller{Runner: mock, LockPath: filepath.Join(dir, "nf.lock")}
+	if err := ctrl.ApplyOrVerify(context.Background(), spec, false); err != nil {
+		t.Fatalf("ApplyOrVerify with stale pref failed: %v", err)
+	}
+	if len(mock.ipRules) != 1 || !strings.Contains(mock.ipRules[0], "0x1a/0xffff") {
+		t.Fatalf("expected clean single 0x1a/0xffff rule after stale cleanup, got %v", mock.ipRules)
 	}
 }

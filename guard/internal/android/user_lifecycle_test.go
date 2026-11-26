@@ -138,10 +138,12 @@ func TestStartAndStopSandboxUserLifecycle(t *testing.T) {
 		!strings.Contains(joined, "appops set --user 10 com.google.android.apps.bard WAKE_LOCK ignore") ||
 		!strings.Contains(joined, "am set-standby-bucket --user 10 com.google.android.apps.bard restricted") ||
 		!strings.Contains(joined, "cmd jobscheduler cancel -u 10 com.google.android.apps.bard") ||
-		!strings.Contains(joined, "am force-stop --user 10 com.google.android.apps.bard") {
+		!strings.Contains(joined, "am stop-app --user 10 com.google.android.apps.bard") {
 		t.Fatalf("missing expected hibernation commands on Gemini:\n%s", joined)
 	}
-	if strings.Contains(joined, "force-stop --user 10 "+contracts.DefaultWorkPackage) ||
+	if strings.Contains(joined, "stop-app --user 10 "+contracts.DefaultWorkPackage) ||
+		strings.Contains(joined, "force-stop --user 10 "+contracts.DefaultWorkPackage) ||
+		strings.Contains(joined, "stop-app --user 10 com.custom.ime") ||
 		strings.Contains(joined, "force-stop --user 10 com.custom.ime") {
 		t.Fatalf("must protect WorkPackage and active IME:\n%s", joined)
 	}
@@ -307,21 +309,22 @@ func TestRestoreHibernatedPriorityAndConcurrency(t *testing.T) {
 	if b, _ := os.ReadFile(vendFreeze); string(b) != "0" {
 		t.Fatalf("expected vending UID thawed immediately alongside all cgroups, got %q", string(b))
 	}
-	if restoredNow != 3 {
-		t.Fatalf("expected 3 priority packages restored synchronously (bard, gms, gsf), got %d", restoredNow)
+	if restoredNow != 4 {
+		t.Fatalf("expected 4 priority packages restored synchronously (bard, googlequicksearchbox, gms, gsf), got %d", restoredNow)
 	}
-	wantRem := []string{"com.android.vending", "com.google.android.googlequicksearchbox"}
+	wantRem := []string{"com.android.vending"}
 	if !reflect.DeepEqual(remaining, wantRem) {
 		t.Fatalf("remaining = %v want %v", remaining, wantRem)
 	}
 	prioJoined := strings.Join(prioRunner.calls, "\n")
 	if !strings.Contains(prioJoined, "appops set --user 10 com.google.android.apps.bard RUN_ANY_IN_BACKGROUND allow") ||
+		!strings.Contains(prioJoined, "appops set --user 10 com.google.android.googlequicksearchbox RUN_ANY_IN_BACKGROUND allow") ||
 		!strings.Contains(prioJoined, "appops set --user 10 com.google.android.gms RUN_ANY_IN_BACKGROUND allow") ||
 		!strings.Contains(prioJoined, "appops set --user 10 com.google.android.gsf RUN_ANY_IN_BACKGROUND allow") {
 		t.Fatalf("missing priority restore calls:\n%s", prioJoined)
 	}
-	if strings.Contains(prioJoined, "com.android.vending") || strings.Contains(prioJoined, "com.google.android.googlequicksearchbox") {
-		t.Fatalf("non-priority packages must wait for async pass:\n%s", prioJoined)
+	if strings.Contains(prioJoined, "com.android.vending") {
+		t.Fatalf("non-priority package com.android.vending must wait for async pass:\n%s", prioJoined)
 	}
 	midState := ReadHibernatedState(hibPath)
 	if !reflect.DeepEqual(midState.Packages, wantRem) || len(midState.FrozenUIDs) != 0 {
@@ -330,8 +333,8 @@ func TestRestoreHibernatedPriorityAndConcurrency(t *testing.T) {
 
 	fullRunner := &sandboxRecRunner{}
 	remCount, err := RestoreHibernatedSandboxUserWithOpts(context.Background(), fullRunner, 10, hibPath, cgRoot)
-	if err != nil || remCount != 2 {
-		t.Fatalf("expected remaining 2 packages restored, got count=%d err=%v", remCount, err)
+	if err != nil || remCount != 1 {
+		t.Fatalf("expected remaining 1 package restored, got count=%d err=%v", remCount, err)
 	}
 	if _, err := os.Stat(hibPath); !os.IsNotExist(err) {
 		t.Fatalf("expected %s removed after remaining restore, err=%v", hibPath, err)

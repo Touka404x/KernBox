@@ -127,4 +127,16 @@ func TestV251TProxyToVPNCleanupAndVerify(t *testing.T) {
 	if err := ctrl.ApplyOrVerify(ctx, vpnSpec, true); err != nil {
 		t.Fatalf("inspect vpn after TProxy cleanup failed: %v", err)
 	}
+
+	// VPN mode has no IPv6 tunnel; IPv6 OUTPUT/EGRESS must remain fail-closed even if IPv6Enabled=true.
+	vpnIPv6 := testVPNSpecOpen()
+	vpnIPv6.IPv6Enabled = true
+	out6, err := RulesFor(6, GateHooks[1], vpnIPv6)
+	if err != nil || len(out6) == 0 || strings.Contains(strings.Join(out6, "\n"), "RETURN") {
+		t.Fatalf("expected IPv6 OUTPUT fail-closed even when IPv6Enabled=true, got %v (err=%v)", out6, err)
+	}
+	eg6, err := RulesFor(6, GateHooks[2], vpnIPv6)
+	if err != nil || len(eg6) == 0 || strings.Contains(strings.Join(eg6, "\n"), "RETURN") {
+		t.Fatalf("expected IPv6 EGRESS fail-closed even when IPv6Enabled=true, got %v (err=%v)", eg6, err)
+	}
 }

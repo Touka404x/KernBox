@@ -170,13 +170,13 @@ func TestHasExternalCapture(t *testing.T) {
 	if !HasExternalCapture(m4, 4, "PROXY_") || HasExternalCapture(m4, 6, "PROXY_") {
 		t.Fatal("unexpected HasExternalCapture result")
 	}
-	lgp4 := ParseSave("*mangle\n:LGP_PROXY_OUTPUT - [0:0]\n-A OUTPUT -p tcp -j LGP_PROXY_OUTPUT\n")
-	if !HasExternalCapture(lgp4, 4, "LGP_") || HasExternalCapture(lgp4, 6, "LGP_") {
-		t.Fatal("expected LGP_PROXY_OUTPUT to match IPv4 prefix LGP_ only")
+	tpx4 := ParseSave("*mangle\n:TPX_PROXY_OUTPUT - [0:0]\n-A OUTPUT -p tcp -j TPX_PROXY_OUTPUT\n")
+	if !HasExternalCapture(tpx4, 4, "TPX_") || HasExternalCapture(tpx4, 6, "TPX_") {
+		t.Fatal("expected TPX_PROXY_OUTPUT to match IPv4 prefix TPX_ only")
 	}
-	lgp6 := ParseSave("*mangle\n:LGP_PROXY_OUTPUT6 - [0:0]\n-A OUTPUT -p tcp -j LGP_PROXY_OUTPUT6\n")
-	if !HasExternalCapture(lgp6, 6, "LGP_") || HasExternalCapture(lgp6, 4, "LGP_") {
-		t.Fatal("expected LGP_PROXY_OUTPUT6 to match IPv6 prefix LGP_ only")
+	tpx6 := ParseSave("*mangle\n:TPX_PROXY_OUTPUT6 - [0:0]\n-A OUTPUT -p tcp -j TPX_PROXY_OUTPUT6\n")
+	if !HasExternalCapture(tpx6, 6, "TPX_") || HasExternalCapture(tpx6, 4, "TPX_") {
+		t.Fatal("expected TPX_PROXY_OUTPUT6 to match IPv6 prefix TPX_ only")
 	}
 	if HasExternalCapture(m4, 4, "") {
 		t.Fatal("empty prefix must return false")

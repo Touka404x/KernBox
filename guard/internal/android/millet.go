@@ -43,6 +43,14 @@ func InspectCgroupV2Freeze(fs CgroupFS, clientUID, pid int) FreezeState {
 		return FreezeState{}
 	}
 	pidStr := strconv.Itoa(pid)
+	parentPath := fmt.Sprintf("/sys/fs/cgroup/uid_%d/cgroup.freeze", clientUID)
+	if pdata, perr := fs.ReadFile(parentPath); perr == nil && strings.TrimSpace(string(pdata)) == "1" {
+		return FreezeState{
+			Frozen:     true,
+			FreezePath: parentPath,
+			Evidence:   parentPath + "=1",
+		}
+	}
 	directPath := fmt.Sprintf("/sys/fs/cgroup/uid_%d/pid_%d/cgroup.freeze", clientUID, pid)
 	if data, err := fs.ReadFile(directPath); err == nil {
 		if strings.TrimSpace(string(data)) == "1" {
@@ -51,6 +59,18 @@ func InspectCgroupV2Freeze(fs CgroupFS, clientUID, pid int) FreezeState {
 				FreezePath: directPath,
 				Evidence:   directPath + "=1",
 			}
+		}
+	}
+	eventsPath := fmt.Sprintf("/sys/fs/cgroup/uid_%d/pid_%d/cgroup.events", clientUID, pid)
+	if ev, err := fs.ReadFile(eventsPath); err == nil && strings.Contains(string(ev), "frozen 1") {
+		freezeTarget := directPath
+		if _, rerr := fs.ReadFile(freezeTarget); rerr != nil {
+			freezeTarget = parentPath
+		}
+		return FreezeState{
+			Frozen:     true,
+			FreezePath: freezeTarget,
+			Evidence:   eventsPath + ":frozen 1",
 		}
 	}
 
@@ -101,6 +121,14 @@ func UnfreezeCgroupV2(fs CgroupFS, clientUID, pid int, st FreezeState) error {
 		directPath := fmt.Sprintf("/sys/fs/cgroup/uid_%d/pid_%d/cgroup.freeze", clientUID, pid)
 		if _, err := fs.ReadFile(directPath); err == nil {
 			if err := fs.WriteFile(directPath, []byte("0")); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	}
+	parentPath := fmt.Sprintf("/sys/fs/cgroup/uid_%d/cgroup.freeze", clientUID)
+	if st.FreezePath != parentPath {
+		if pdata, err := fs.ReadFile(parentPath); err == nil && strings.TrimSpace(string(pdata)) == "1" {
+			if err := fs.WriteFile(parentPath, []byte("0")); err != nil {
 				errs = append(errs, err)
 			}
 		}

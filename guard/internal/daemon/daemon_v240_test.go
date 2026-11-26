@@ -268,8 +268,8 @@ func TestDeepPauseWakesAndFlushesMihomoAndPreservesLocales(t *testing.T) {
 	if strings.Contains(pauseCalls, "am stop-user") {
 		t.Fatalf("must NEVER call am stop-user (FBE key eviction bug):\n%s", pauseCalls)
 	}
-	if !strings.Contains(pauseCalls, "am force-stop --user 10 com.google.android.apps.bard") {
-		t.Fatalf("expected Gemini force-stopped on hibernate pause:\n%s", pauseCalls)
+	if !strings.Contains(pauseCalls, "am stop-app --user 10 com.google.android.apps.bard") {
+		t.Fatalf("expected Gemini stopped via am stop-app on hibernate pause:\n%s", pauseCalls)
 	}
 	if len(closedIDs) != 1 || closedIDs[0] != "wp-1" {
 		t.Fatalf("expected only wp-1 flushed on pause, got %v", closedIDs)
@@ -361,7 +361,7 @@ func TestIdleAutoPauseTrackerAndStepCheck(t *testing.T) {
 			"dumpsys audio":                                                 "",
 		},
 		onRun: func(cmdLine string) (string, bool, error) {
-			if cmdLine == "am force-stop --user 10 com.google.android.apps.bard" {
+			if cmdLine == "am stop-app --user 10 com.google.android.apps.bard" {
 				forceStoppedBard = true
 				return "", true, nil
 			}
