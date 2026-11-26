@@ -2594,6 +2594,9 @@ func (d *Daemon) HandleRPC(ctx context.Context, req contracts.RPCRequest) contra
 		if !loaded {
 			return contracts.RPCResponse{ID: req.ID, OK: false, Error: "policy not pinned", Data: map[string]any{}}
 		}
+		if req.Pkg == policy.EffectiveAdminPackage() {
+			return contracts.RPCResponse{ID: req.ID, OK: false, Error: fmt.Sprintf("refusing to force-stop profile owner package %s", req.Pkg), Data: d.buildStatusData(ctx)}
+		}
 		if err := android.StopSandboxApp(ctx, d.runner, policy.UserID, req.Pkg, policy.EffectiveCallerPackage()); err != nil {
 			return contracts.RPCResponse{ID: req.ID, OK: false, Error: err.Error(), Data: d.buildStatusData(ctx)}
 		}
@@ -2605,6 +2608,9 @@ func (d *Daemon) HandleRPC(ctx context.Context, req contracts.RPCRequest) contra
 		d.mu.Unlock()
 		if !loaded {
 			return contracts.RPCResponse{ID: req.ID, OK: false, Error: "policy not pinned", Data: map[string]any{}}
+		}
+		if req.Pkg == policy.EffectiveAdminPackage() {
+			return contracts.RPCResponse{ID: req.ID, OK: false, Error: fmt.Sprintf("refusing to remove profile owner package %s", req.Pkg), Data: d.buildStatusData(ctx)}
 		}
 		if _, err := android.RemoveSandboxApp(ctx, d.runner, policy.UserID, req.Pkg, policy.EffectiveCallerPackage()); err != nil {
 			return contracts.RPCResponse{ID: req.ID, OK: false, Error: err.Error(), Data: d.buildStatusData(ctx)}
@@ -3036,7 +3042,7 @@ func (d *Daemon) buildStatusData(ctx context.Context) map[string]any {
 		} else {
 			data["frozen_uids"] = []int{}
 		}
-		if apps, err := android.ListSandboxApps(ctx, d.runner, policy.UserID, policy.EffectiveCallerPackage(), "com.sandbox.verify"); err == nil {
+		if apps, err := android.ListSandboxApps(ctx, d.runner, policy.UserID, policy.EffectiveCallerPackage(), policy.EffectiveAdminPackage(), contracts.VerifyProbePackage); err == nil {
 			data["sandbox_apps"] = apps
 		} else {
 			data["sandbox_apps"] = []string{}

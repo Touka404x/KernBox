@@ -183,6 +183,14 @@ func (p Policy) EffectiveAdminComponent() string {
 	return p.EffectiveCallerPackage() + "/" + DefaultAdminReceiverClass
 }
 
+func (p Policy) EffectiveAdminPackage() string {
+	comp := p.EffectiveAdminComponent()
+	if idx := strings.IndexByte(comp, '/'); idx > 0 {
+		return comp[:idx]
+	}
+	return p.EffectiveCallerPackage()
+}
+
 func (p Policy) EffectiveServiceComponent() string {
 	if p.ServiceComponent != "" {
 		return p.ServiceComponent

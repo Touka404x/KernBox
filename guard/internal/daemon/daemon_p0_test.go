@@ -124,3 +124,54 @@ func TestCustomExemptionLockAndAckCustomPIDKey(t *testing.T) {
 		t.Fatal("expected unknown non-*_pid key rejected")
 	}
 }
+
+type adminExcludeRunner struct {
+	calls []string
+}
+
+func (a *adminExcludeRunner) Run(_ context.Context, _ time.Duration, _ string, name string, args ...string) (string, error) {
+	line := name + " " + strings.Join(args, " ")
+	a.calls = append(a.calls, line)
+	if line == "cmd package list packages -3 --user 10" {
+		return "package:com.android.chrome\npackage:com.legacy.dpc\npackage:com.sandbox.controller\npackage:com.sandbox.verify\n", nil
+	}
+	return "", nil
+}
+
+func TestAdminPackageExcludedFromSandboxAppsAndProtectedFromStopRemove(t *testing.T) {
+	dir := t.TempDir()
+	pol := testPolicy()
+	pol.AdminComponent = "com.legacy.dpc/.AdminReceiver"
+	if got := pol.EffectiveAdminPackage(); got != "com.legacy.dpc" {
+		t.Fatalf("EffectiveAdminPackage=%q, want com.legacy.dpc", got)
+	}
+	runner := &adminExcludeRunner{}
+	d := &Daemon{
+		bootID:            "boot-admin-1",
+		policy:            pol,
+		policyLoaded:      true,
+		runner:            runner,
+		hibernatedPkgsPath:   filepath.Join(dir, "hibernated.json"),
+		perfConfigPath:    filepath.Join(dir, "perf.json"),
+		stealthConfigPath: filepath.Join(dir, "stealth.json"),
+		zygiskDisabledFlag: filepath.Join(dir, "zygisk_disabled"),
+		stealthBootTriesPath: filepath.Join(dir, "stealth_boot_tries"),
+	}
+	data := d.buildStatusData(context.Background())
+	apps, ok := data["sandbox_apps"].([]string)
+	if !ok {
+		t.Fatalf("unexpected sandbox_apps type: %T", data["sandbox_apps"])
+	}
+	if len(apps) != 1 || apps[0] != "com.android.chrome" {
+		t.Fatalf("expected [com.android.chrome], got %v", apps)
+	}
+
+	stopResp := d.HandleRPC(context.Background(), contracts.RPCRequest{ID: "stop-1", Op: contracts.OpStopApp, Pkg: "com.legacy.dpc"})
+	if stopResp.OK || !strings.Contains(stopResp.Error, "profile owner") {
+		t.Fatalf("expected OpStopApp to refuse profile owner package, got %+v", stopResp)
+	}
+	remResp := d.HandleRPC(context.Background(), contracts.RPCRequest{ID: "rem-1", Op: contracts.OpRemoveApp, Pkg: "com.legacy.dpc"})
+	if remResp.OK || !strings.Contains(remResp.Error, "profile owner") {
+		t.Fatalf("expected OpRemoveApp to refuse profile owner package, got %+v", remResp)
+	}
+}
