@@ -6,7 +6,6 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/epoll.h>
@@ -16,6 +15,21 @@
 #include <sys/un.h>
 #include <time.h>
 #include <unistd.h>
+
+#define BROKER_STR_HELPER(x) #x
+#define BROKER_STR(x) BROKER_STR_HELPER(x)
+#define BROKER_LINE_TOO_LONG_MSG "line exceeds " BROKER_STR(BROKER_MAX_RPC_LINE_BYTES) " bytes"
+
+static void log_stderr(const char *msg) {
+    if (!msg) return;
+    size_t len = strlen(msg);
+    if (len > 0) {
+        ssize_t w = write(STDERR_FILENO, msg, len);
+        (void)w;
+    }
+    ssize_t nl = write(STDERR_FILENO, "\n", 1);
+    (void)nl;
+}
 
 #define MAX_CONNS 8
 #define MAX_EPOLL_EVENTS 16
@@ -310,9 +324,7 @@ static void start_guard_forward(conn_slot_t *s, size_t slot_idx, uint64_t now_ms
 static void handle_client_read(conn_slot_t *s, size_t slot_idx, uint64_t now_ms) {
     for (;;) {
         if (s->req_len > BROKER_MAX_RPC_LINE_BYTES) {
-            char msg[48];
-            (void)snprintf(msg, sizeof(msg), "line exceeds %d bytes", BROKER_MAX_RPC_LINE_BYTES);
-            queue_error_reply(s, slot_idx, msg, now_ms);
+            queue_error_reply(s, slot_idx, BROKER_LINE_TOO_LONG_MSG, now_ms);
             return;
         }
         size_t avail = (BROKER_MAX_RPC_LINE_BYTES + 1) - s->req_len;
@@ -339,9 +351,7 @@ static void handle_client_read(conn_slot_t *s, size_t slot_idx, uint64_t now_ms)
             break;
         }
         if (s->req_len > BROKER_MAX_RPC_LINE_BYTES) {
-            char msg[48];
-            (void)snprintf(msg, sizeof(msg), "line exceeds %d bytes", BROKER_MAX_RPC_LINE_BYTES);
-            queue_error_reply(s, slot_idx, msg, now_ms);
+            queue_error_reply(s, slot_idx, BROKER_LINE_TOO_LONG_MSG, now_ms);
             return;
         }
     }
@@ -496,7 +506,7 @@ int main(void) {
     size_t attr_len = 0;
     if (read_proc_attr(BROKER_PROC_ATTR_CURRENT, attr_buf, sizeof(attr_buf), &attr_len) != 0 ||
         broker_check_self_context(attr_buf, attr_len) != 0) {
-        fprintf(stderr, "unexpected SELinux context (want %s)\n", BROKER_SELINUX_CTX);
+        log_stderr("unexpected SELinux context (want " BROKER_SELINUX_CTX ")");
         return 1;
     }
 
@@ -505,12 +515,12 @@ int main(void) {
     sigaddset(&mask, SIGTERM);
     sigaddset(&mask, SIGINT);
     if (sigprocmask(SIG_BLOCK, &mask, NULL) != 0) {
-        perror("sigprocmask");
+        log_stderr("sigprocmask failed");
         return 1;
     }
     int sig_fd = signalfd(-1, &mask, SFD_NONBLOCK | SFD_CLOEXEC);
     if (sig_fd < 0) {
-        perror("signalfd");
+        log_stderr("signalfd failed");
         return 1;
     }
 
@@ -519,7 +529,7 @@ int main(void) {
     int listen_fd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
     if (listen_fd < 0) {
         umask(old_mask);
-        perror("socket");
+        log_stderr("socket failed");
         close(sig_fd);
         return 1;
     }
@@ -531,7 +541,7 @@ int main(void) {
     if (bind(listen_fd, (struct sockaddr *)&laddr, sizeof(laddr)) != 0 ||
         listen(listen_fd, 16) != 0) {
         umask(old_mask);
-        perror("bind/listen");
+        log_stderr("bind/listen failed");
         close(listen_fd);
         unlink(BROKER_SOCK_PATH);
         close(sig_fd);
@@ -539,7 +549,7 @@ int main(void) {
     }
     umask(old_mask);
     if (chmod(BROKER_SOCK_PATH, 0666) != 0) {
-        perror("chmod ctrl.sock");
+        log_stderr("chmod ctrl.sock failed");
         close(listen_fd);
         unlink(BROKER_SOCK_PATH);
         close(sig_fd);
@@ -548,7 +558,7 @@ int main(void) {
 
     g_epfd = epoll_create1(EPOLL_CLOEXEC);
     if (g_epfd < 0) {
-        perror("epoll_create1");
+        log_stderr("epoll_create1 failed");
         close(listen_fd);
         unlink(BROKER_SOCK_PATH);
         close(sig_fd);
@@ -561,7 +571,7 @@ int main(void) {
     }
     if (epoll_add(listen_fd, EPOLLIN, TAG_LISTENER) != 0 ||
         epoll_add(sig_fd, EPOLLIN, TAG_SIGNALFD) != 0) {
-        perror("epoll_add");
+        log_stderr("epoll_add failed");
         close(g_epfd);
         close(listen_fd);
         unlink(BROKER_SOCK_PATH);

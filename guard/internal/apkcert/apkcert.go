@@ -4,7 +4,6 @@ import (
 	"archive/zip"
 	"bytes"
 	"crypto/sha256"
-	"crypto/x509"
 	"encoding/asn1"
 	"encoding/binary"
 	"encoding/hex"
@@ -25,7 +24,90 @@ const (
 	maxV1SigBytes    = 2 << 20
 )
 
-var oidPKCS7SignedData = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 7, 2}
+var (
+	oidPKCS7SignedData  = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 7, 2}
+	oidBasicConstraints = asn1.ObjectIdentifier{2, 5, 29, 19}
+)
+
+type x509CertificateASN1 struct {
+	TBSCertificate     asn1.RawValue
+	SignatureAlgorithm asn1.RawValue
+	SignatureValue     asn1.BitString
+}
+
+type x509ExtensionASN1 struct {
+	ID       asn1.ObjectIdentifier
+	Critical bool `asn1:"optional"`
+	Value    []byte
+}
+
+type x509TBSCertificateASN1 struct {
+	Version            int `asn1:"optional,explicit,default:0,tag:0"`
+	SerialNumber       asn1.RawValue
+	SignatureAlgorithm asn1.RawValue
+	Issuer             asn1.RawValue
+	Validity           asn1.RawValue
+	Subject            asn1.RawValue
+	PublicKeyInfo      asn1.RawValue
+	IssuerUniqueID     asn1.BitString     `asn1:"optional,tag:1"`
+	SubjectUniqueID    asn1.BitString     `asn1:"optional,tag:2"`
+	Extensions         []x509ExtensionASN1 `asn1:"optional,explicit,tag:3"`
+}
+
+func isASN1Sequence(v asn1.RawValue) bool {
+	return v.Class == asn1.ClassUniversal && v.Tag == asn1.TagSequence && v.IsCompound
+}
+
+// validateX509CertDER verifies X.509 DER structure using encoding/asn1 without
+// pulling crypto/x509, math/big, or asymmetric signature packages into sandbox_guard.
+func validateX509CertDER(der []byte) (bool, error) {
+	if len(der) == 0 {
+		return false, errors.New("empty certificate DER")
+	}
+	var cert x509CertificateASN1
+	rest, err := asn1.Unmarshal(der, &cert)
+	if err != nil {
+		return false, err
+	}
+	if len(rest) != 0 {
+		return false, errors.New("trailing data after X.509 certificate")
+	}
+	if !isASN1Sequence(cert.TBSCertificate) || !isASN1Sequence(cert.SignatureAlgorithm) {
+		return false, errors.New("malformed X.509 outer sequence")
+	}
+
+	var tbs x509TBSCertificateASN1
+	tbsRest, err := asn1.Unmarshal(cert.TBSCertificate.FullBytes, &tbs)
+	if err != nil {
+		return false, err
+	}
+	if len(tbsRest) != 0 {
+		return false, errors.New("trailing data after TBSCertificate")
+	}
+	if tbs.SerialNumber.Class != asn1.ClassUniversal || tbs.SerialNumber.Tag != asn1.TagInteger {
+		return false, errors.New("invalid X.509 serialNumber")
+	}
+	if !isASN1Sequence(tbs.SignatureAlgorithm) ||
+		!isASN1Sequence(tbs.Issuer) ||
+		!isASN1Sequence(tbs.Validity) ||
+		!isASN1Sequence(tbs.Subject) ||
+		!isASN1Sequence(tbs.PublicKeyInfo) {
+		return false, errors.New("malformed X.509 TBSCertificate fields")
+	}
+
+	for _, ext := range tbs.Extensions {
+		if !ext.ID.Equal(oidBasicConstraints) {
+			continue
+		}
+		var bc struct {
+			IsCA bool `asn1:"optional"`
+		}
+		if _, err := asn1.Unmarshal(ext.Value, &bc); err == nil && bc.IsCA {
+			return true, nil
+		}
+	}
+	return false, nil
+}
 
 // ExtractAPKCertSHA256s parses an APK file (v3/v2 APK Signing Block or v1 JAR PKCS#7)
 // and returns lowercase hex SHA-256 digests of its signing certificates.
@@ -210,7 +292,7 @@ func parseV2V3Signers(blockVal []byte) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		if _, err := x509.ParseCertificate(certDER); err != nil {
+		if _, err := validateX509CertDER(certDER); err != nil {
 			return nil, fmt.Errorf("invalid signer cert DER: %w", err)
 		}
 		sum := sha256.Sum256(certDER)
@@ -290,14 +372,14 @@ func parsePKCS7Certs(der []byte) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		cert, err := x509.ParseCertificate(rawCert.FullBytes)
+		isCA, err := validateX509CertDER(rawCert.FullBytes)
 		if err != nil {
 			return nil, err
 		}
-		sum := sha256.Sum256(cert.Raw)
+		sum := sha256.Sum256(rawCert.FullBytes)
 		h := hex.EncodeToString(sum[:])
 		allHashes = append(allHashes, h)
-		if !cert.IsCA {
+		if !isCA {
 			leafHashes = append(leafHashes, h)
 		}
 	}

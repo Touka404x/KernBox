@@ -57,8 +57,12 @@ jobs:
           GOOS=linux GOARCH=arm64 go vet -tags "${{ matrix.tags }}" ./...
           GOOS=linux GOARCH=arm64 go build -tags "${{ matrix.tags }}" -o /tmp/guard ./cmd/guard
           GOOS=linux GOARCH=arm64 go build -tags "${{ matrix.tags }}" -o /tmp/broker ./cmd/broker
-          if GOOS=linux GOARCH=arm64 go list -tags "${{ matrix.tags }}" -deps ./cmd/guard ./cmd/broker | grep -qx testing; then
-            echo "ERROR: testing package linked into production binary"
+          if GOOS=linux GOARCH=arm64 go list -tags "${{ matrix.tags }}" -deps ./cmd/guard | grep -qxE 'testing|net/http|crypto/tls|crypto/x509|vendor/golang\.org/x/net'; then
+            echo "ERROR: bloat/test package linked into production sandbox_guard binary"
+            exit 1
+          fi
+          if GOOS=linux GOARCH=arm64 go list -tags "${{ matrix.tags }}" -deps ./cmd/broker | grep -qx testing; then
+            echo "ERROR: testing package linked into broker"
             exit 1
           fi
       - name: Go test (-race)

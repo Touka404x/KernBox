@@ -1,14 +1,15 @@
 package daemon
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
-	"net/http"
-	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -145,40 +146,187 @@ func FlushSandboxConnections(ctx context.Context, configPath, inboundName string
 	return flushMihomoInboundURL(ctx, baseURL, secret, inboundName)
 }
 
+const maxMihomoRespBytes = 2 << 20
+
+func escapePathSegment(s string) string {
+	const hexDigits = "0123456789ABCDEF"
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		isUnreserved := (c >= 'A' && c <= 'Z') ||
+			(c >= 'a' && c <= 'z') ||
+			(c >= '0' && c <= '9') ||
+			c == '-' || c == '.' || c == '_' || c == '~'
+		if isUnreserved {
+			b.WriteByte(c)
+			continue
+		}
+		b.WriteByte('%')
+		b.WriteByte(hexDigits[c>>4])
+		b.WriteByte(hexDigits[c&0x0F])
+	}
+	return b.String()
+}
+
+func loopbackHTTPRequest(ctx context.Context, method, baseURL, reqPath, secret string) (int, []byte, error) {
+	if strings.ContainsAny(reqPath, "\r\n") || strings.ContainsAny(secret, "\r\n") {
+		return 0, nil, errors.New("invalid CR/LF in loopback HTTP request")
+	}
+	if !strings.HasPrefix(baseURL, "http://") {
+		return 0, nil, fmt.Errorf("unsupported controller scheme in %q", baseURL)
+	}
+	hostport := strings.TrimRight(strings.TrimPrefix(baseURL, "http://"), "/")
+	host, port, err := net.SplitHostPort(hostport)
+	if err != nil || !isLoopbackHost(host) {
+		return 0, nil, fmt.Errorf("refusing non-loopback controller target %q", baseURL)
+	}
+
+	deadline := time.Now().Add(1500 * time.Millisecond)
+	if cd, ok := ctx.Deadline(); ok && cd.Before(deadline) {
+		deadline = cd
+	}
+
+	var dialer net.Dialer
+	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(host, port))
+	if err != nil {
+		return 0, nil, err
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(deadline)
+
+	var reqBuf bytes.Buffer
+	reqBuf.Grow(128 + len(reqPath) + len(secret))
+	reqBuf.WriteString(method)
+	reqBuf.WriteByte(' ')
+	reqBuf.WriteString(reqPath)
+	reqBuf.WriteString(" HTTP/1.1\r\nHost: ")
+	reqBuf.WriteString(hostport)
+	reqBuf.WriteString("\r\nConnection: close\r\n")
+	if secret != "" {
+		reqBuf.WriteString("Authorization: Bearer ")
+		reqBuf.WriteString(secret)
+		reqBuf.WriteString("\r\n")
+	}
+	reqBuf.WriteString("\r\n")
+
+	if _, err := conn.Write(reqBuf.Bytes()); err != nil {
+		return 0, nil, err
+	}
+
+	br := bufio.NewReaderSize(conn, 4096)
+	statusLine, err := br.ReadString('\n')
+	if err != nil {
+		return 0, nil, err
+	}
+	statusFields := strings.Fields(statusLine)
+	if len(statusFields) < 2 || !strings.HasPrefix(statusFields[0], "HTTP/1.") {
+		return 0, nil, fmt.Errorf("malformed HTTP status line %q", strings.TrimSpace(statusLine))
+	}
+	code, err := strconv.Atoi(statusFields[1])
+	if err != nil {
+		return 0, nil, fmt.Errorf("invalid HTTP status code %q", statusFields[1])
+	}
+
+	chunked := false
+	contentLen := int64(-1)
+	for hdrCount := 0; hdrCount < 128; hdrCount++ {
+		line, err := br.ReadString('\n')
+		if err != nil {
+			return 0, nil, err
+		}
+		trimmed := strings.TrimRight(line, "\r\n")
+		if trimmed == "" {
+			break
+		}
+		k, v, ok := strings.Cut(trimmed, ":")
+		if !ok {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(k)) {
+		case "transfer-encoding":
+			if strings.Contains(strings.ToLower(v), "chunked") {
+				chunked = true
+			}
+		case "content-length":
+			if n, perr := strconv.ParseInt(strings.TrimSpace(v), 10, 64); perr == nil && n >= 0 {
+				contentLen = n
+			}
+		}
+	}
+
+	if code == 204 || code == 304 || method == "HEAD" {
+		return code, nil, nil
+	}
+	if chunked {
+		body, err := readChunkedBody(br, maxMihomoRespBytes)
+		return code, body, err
+	}
+	if contentLen == 0 {
+		return code, nil, nil
+	}
+	if contentLen > 0 {
+		if contentLen > maxMihomoRespBytes {
+			return 0, nil, fmt.Errorf("response body %d exceeds limit", contentLen)
+		}
+		body := make([]byte, contentLen)
+		if _, err := io.ReadFull(br, body); err != nil {
+			return 0, nil, err
+		}
+		return code, body, nil
+	}
+	body, err := io.ReadAll(io.LimitReader(br, maxMihomoRespBytes+1))
+	if err != nil {
+		return 0, nil, err
+	}
+	if len(body) > maxMihomoRespBytes {
+		return 0, nil, errors.New("response body exceeds limit")
+	}
+	return code, body, nil
+}
+
+func readChunkedBody(br *bufio.Reader, limit int) ([]byte, error) {
+	var out bytes.Buffer
+	for {
+		line, err := br.ReadString('\n')
+		if err != nil {
+			return nil, err
+		}
+		sizePart, _, _ := strings.Cut(strings.TrimSpace(line), ";")
+		sz, err := strconv.ParseInt(strings.TrimSpace(sizePart), 16, 64)
+		if err != nil || sz < 0 {
+			return nil, fmt.Errorf("invalid chunk size %q", line)
+		}
+		if sz == 0 {
+			return out.Bytes(), nil
+		}
+		if sz > int64(limit-out.Len()) {
+			return nil, errors.New("chunked response exceeds limit")
+		}
+		if _, err := io.CopyN(&out, br, sz); err != nil {
+			return nil, err
+		}
+		crlf, err := br.ReadString('\n')
+		if err != nil || strings.TrimRight(crlf, "\r\n") != "" {
+			return nil, errors.New("malformed chunk terminator")
+		}
+	}
+}
+
 func flushMihomoInboundURL(ctx context.Context, baseURL, secret, inboundName string) (int, error) {
 	cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
-	client := &http.Client{
-		Timeout: 1500 * time.Millisecond,
-		Transport: &http.Transport{
-			Proxy:               nil,
-			MaxIdleConns:        16,
-			MaxIdleConnsPerHost: 8,
-			IdleConnTimeout:     5 * time.Second,
-		},
-		CheckRedirect: func(*http.Request, []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
-	req, err := http.NewRequestWithContext(cctx, http.MethodGet, baseURL+"/connections", nil)
+	status, body, err := loopbackHTTPRequest(cctx, "GET", baseURL, "/connections", secret)
 	if err != nil {
 		return 0, err
 	}
-	if secret != "" {
-		req.Header.Set("Authorization", "Bearer "+secret)
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return 0, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("GET /connections status %d", resp.StatusCode)
+	if status != 200 {
+		return 0, fmt.Errorf("GET /connections status %d", status)
 	}
 
 	var list mihomoConnsResp
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(&list); err != nil {
+	if err := json.Unmarshal(body, &list); err != nil {
 		return 0, err
 	}
 
@@ -187,7 +335,7 @@ func flushMihomoInboundURL(ctx context.Context, baseURL, secret, inboundName str
 		if c.Metadata.InboundName != inboundName {
 			continue
 		}
-		if c.ID == "" || c.ID == "." || c.ID == ".." || strings.ContainsAny(c.ID, "/?\\#%") {
+		if c.ID == "" || c.ID == "." || c.ID == ".." || strings.ContainsAny(c.ID, "/?\\#%\r\n") {
 			continue
 		}
 		targetIDs = append(targetIDs, c.ID)
@@ -216,19 +364,9 @@ func flushMihomoInboundURL(ctx context.Context, baseURL, secret, inboundName str
 				if cctx.Err() != nil {
 					return
 				}
-				delReq, derr := http.NewRequestWithContext(cctx, http.MethodDelete, baseURL+"/connections/"+url.PathEscape(id), nil)
-				if derr != nil {
-					continue
-				}
-				if secret != "" {
-					delReq.Header.Set("Authorization", "Bearer "+secret)
-				}
-				delResp, derr := client.Do(delReq)
-				if derr == nil {
-					_ = delResp.Body.Close()
-					if delResp.StatusCode >= 200 && delResp.StatusCode < 300 {
-						closed.Add(1)
-					}
+				delStatus, _, derr := loopbackHTTPRequest(cctx, "DELETE", baseURL, "/connections/"+escapePathSegment(id), secret)
+				if derr == nil && delStatus >= 200 && delStatus < 300 {
+					closed.Add(1)
 				}
 			}
 		}()

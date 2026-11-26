@@ -89,8 +89,9 @@ def build_broker(args: argparse.Namespace) -> pathlib.Path:
         f"--target={tc['target']}",
         "-static",
         "-std=c11",
-        "-Os",
+        "-Oz",
         "-flto",
+        "-fmerge-all-constants",
         "-Wall",
         "-Wextra",
         "-Werror",
@@ -104,7 +105,7 @@ def build_broker(args: argparse.Namespace) -> pathlib.Path:
         str(ROOT / "main.c"),
         "-o",
         str(out_bin),
-        "-Wl,--gc-sections,-s,-z,max-page-size=16384",
+        "-Wl,--gc-sections,-s,--icf=all,-z,max-page-size=16384",
     ]
     print("+", " ".join(cmd))
     subprocess.run(cmd, check=True)

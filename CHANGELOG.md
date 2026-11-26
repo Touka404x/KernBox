@@ -5,9 +5,11 @@ All notable changes to **KernBox** are documented in this file.
 ## [Unreleased]
 
 ### Changed & Optimized
-- **Static C11 Zero-GC `sandbox_broker` (`broker/`)**: Replaced the Go broker runtime with a pure C11 single-thread `epoll` + `signalfd` daemon (~258 KB static ARM64 ELF, zero `PT_INTERP`/`DT_NEEDED`/`TEXTREL`, ~244–312 KB RSS), cutting variant module ZIP sizes from ~4.1 MB to ~3.2 MB while preserving strict `SO_PEERCRED` + `SO_PEERSEC` + APK cert validation.
-- **Native Linux `AF_NETLINK` (`NETLINK_ROUTE`) TProxy Routing (`guard/internal/netfilter/rtnetlink_*.go`)**: Replaced `ip` subprocess forks in `verifyTProxyRouting`, `ensureTProxyRouting`, and `cleanupTProxyRouting` with direct `NETLINK_ROUTE` syscalls supporting stale `pref 2025` rule self-healing and CLI fallback.
-- **Build & Packaging Polish (`controller/`, `stealth/`, `verify/`, `packaging/`)**: Fixed Windows SDK/NDK space-in-path invocations by calling `java -cp d8.jar`, `java -jar apksigner.jar`, and `clang++.exe --target=...` directly, and removed obsolete `GOMAXPROCS`/`GOGC`/`GOMEMLIMIT` env vars from `service.sh.tmpl` for `sandbox_broker`.
+- **Static C11 Zero-GC `sandbox_broker` & `AF_NETLINK` Routing (`broker/`, `guard/internal/netfilter/rtnetlink_*.go`)**: Replaced Go broker with a pure C11 single-thread `epoll` + `signalfd` daemon (zero `PT_INTERP`/`DT_NEEDED`/`TEXTREL`), and replaced `ip` subprocess forks in `verifyTProxyRouting` / `ensureTProxyRouting` / `cleanupTProxyRouting` with direct Linux `NETLINK_ROUTE` syscalls supporting stale `pref 2025` rule self-healing.
+- **Extreme Footprint & Memory Squeeze (`guard/`, `broker/`, `stealth/`, `packaging/`)**:
+  - Replaced `"net/http"` / `"net/url"` in `mihomo_flush.go` with a dedicated 120-line loopback HTTP/1.1 client and replaced `"crypto/x509"` in `apkcert.go` with strict ASN.1 DER structural validation, cutting `sandbox_guard` from `7,143,586 B` to `4,587,682 B` (-35.8%), removing `net/http`, `crypto/tls`, `crypto/x509`, and `vendor/golang.org/x/net` (enforced in CI), tuning `GOMAXPROCS=1` / `GOGC=10` / `GOMEMLIMIT=3MiB` + `debug.FreeOSMemory()`, and shrinking runtime PSS from `8.66 MiB` to `7.28 MiB`.
+  - Eliminated `<stdio.h>` (`vsnprintf`/`snprintf`/`fprintf`/`perror`) from `broker/` and enabled `-Oz -flto -fmerge-all-constants -Wl,--icf=all` across `broker/` (`259,192 B` / ~253 KB) and `stealth/` (`zygisk/arm64-v8a.so`: `306,208 B` -> `271,016 B`).
+  - Removed the post-install duplicate `$MODPATH/bin` copy in `customize.sh.tmpl`, reducing variant ZIP size from `~3.18 MB` to `~2.08 MB` and total on-device disk footprint from `15.22 MiB` to `5.68 MiB`.
 
 ## [1.2.0] - 2026-11-25
 

@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -770,6 +771,7 @@ func (d *Daemon) Supervise() int {
 	if err := d.reconcileOnce(ctx, reconcileReq{clearAckBlock: true, refreshCert: true, syncHide: syncOnBoot}); err != nil {
 		d.log.Printf("initial reconcile: %v", err)
 	}
+	debug.FreeOSMemory()
 
 	stopRPC, err := rpc.ServeGuardRPC(ctx, contracts.GuardSockPath, d)
 	if err != nil {

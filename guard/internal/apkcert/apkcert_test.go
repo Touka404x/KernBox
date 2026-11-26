@@ -29,8 +29,9 @@ func generateTestCertDER(t *testing.T, isCA bool) []byte {
 		Subject:      pkix.Name{CommonName: "Sandbox Work Test"},
 		NotBefore:    time.Now().Add(-time.Hour),
 		NotAfter:     time.Now().Add(24 * time.Hour),
-		IsCA:         isCA,
-		KeyUsage:     x509.KeyUsageDigitalSignature,
+		IsCA:                  isCA,
+		BasicConstraintsValid: isCA,
+		KeyUsage:              x509.KeyUsageDigitalSignature,
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
 	if err != nil {
@@ -110,5 +111,33 @@ func TestExtractAPKCertSHA256_V2AndV1(t *testing.T) {
 	}
 	if gotV1 != want {
 		t.Fatalf("v1 cert mismatch: got %s want %s", gotV1, want)
+	}
+
+	// Reject garbage DER in V2 signing block.
+	badV2, err := BuildV2SignedTestAPK([]byte("not-a-valid-x509-cert"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	badPath := filepath.Join(dir, "bad.apk")
+	if err := os.WriteFile(badPath, badV2, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ExtractAPKCertSHA256s(badPath); err == nil {
+		t.Fatal("expected invalid DER certificate to be rejected")
+	}
+
+	// Verify V1 PKCS#7 chain with both CA cert and leaf cert prefers the leaf cert.
+	caDER := generateTestCertDER(t, true)
+	chainBytes := append(append([]byte(nil), caDER...), certDER...)
+	chainPath := filepath.Join(dir, "chain.apk")
+	if err := os.WriteFile(chainPath, buildTestV1APK(t, chainBytes), 0600); err != nil {
+		t.Fatal(err)
+	}
+	gotChain, err := ExtractPrimaryCertSHA256(chainPath)
+	if err != nil {
+		t.Fatalf("v1 chain extract error: %v", err)
+	}
+	if gotChain != want {
+		t.Fatalf("v1 chain expected leaf cert %s, got %s", want, gotChain)
 	}
 }

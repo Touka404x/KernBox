@@ -199,7 +199,9 @@ def build_so(tc: dict, build_dir: pathlib.Path, oem: str, out_so: pathlib.Path) 
         cmd.append(f"--target={tc['clang_target']}")
     cmd.extend([
         "-std=c++17",
-        "-O2",
+        "-Oz",
+        "-flto",
+        "-fmerge-all-constants",
         "-Wall",
         "-Wextra",
         "-Werror",
@@ -209,6 +211,8 @@ def build_so(tc: dict, build_dir: pathlib.Path, oem: str, out_so: pathlib.Path) 
         "-fvisibility=hidden",
         "-ffunction-sections",
         "-fdata-sections",
+        "-fno-unwind-tables",
+        "-fno-asynchronous-unwind-tables",
         "-static-libstdc++",
         "-fno-exceptions",
         "-fno-rtti",
@@ -217,7 +221,7 @@ def build_so(tc: dict, build_dir: pathlib.Path, oem: str, out_so: pathlib.Path) 
         "-o",
         str(out_so),
         "-llog",
-        "-Wl,--gc-sections,-s,--exclude-libs,ALL,--hash-style=both,-z,max-page-size=16384",
+        "-Wl,--gc-sections,-s,--icf=all,--exclude-libs,ALL,--hash-style=both,-z,max-page-size=16384",
     ])
     run(cmd, env=tc["env"])
     print(f"Built {out_so} (oem={oem}): {out_so.stat().st_size} bytes")

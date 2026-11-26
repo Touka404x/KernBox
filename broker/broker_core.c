@@ -2,7 +2,6 @@
 
 #include <limits.h>
 #include <stdarg.h>
-#include <stdio.h>
 #include <string.h>
 
 static int is_ascii_ws(unsigned char c) {
@@ -24,15 +23,65 @@ static int hex_val(unsigned char c) {
     return -1;
 }
 
+static size_t fmt_append_u64(char *dst, size_t pos, size_t max, uint64_t v) {
+    char tmp[24];
+    size_t n = 0;
+    do {
+        tmp[n++] = (char)('0' + (v % 10u));
+        v /= 10u;
+    } while (v != 0 && n < sizeof(tmp));
+    while (n > 0 && pos < max) {
+        dst[pos++] = tmp[--n];
+    }
+    return pos;
+}
+
 static void set_err(char *errbuf, size_t errcap, const char *fmt, ...) {
-    if (!errbuf || errcap == 0) {
+    if (!errbuf || errcap == 0 || !fmt) {
         return;
     }
     va_list ap;
     va_start(ap, fmt);
-    (void)vsnprintf(errbuf, errcap, fmt, ap);
+    size_t pos = 0;
+    size_t max = errcap - 1;
+    for (const char *p = fmt; *p != '\0' && pos < max; p++) {
+        if (*p != '%') {
+            errbuf[pos++] = *p;
+            continue;
+        }
+        p++;
+        if (*p == '\0') {
+            break;
+        }
+        if (*p == '%') {
+            errbuf[pos++] = '%';
+        } else if (*p == 's') {
+            const char *s = va_arg(ap, const char *);
+            if (!s) s = "(null)";
+            while (*s != '\0' && pos < max) {
+                errbuf[pos++] = *s++;
+            }
+        } else if (*p == 'd') {
+            int iv = va_arg(ap, int);
+            uint64_t uv;
+            if (iv < 0) {
+                errbuf[pos++] = '-';
+                uv = (uint64_t)(-(int64_t)iv);
+            } else {
+                uv = (uint64_t)iv;
+            }
+            pos = fmt_append_u64(errbuf, pos, max, uv);
+        } else if (*p == 'z' && *(p + 1) == 'u') {
+            p++;
+            size_t zv = va_arg(ap, size_t);
+            pos = fmt_append_u64(errbuf, pos, max, (uint64_t)zv);
+        } else {
+            errbuf[pos++] = '%';
+            if (pos < max) errbuf[pos++] = *p;
+        }
+    }
     va_end(ap);
-    errbuf[errcap - 1] = '\0';
+    errbuf[pos] = '\0';
 }
 
 int broker_check_self_context(const char *raw, size_t len) {
@@ -525,7 +574,7 @@ static int parse_config_obj(json_cursor_t *c, char *errbuf, size_t errcap) {
                     return -1;
                 }
                 if (vlen > 0 && strcmp(val, "reject") != 0 && strcmp(val, "allow") != 0) {
-                    set_err(errbuf, errcap, "invalid quic_udp443_mode %q", val);
+                    set_err(errbuf, errcap, "invalid quic_udp443_mode \"%s\"", val);
                     return -1;
                 }
             }
@@ -549,7 +598,7 @@ static int parse_config_obj(json_cursor_t *c, char *errbuf, size_t errcap) {
                     strcmp(val, "warning") != 0 &&
                     strcmp(val, "info") != 0 &&
                     strcmp(val, "debug") != 0) {
-                    set_err(errbuf, errcap, "invalid log_level %q", val);
+                    set_err(errbuf, errcap, "invalid log_level \"%s\"", val);
                     return -1;
                 }
             }
@@ -877,7 +926,13 @@ static size_t append_json_escaped(char *out, size_t cap, size_t pos, const char 
         } else if (c == '\t') {
             rep[0] = '\\'; rep[1] = 't'; rlen = 2;
         } else if (c < 0x20u) {
-            (void)snprintf(rep, sizeof(rep), "\\u%04x", (unsigned int)c);
+            static const char k_hex[] = "0123456789abcdef";
+            rep[0] = '\\';
+            rep[1] = 'u';
+            rep[2] = '0';
+            rep[3] = '0';
+            rep[4] = k_hex[(c >> 4) & 0xFu];
+            rep[5] = k_hex[c & 0xFu];
             rlen = 6;
         } else {
             rep[0] = (char)c; rlen = 1;

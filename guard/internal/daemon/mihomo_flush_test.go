@@ -106,4 +106,34 @@ func TestFlushSandboxConnectionsOnlyClosesMatchingInbound(t *testing.T) {
 	if err != nil || closed2 != 2 {
 		t.Fatalf("expected direct loopback flush ignoring HTTP_PROXY, got closed=%d err=%v", closed2, err)
 	}
+
+	// Verify chunked Transfer-Encoding responses and CR/LF header injection rejection.
+	chunkedSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/connections" {
+			fl, _ := w.(http.Flusher)
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"connections":[{"id":"chk 1",`))
+			if fl != nil {
+				fl.Flush()
+			}
+			_, _ = w.Write([]byte(`"metadata":{"inboundName":"sandbox-tproxy"}}]}`))
+			return
+		}
+		if r.Method == http.MethodDelete && (r.RequestURI == "/connections/chk%201" || r.URL.Path == "/connections/chk 1") {
+			if r.RequestURI != "/connections/chk%201" {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer chunkedSrv.Close()
+	if n, err := flushMihomoInboundURL(context.Background(), chunkedSrv.URL, "", "sandbox-tproxy"); err != nil || n != 1 {
+		t.Fatalf("expected chunked flush count=1, got %d err=%v", n, err)
+	}
+	if _, _, err := loopbackHTTPRequest(context.Background(), "GET", chunkedSrv.URL, "/connections", "bad\r\nInjected: 1"); err == nil {
+		t.Fatal("expected CR/LF in secret to be rejected")
+	}
 }

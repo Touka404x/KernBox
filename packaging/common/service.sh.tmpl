@@ -358,7 +358,7 @@ supervise_proc() {
                 g_sz=$(wc -c < "$GUARD_HOME/guard-svc.log" 2>/dev/null || echo 0)
                 [ "$g_sz" -gt 131072 ] && mv -f "$GUARD_HOME/guard-svc.log" "$GUARD_HOME/guard-svc.log.1"
             fi
-            GOMAXPROCS=2 GOGC=25 GOMEMLIMIT=6MiB "$bin" "$arg" >> "$GUARD_HOME/guard-svc.log" 2>&1 9>&- &
+            GOMAXPROCS=1 GOGC=10 GOMEMLIMIT=3MiB "$bin" "$arg" >> "$GUARD_HOME/guard-svc.log" 2>&1 9>&- &
         fi
         local child=$!
         echo "$child" > "$pidfile"
