@@ -109,8 +109,8 @@ public final class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         this.certSha256 = CertUtil.getSigningCertSha256(this);
-        configureSystemBars();
         setContentView(buildRootLayout());
+        configureSystemBars();
         registerPredictiveBack();
         renderSnapshot();
         refreshStatus(false);
@@ -234,16 +234,20 @@ public final class MainActivity extends Activity {
 
     @SuppressWarnings("deprecation")
     private void configureSystemBars() {
+        if (getWindow() == null) {
+            return;
+        }
+        View decor = getWindow().getDecorView();
         boolean dark = ThemePalette.isDark(this);
         if (Build.VERSION.SDK_INT >= 30) {
             getWindow().setDecorFitsSystemWindows(false);
-            WindowInsetsController ctrl = getWindow().getInsetsController();
+            WindowInsetsController ctrl = decor != null ? decor.getWindowInsetsController() : null;
             if (ctrl != null) {
                 int mask = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
                         | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
                 ctrl.setSystemBarsAppearance(dark ? 0 : mask, mask);
             }
-        } else {
+        } else if (decor != null) {
             int flags = View.SYSTEM_UI_FLAG_LAYOUT_STABLE
                     | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
                     | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN;
@@ -253,7 +257,7 @@ public final class MainActivity extends Activity {
                     flags |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
                 }
             }
-            getWindow().getDecorView().setSystemUiVisibility(flags);
+            decor.setSystemUiVisibility(flags);
             getWindow().setStatusBarColor(Color.TRANSPARENT);
             getWindow().setNavigationBarColor(Color.TRANSPARENT);
         }
