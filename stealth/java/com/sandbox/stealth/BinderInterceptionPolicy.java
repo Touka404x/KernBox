@@ -20,6 +20,7 @@ public final class BinderInterceptionPolicy {
         PASSTHROUGH,
         WRITE_BOOL,
         WRITE_INT,
+        WRITE_LONG,
         WRITE_INT_ARRAY,
         WRITE_VOID,
         WRITE_STRING,
@@ -44,6 +45,7 @@ public final class BinderInterceptionPolicy {
         public final Action action;
         public final boolean boolValue;
         public final int intValue;
+        public final long longValue;
         public final int[] intArrayValue;
         public final String stringValue;
         public final List<String> stringListValue;
@@ -52,100 +54,106 @@ public final class BinderInterceptionPolicy {
                 Action action,
                 boolean boolValue,
                 int intValue,
+                long longValue,
                 int[] intArrayValue,
                 String stringValue,
                 List<String> stringListValue) {
             this.action = action;
             this.boolValue = boolValue;
             this.intValue = intValue;
+            this.longValue = longValue;
             this.intArrayValue = intArrayValue;
             this.stringValue = stringValue;
             this.stringListValue = stringListValue;
         }
 
         public static Decision passthrough() {
-            return new Decision(Action.PASSTHROUGH, false, 0, null, null, null);
+            return new Decision(Action.PASSTHROUGH, false, 0, 0L, null, null, null);
         }
 
         public static Decision writeBool(boolean v) {
-            return new Decision(Action.WRITE_BOOL, v, v ? 1 : 0, null, null, null);
+            return new Decision(Action.WRITE_BOOL, v, v ? 1 : 0, 0L, null, null, null);
         }
 
         public static Decision writeInt(int v) {
-            return new Decision(Action.WRITE_INT, v != 0, v, null, null, null);
+            return new Decision(Action.WRITE_INT, v != 0, v, v, null, null, null);
+        }
+
+        public static Decision writeLong(long v) {
+            return new Decision(Action.WRITE_LONG, v != 0L, (int) v, v, null, null, null);
         }
 
         public static Decision writeIntArray(int[] arr) {
-            return new Decision(Action.WRITE_INT_ARRAY, false, 0, arr, null, null);
+            return new Decision(Action.WRITE_INT_ARRAY, false, 0, 0L, arr, null, null);
         }
 
         public static Decision writeVoid() {
-            return new Decision(Action.WRITE_VOID, false, 0, null, null, null);
+            return new Decision(Action.WRITE_VOID, false, 0, 0L, null, null, null);
         }
 
         public static Decision writeString(String s) {
-            return new Decision(Action.WRITE_STRING, false, 0, null, s, null);
+            return new Decision(Action.WRITE_STRING, false, 0, 0L, null, s, null);
         }
 
         public static Decision writeStringList(List<String> list) {
-            return new Decision(Action.WRITE_STRING_LIST, false, 0, null, null,
+            return new Decision(Action.WRITE_STRING_LIST, false, 0, 0L, null, null,
                     list == null ? Collections.emptyList() : list);
         }
 
         public static Decision writeNullParcelable() {
-            return new Decision(Action.WRITE_NULL_PARCELABLE, false, 0, null, null, null);
+            return new Decision(Action.WRITE_NULL_PARCELABLE, false, 0, 0L, null, null, null);
         }
 
         public static Decision writeNullStrongBinder() {
-            return new Decision(Action.WRITE_NULL_STRONG_BINDER, false, 0, null, null, null);
+            return new Decision(Action.WRITE_NULL_STRONG_BINDER, false, 0, 0L, null, null, null);
         }
 
         public static Decision writeEmptyStringList() {
-            return new Decision(Action.WRITE_EMPTY_STRING_LIST, false, 0, null, null, null);
+            return new Decision(Action.WRITE_EMPTY_STRING_LIST, false, 0, 0L, null, null, null);
         }
 
         public static Decision writeEmptyTypedList() {
-            return new Decision(Action.WRITE_EMPTY_TYPED_LIST, false, 0, null, null, null);
+            return new Decision(Action.WRITE_EMPTY_TYPED_LIST, false, 0, 0L, null, null, null);
         }
 
         public static Decision writeRedactedWifiInfo() {
-            return new Decision(Action.WRITE_REDACTED_WIFI_INFO, false, 0, null, null, null);
+            return new Decision(Action.WRITE_REDACTED_WIFI_INFO, false, 0, 0L, null, null, null);
         }
 
         public static Decision sanitizeLinkProperties() {
-            return new Decision(Action.SANITIZE_LINK_PROPERTIES, false, 0, null, null, null);
+            return new Decision(Action.SANITIZE_LINK_PROPERTIES, false, 0, 0L, null, null, null);
         }
 
         public static Decision sanitizeNetworkCapabilities() {
-            return new Decision(Action.SANITIZE_NETWORK_CAPABILITIES, false, 0, null, null, null);
+            return new Decision(Action.SANITIZE_NETWORK_CAPABILITIES, false, 0, 0L, null, null, null);
         }
 
         public static Decision sanitizeNetworkCapabilitiesArray() {
-            return new Decision(Action.SANITIZE_NETWORK_CAPABILITIES_ARRAY, false, 0, null, null, null);
+            return new Decision(Action.SANITIZE_NETWORK_CAPABILITIES_ARRAY, false, 0, 0L, null, null, null);
         }
 
         public static Decision sanitizeNetworkInfo() {
-            return new Decision(Action.SANITIZE_NETWORK_INFO, false, 0, null, null, null);
+            return new Decision(Action.SANITIZE_NETWORK_INFO, false, 0, 0L, null, null, null);
         }
 
         public static Decision sanitizeNetworkInfoArray() {
-            return new Decision(Action.SANITIZE_NETWORK_INFO_ARRAY, false, 0, null, null, null);
+            return new Decision(Action.SANITIZE_NETWORK_INFO_ARRAY, false, 0, 0L, null, null, null);
         }
 
         public static Decision wrapConnectivityMessenger() {
-            return new Decision(Action.WRAP_CONNECTIVITY_MESSENGER, false, 0, null, null, null);
+            return new Decision(Action.WRAP_CONNECTIVITY_MESSENGER, false, 0, 0L, null, null, null);
         }
 
         public static Decision sanitizeSubscriptionInfo() {
-            return new Decision(Action.SANITIZE_SUBSCRIPTION_INFO, false, 0, null, null, null);
+            return new Decision(Action.SANITIZE_SUBSCRIPTION_INFO, false, 0, 0L, null, null, null);
         }
 
         public static Decision sanitizeSubscriptionList() {
-            return new Decision(Action.SANITIZE_SUBSCRIPTION_LIST, false, 0, null, null, null);
+            return new Decision(Action.SANITIZE_SUBSCRIPTION_LIST, false, 0, 0L, null, null, null);
         }
 
         public static Decision sanitizeServiceState() {
-            return new Decision(Action.SANITIZE_SERVICE_STATE, false, 0, null, null, null);
+            return new Decision(Action.SANITIZE_SERVICE_STATE, false, 0, 0L, null, null, null);
         }
     }
 
@@ -298,6 +306,10 @@ public final class BinderInterceptionPolicy {
                 return decideConnectivity(methodName, cfg, firstIntArg);
             case "bluetooth_manager":
                 return decideBluetooth(methodName, cfg);
+            case "usb":
+                return decideUsb(methodName, cfg);
+            case "adb":
+                return decideAdb(methodName, cfg);
             default:
                 return Decision.passthrough();
         }
@@ -392,6 +404,7 @@ public final class BinderInterceptionPolicy {
             return Decision.passthrough();
         }
         switch (m) {
+            case "isLocationEnabled":
             case "isLocationEnabledForUser":
             case "isProviderEnabledForUser":
                 return Decision.writeBool(false);
@@ -414,7 +427,10 @@ public final class BinderInterceptionPolicy {
             case "getAllProviders":
                 return Decision.writeStringList(STANDARD_LOCATION_PROVIDERS);
             case "getBestProvider":
+            case "getGnssHardwareModelName":
                 return Decision.writeString(null);
+            case "getGnssYearOfHardware":
+                return Decision.writeInt(0);
             default:
                 return Decision.passthrough();
         }
@@ -450,6 +466,12 @@ public final class BinderInterceptionPolicy {
                 return Decision.writeRedactedWifiInfo();
             case "getDhcpInfo":
                 return Decision.writeNullParcelable();
+            case "isWifiApEnabled":
+                return Decision.writeBool(false);
+            case "getWifiApState":
+                return Decision.writeInt(11); // WifiManager.WIFI_AP_STATE_DISABLED
+            case "getCurrentNetworkWpsNfcConfigurationToken":
+                return Decision.writeString(null);
             default:
                 return Decision.passthrough();
         }
@@ -496,6 +518,7 @@ public final class BinderInterceptionPolicy {
         }
         switch (m) {
             case "registerAdapter":
+            case "getAdapter":
             case "getBluetoothGatt":
                 return Decision.writeNullStrongBinder();
             case "isEnabled":
@@ -509,6 +532,36 @@ public final class BinderInterceptionPolicy {
                 return Decision.writeString("02:00:00:00:00:00");
             case "getBondedDevices":
                 return Decision.writeEmptyTypedList();
+            default:
+                return Decision.passthrough();
+        }
+    }
+
+    private static Decision decideUsb(String m, StealthConfig cfg) {
+        if (!cfg.hideAdb) {
+            return Decision.passthrough();
+        }
+        switch (m) {
+            case "isFunctionEnabled":
+                return Decision.writeBool(false);
+            case "getCurrentFunctions":
+            case "getScreenUnlockedFunctions":
+                return Decision.writeLong(0L); // UsbManager.FUNCTION_NONE
+            case "getCurrentAccessory":
+                return Decision.writeNullParcelable();
+            default:
+                return Decision.passthrough();
+        }
+    }
+
+    private static Decision decideAdb(String m, StealthConfig cfg) {
+        if (!cfg.hideAdb) {
+            return Decision.passthrough();
+        }
+        switch (m) {
+            case "isAdbWifiSupported":
+            case "isAdbWifiQrSupported":
+                return Decision.writeBool(false);
             default:
                 return Decision.passthrough();
         }

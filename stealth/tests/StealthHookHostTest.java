@@ -503,6 +503,31 @@ public final class StealthHookHostTest {
         check("".equals(nestedCfg.deviceRegion), "nested device_region must not leak into top-level");
         check("NTT]DOCOMO".equals(nestedCfg.simOperatorName), "bracket inside string must preserve value");
         check(!nestedCfg.shouldIntercept(1010376), "exempt_uids array parsed past string bracket");
+
+        // USB / ADB / hardened wifi / location / bluetooth decisions
+        check(cfg.hideAdb, "hideAdb defaults to true");
+        Set<String> sysTargets = SystemServerHook.targetServicesForProcess("system_server");
+        check(sysTargets.contains("usb") && sysTargets.contains("adb"), "system_server targets include usb and adb");
+
+        BinderInterceptionPolicy.Decision dUsbFn = BinderInterceptionPolicy.decide("usb", "getCurrentFunctions", cfg, u10App, null);
+        check(dUsbFn.action == BinderInterceptionPolicy.Action.WRITE_LONG && dUsbFn.longValue == 0L,
+                "usb.getCurrentFunctions -> 0L");
+        BinderInterceptionPolicy.Decision dUsbAdb = BinderInterceptionPolicy.decide("usb", "isFunctionEnabled", cfg, u10App, null);
+        check(dUsbAdb.action == BinderInterceptionPolicy.Action.WRITE_BOOL && !dUsbAdb.boolValue,
+                "usb.isFunctionEnabled -> false");
+        BinderInterceptionPolicy.Decision dAdbWifi = BinderInterceptionPolicy.decide("adb", "isAdbWifiSupported", cfg, u10App, null);
+        check(dAdbWifi.action == BinderInterceptionPolicy.Action.WRITE_BOOL && !dAdbWifi.boolValue,
+                "adb.isAdbWifiSupported -> false");
+        StealthConfig noAdbCfg = StealthConfig.fromJson("{\"enabled\":true,\"hide_adb\":false}");
+        check(!noAdbCfg.hideAdb, "hide_adb=false parsed");
+        check(BinderInterceptionPolicy.decide("usb", "getCurrentFunctions", noAdbCfg, u10App, null).action
+                == BinderInterceptionPolicy.Action.PASSTHROUGH, "usb passthrough when hide_adb=false");
+        check(BinderInterceptionPolicy.decide("wifi", "getWifiApState", cfg, u10App, null).intValue == 11,
+                "wifi.getWifiApState -> WIFI_AP_STATE_DISABLED (11)");
+        check(BinderInterceptionPolicy.decide("bluetooth_manager", "getAdapter", cfg, u10App, null).action
+                == BinderInterceptionPolicy.Action.WRITE_NULL_STRONG_BINDER, "bluetooth_manager.getAdapter -> null binder");
+        check(BinderInterceptionPolicy.decide("location", "getGnssYearOfHardware", cfg, u10App, null).intValue == 0,
+                "location.getGnssYearOfHardware -> 0");
     }
 
     public static void main(String[] args) {

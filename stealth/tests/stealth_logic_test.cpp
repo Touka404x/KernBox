@@ -172,7 +172,7 @@ int main() {
 
 #if defined(OEM_HYPEROS)
         assert(std::string(stealth::kOemProfileName) == "hyperos");
-        assert(stealth::kBakedPropCount == 17);
+        assert(stealth::kBakedPropCount == 22);
         assert(stealth::lookupSpoofedPropertyIntoBuf(baked, "ro.boot.hwc", "CN", stack_buf, sizeof(stack_buf), &res) && std::string(res) == "JP");
         assert(stealth::lookupSpoofedPropertyIntoBuf(baked, "ro.miui.region", "CN", stack_buf, sizeof(stack_buf), &res) && std::string(res) == "JP");
         assert(stealth::lookupSpoofedPropertyIntoBuf(baked, "ro.miui.cust_variant", "cn", stack_buf, sizeof(stack_buf), &res) && std::string(res) == "jp");
@@ -181,7 +181,7 @@ int main() {
         assert(!stealth::lookupSpoofedPropertyIntoBuf(baked, "ro.csc.country_code", "CN", stack_buf, sizeof(stack_buf), &res));
 #elif defined(OEM_OPLUS)
         assert(std::string(stealth::kOemProfileName) == "oplus");
-        assert(stealth::kBakedPropCount == 17);
+        assert(stealth::kBakedPropCount == 22);
         assert(stealth::lookupSpoofedPropertyIntoBuf(baked, "persist.sys.oplus.region", "CN", stack_buf, sizeof(stack_buf), &res) && std::string(res) == "JP");
         assert(stealth::lookupSpoofedPropertyIntoBuf(baked, "ro.oplus.region", "CN", stack_buf, sizeof(stack_buf), &res) && std::string(res) == "JP");
         assert(stealth::lookupSpoofedPropertyIntoBuf(baked, "ro.vendor.oplus.regionmark", "CN", stack_buf, sizeof(stack_buf), &res) && std::string(res) == "JP");
@@ -190,7 +190,7 @@ int main() {
         assert(!stealth::lookupSpoofedPropertyIntoBuf(baked, "ro.csc.country_code", "CN", stack_buf, sizeof(stack_buf), &res));
 #elif defined(OEM_ONEUI)
         assert(std::string(stealth::kOemProfileName) == "oneui");
-        assert(stealth::kBakedPropCount == 18);
+        assert(stealth::kBakedPropCount == 23);
         assert(stealth::lookupSpoofedPropertyIntoBuf(baked, "ro.csc.country_code", "CN", stack_buf, sizeof(stack_buf), &res) && std::string(res) == "JP");
         assert(stealth::lookupSpoofedPropertyIntoBuf(baked, "ro.csc.countryiso_code", "CN", stack_buf, sizeof(stack_buf), &res) && std::string(res) == "JP");
         assert(stealth::lookupSpoofedPropertyIntoBuf(baked, "ro.csc.sales_code", "CHN", stack_buf, sizeof(stack_buf), &res) && std::string(res) == "JP");
@@ -199,7 +199,7 @@ int main() {
         assert(!stealth::lookupSpoofedPropertyIntoBuf(baked, "ro.miui.region", "CN", stack_buf, sizeof(stack_buf), &res));
         assert(!stealth::lookupSpoofedPropertyIntoBuf(baked, "ro.oplus.region", "CN", stack_buf, sizeof(stack_buf), &res));
 #else
-        assert(stealth::kBakedPropCount == 13);
+        assert(stealth::kBakedPropCount == 18);
         assert(!stealth::lookupSpoofedPropertyIntoBuf(baked, "ro.miui.region", "CN", stack_buf, sizeof(stack_buf), &res));
         assert(!stealth::lookupSpoofedPropertyIntoBuf(baked, "ro.oplus.region", "CN", stack_buf, sizeof(stack_buf), &res));
         assert(!stealth::lookupSpoofedPropertyIntoBuf(baked, "ro.csc.country_code", "CN", stack_buf, sizeof(stack_buf), &res));
@@ -234,6 +234,34 @@ int main() {
             R"({"enabled":false,"sim_operator_name":"NTT\u0020DOCOMO\u0026Co","enabled":true,"nested":{"enabled":false}})");
         assert(dup_cfg.enabled);
         assert(dup_cfg.sim_operator_name == "NTT DOCOMO&Co");
+    }
+
+    // 9. ADB/USB stealth properties, gsm.network.type multi-SIM, and full OEM slot round-trip
+    {
+        for (int i = 0; i < static_cast<int>(stealth::kBakedPropCount); i++) {
+            const char* pname = stealth::spoofablePropNameByIndex(i);
+            assert(pname != nullptr);
+            assert(stealth::spoofablePropIndex(pname) == i);
+        }
+
+        auto cfg = stealth::parseStealthConfig(
+            R"({"enabled":true,"spoof_carrier":true,"sim_operator":"44010","locale":"ja-JP","device_region":"JP","boot_hwc":"JP"})");
+        assert(cfg.hide_adb);
+        auto baked = stealth::bakeSpoofedProps(cfg);
+        char stack_buf[92];
+        const char* res = nullptr;
+
+        assert(stealth::lookupSpoofedPropertyIntoBuf(baked, "init.svc.adbd", "running", stack_buf, sizeof(stack_buf), &res) && std::string(res) == "stopped");
+        assert(stealth::lookupSpoofedPropertyIntoBuf(baked, "sys.usb.state", "adb", stack_buf, sizeof(stack_buf), &res) && std::string(res) == "none");
+        assert(stealth::lookupSpoofedPropertyIntoBuf(baked, "sys.usb.config", "adb", stack_buf, sizeof(stack_buf), &res) && std::string(res) == "none");
+        assert(stealth::lookupSpoofedPropertyIntoBuf(baked, "persist.sys.usb.config", "adb", stack_buf, sizeof(stack_buf), &res) && std::string(res) == "none");
+        assert(stealth::lookupSpoofedPropertyIntoBuf(baked, "gsm.network.type", "NR_NSA,LTE", stack_buf, sizeof(stack_buf), &res) && std::string(res) == "LTE,LTE");
+
+        auto no_adb = stealth::parseStealthConfig(R"({"enabled":true,"hide_adb":false})");
+        assert(!no_adb.hide_adb);
+        auto baked_no_adb = stealth::bakeSpoofedProps(no_adb);
+        assert(!stealth::lookupSpoofedPropertyIntoBuf(baked_no_adb, "init.svc.adbd", "running", stack_buf, sizeof(stack_buf), &res));
+        assert(!stealth::lookupSpoofedPropertyIntoBuf(baked_no_adb, "sys.usb.state", "adb", stack_buf, sizeof(stack_buf), &res));
     }
 
     std::cout << "ALL stealth_logic_test C++ ASSERTIONS PASSED (oem=" << stealth::kOemProfileName << ")\n";

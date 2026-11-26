@@ -90,6 +90,7 @@ func TestSyncSandboxAppPoliciesSetsLocaleAndAppOps(t *testing.T) {
 		!strings.Contains(joined, "cmd locale set-app-locales com.google.android.apps.bard --user 10 --locales ja-JP") ||
 		!strings.Contains(joined, "cmd locale set-app-locales com.google.android.gms --user 10 --locales ja-JP") ||
 		!strings.Contains(joined, "cmd role add-role-holder --user 10 android.app.role.BROWSER com.android.chrome") ||
+		!strings.Contains(joined, "settings --user 10 put system system_locales ja-JP") ||
 		!strings.Contains(joined, "settings --user 10 put secure bluetooth_name Pixel-Test") ||
 		!strings.Contains(joined, "appops set --user 10 --uid com.google.android.gms FINE_LOCATION ignore") {
 		t.Fatalf("missing expected locale/role/bt/appops calls:\n%s", joined)

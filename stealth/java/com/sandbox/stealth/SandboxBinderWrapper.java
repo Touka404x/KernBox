@@ -437,6 +437,9 @@ public final class SandboxBinderWrapper extends Binder {
                     case WRITE_INT:
                         reply.writeInt(d.intValue);
                         return true;
+                    case WRITE_LONG:
+                        reply.writeLong(d.longValue);
+                        return true;
                     case WRITE_INT_ARRAY:
                         reply.writeIntArray(d.intArrayValue);
                         return true;

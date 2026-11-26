@@ -30,7 +30,8 @@ public final class SystemServerHook {
     private static final Set<String> SYSTEM_SERVER_SERVICES = Collections.unmodifiableSet(
             new HashSet<>(Arrays.asList(
                     "user", "device_policy", "crossprofileapps",
-                    "location", "wifi", "connectivity", "bluetooth_manager")));
+                    "location", "wifi", "connectivity", "bluetooth_manager",
+                    "usb", "adb")));
 
     private static final Set<String> PHONE_SERVICES = Collections.unmodifiableSet(
             new HashSet<>(Arrays.asList("phone", "isub", "iphonesubinfo")));

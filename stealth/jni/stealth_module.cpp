@@ -72,19 +72,34 @@ void populateFakeProps(const stealth::BakedProps& baked, FakePropInfo (&out)[ste
     }
 }
 
-constexpr size_t kPropSuffixCount = 4;
+constexpr size_t kPropSuffixCount = 14;
 const char* const kPropTargetSuffixes[kPropSuffixCount] = {
     "/libandroid_runtime.so",
     "/libbase.so",
     "/libcutils.so",
     "/libutils.so",
+    "/libart.so",
+    "/libbinder.so",
+    "/libandroid.so",
+    "/libjavacore.so",
+    "/libmedia.so",
+    "/libmediandk.so",
+    "/libstagefright.so",
+    "/libhwui.so",
+    "/libnetd_client.so",
+    "/libopenjdk.so",
 };
-constexpr size_t kNetSuffixCount = 1;
+constexpr size_t kNetSuffixCount = 6;
 const char* const kNetTargetSuffixes[kNetSuffixCount] = {
     "/libjavacore.so",
+    "/libandroid_runtime.so",
+    "/libnetd_client.so",
+    "/libopenjdk.so",
+    "/libbase.so",
+    "/libcutils.so",
 };
-constexpr size_t kMaxPropHookSlots = 24;
-constexpr size_t kMaxNetHookSlots = 2;
+constexpr size_t kMaxPropHookSlots = 48;
+constexpr size_t kMaxNetHookSlots = 12;
 
 using FnGetIfAddrs = int (*)(struct ifaddrs** ifap);
 using FnPropFind = const prop_info* (*)(const char* name);
@@ -107,7 +122,9 @@ bool isTunnelIfaceName(const char* name) {
            std::strncmp(name, "wg", 2) == 0 ||
            std::strncmp(name, "utun", 4) == 0 ||
            std::strncmp(name, "ppp", 3) == 0 ||
-           std::strncmp(name, "tailscale", 9) == 0;
+           std::strncmp(name, "tailscale", 9) == 0 ||
+           std::strncmp(name, "dummy", 5) == 0 ||
+           std::strncmp(name, "p2p", 3) == 0;
 }
 
 int hookGetifaddrsImpl(FnGetIfAddrs orig, struct ifaddrs** ifap) {
@@ -358,6 +375,11 @@ void fillPropHookTables(
       cb_hooks[Is] = hook_prop_read_cb_slot<Is>,
       read_hooks[Is] = hook_prop_read_slot<Is>,
       get_hooks[Is] = hook_prop_get_slot<Is>), ...);
+}
+
+template <size_t... Is>
+void fillNetHookTable(FnGetIfAddrs (&net_hooks)[kMaxNetHookSlots], std::index_sequence<Is...>) {
+    ((net_hooks[Is] = hook_getifaddrs_slot<Is>), ...);
 }
 
 bool writeExact(int fd, const void* buf, size_t len) {
@@ -771,6 +793,32 @@ void applyJavaTimezoneAndLocale(JNIEnv* env, const stealth::StealthConfig& cfg) 
         clearJniException(env);
     }
 
+    auto setJavaSystemProperty = [&](const char* k, const std::string& v) {
+        if (!k || v.empty()) return;
+        jclass sys_cls = env->FindClass("java/lang/System");
+        if (sys_cls && !env->ExceptionCheck()) {
+            jmethodID set_prop = env->GetStaticMethodID(
+                sys_cls, "setProperty", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;");
+            if (set_prop && !env->ExceptionCheck()) {
+                jstring jk = newJniStringSafe(env, k);
+                jstring jv = newJniStringSafe(env, v);
+                jobject prev = nullptr;
+                if (jk && jv && !env->ExceptionCheck()) {
+                    prev = env->CallStaticObjectMethod(sys_cls, set_prop, jk, jv);
+                }
+                clearJniException(env);
+                if (prev) env->DeleteLocalRef(prev);
+                if (jk) env->DeleteLocalRef(jk);
+                if (jv) env->DeleteLocalRef(jv);
+            }
+        }
+        clearJniException(env);
+    };
+
+    if (cfg.spoof_timezone && !cfg.timezone.empty()) {
+        setJavaSystemProperty("user.timezone", cfg.timezone);
+    }
+
     if (cfg.spoof_locale && !cfg.locale.empty()) {
         jclass loc_cls = env->FindClass("java/util/Locale");
         if (loc_cls && !env->ExceptionCheck()) {
@@ -965,7 +1013,8 @@ public:
         }
 
         if (g_cfg.prop_hook_mode != "dlclose") {
-            const bool want_props = g_cfg.spoof_carrier || g_cfg.spoof_timezone || g_cfg.spoof_locale || g_cfg.spoof_device_region;
+            const bool want_props = g_cfg.spoof_carrier || g_cfg.spoof_timezone || g_cfg.spoof_locale ||
+                g_cfg.spoof_device_region || g_cfg.hide_adb;
             const bool want_net = g_cfg.sanitize_network;
             TargetList prop_hits{};
             TargetList net_hits{};
@@ -978,9 +1027,8 @@ public:
             FnPropGet propGetHooks[kMaxPropHookSlots] = {};
             fillPropHookTables(propFindHooks, propCbHooks, propReadHooks, propGetHooks,
                                std::make_index_sequence<kMaxPropHookSlots>{});
-            FnGetIfAddrs netHooks[kMaxNetHookSlots] = {
-                hook_getifaddrs_slot<0>, hook_getifaddrs_slot<1>,
-            };
+            FnGetIfAddrs netHooks[kMaxNetHookSlots] = {};
+            fillNetHookTable(netHooks, std::make_index_sequence<kMaxNetHookSlots>{});
 
             size_t prop_libs_registered = prop_hits.count;
             for (size_t i = 0; i < prop_hits.count; i++) {

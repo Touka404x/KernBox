@@ -43,6 +43,7 @@ type StealthConfig struct {
 	SanitizeNetwork     bool   `json:"sanitize_network"`
 	SpoofBluetooth      bool   `json:"spoof_bluetooth"`
 	SpoofDeviceRegion   bool   `json:"spoof_device_region"`
+	HideAdb             bool   `json:"hide_adb"`
 	SandboxLinkIPv4     string `json:"sandbox_link_ipv4"`
 	DeviceName          string `json:"device_name"`
 	DeviceRegion        string `json:"device_region,omitempty"`
@@ -69,6 +70,7 @@ func DefaultStealthConfig(userID, exemptWorkUID int) StealthConfig {
 		SanitizeNetwork:     true,
 		SpoofBluetooth:      true,
 		SpoofDeviceRegion:   false,
+		HideAdb:             true,
 		SandboxLinkIPv4:     "10.172.10.2",
 		DeviceName:          oem.Current().DefaultDeviceName,
 	}
@@ -406,6 +408,7 @@ type RegionPreset struct {
 	SpoofLocale         *bool   `json:"spoof_locale,omitempty"`
 	SpoofDeviceRegion   *bool   `json:"spoof_device_region,omitempty"`
 	SpoofBluetooth      *bool   `json:"spoof_bluetooth,omitempty"`
+	HideAdb             *bool   `json:"hide_adb,omitempty"`
 	DeviceName          *string `json:"device_name,omitempty"`
 	DeviceRegion        *string `json:"device_region,omitempty"`
 	MiuiRegion          *string `json:"miui_region,omitempty"`
@@ -528,6 +531,9 @@ func (d *Daemon) ApplyPresetFile(ctx context.Context, presetPath string) (Stealt
 	}
 	if p.SpoofBluetooth != nil {
 		cfg.SpoofBluetooth = *p.SpoofBluetooth
+	}
+	if p.HideAdb != nil {
+		cfg.HideAdb = *p.HideAdb
 	}
 	if p.DeviceName != nil && strings.TrimSpace(*p.DeviceName) != "" {
 		cfg.DeviceName = strings.TrimSpace(*p.DeviceName)

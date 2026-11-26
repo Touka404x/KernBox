@@ -34,6 +34,7 @@ public final class StealthConfig {
     public final boolean sanitizeNetwork;
     public final boolean spoofBluetooth;
     public final boolean spoofDeviceRegion;
+    public final boolean hideAdb;
     public final String sandboxLinkIpv4;
     public final String deviceName;
     public final String deviceRegion;
@@ -189,6 +190,39 @@ public final class StealthConfig {
             String deviceName,
             String deviceRegion,
             String bootHwc) {
+        this(
+                enabled, sandboxUserId, exemptWorkUid, exemptUids, timezone, locale,
+                simOperator, simOperatorName, simCountryIso, networkOperator, networkOperatorName, networkCountryIso,
+                hideManagedProfile, spoofLocationMode, blockWifiScan, spoofCarrier,
+                sanitizeNetwork, spoofBluetooth, spoofDeviceRegion, true,
+                sandboxLinkIpv4, deviceName, deviceRegion, bootHwc);
+    }
+
+    public StealthConfig(
+            boolean enabled,
+            int sandboxUserId,
+            int exemptWorkUid,
+            int[] exemptUids,
+            String timezone,
+            String locale,
+            String simOperator,
+            String simOperatorName,
+            String simCountryIso,
+            String networkOperator,
+            String networkOperatorName,
+            String networkCountryIso,
+            boolean hideManagedProfile,
+            String spoofLocationMode,
+            boolean blockWifiScan,
+            boolean spoofCarrier,
+            boolean sanitizeNetwork,
+            boolean spoofBluetooth,
+            boolean spoofDeviceRegion,
+            boolean hideAdb,
+            String sandboxLinkIpv4,
+            String deviceName,
+            String deviceRegion,
+            String bootHwc) {
         this.enabled = enabled;
         this.sandboxUserId = sandboxUserId;
         this.exemptWorkUid = exemptWorkUid;
@@ -208,6 +242,7 @@ public final class StealthConfig {
         this.sanitizeNetwork = sanitizeNetwork;
         this.spoofBluetooth = spoofBluetooth;
         this.spoofDeviceRegion = spoofDeviceRegion;
+        this.hideAdb = hideAdb;
         this.sandboxLinkIpv4 = nonEmptyOrDefault(sandboxLinkIpv4, "10.172.10.2");
         this.deviceName = nonEmptyOrDefault(deviceName, "Android");
         this.deviceRegion = deviceRegion != null ? deviceRegion : "";
@@ -292,6 +327,7 @@ public final class StealthConfig {
         boolean sanitizeNet = parseBool(kv.get("sanitize_network"), true);
         boolean spoofBt = parseBool(kv.get("spoof_bluetooth"), true);
         boolean spoofRegion = parseBool(kv.get("spoof_device_region"), false);
+        boolean hideAdb = parseBool(kv.get("hide_adb"), true);
         String linkIpv4 = nonEmptyOrDefault(kv.get("sandbox_link_ipv4"), "10.172.10.2");
         String devName = nonEmptyOrDefault(kv.get("device_name"), "Android");
         String primaryRegion = kv.get("device_region");
@@ -305,7 +341,7 @@ public final class StealthConfig {
                 enabled, userId, exemptUid, exemptUids, tz, loc,
                 simOp, simAlpha, simIso, netOp, netAlpha, netIso,
                 hideManaged, locMode, blockWifi, carrier,
-                sanitizeNet, spoofBt, spoofRegion, linkIpv4, devName, region, hwc);
+                sanitizeNet, spoofBt, spoofRegion, hideAdb, linkIpv4, devName, region, hwc);
     }
 
     /**
