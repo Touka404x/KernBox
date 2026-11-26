@@ -28,6 +28,51 @@ public final class Strings {
     public String statusPausedTitle() { return zh ? "沙盒已暂停" : "Sandbox Paused"; }
     public String statusOfflineTitle() { return zh ? "守护进程未连接" : "Daemon Unreachable"; }
     public String statusBusyTitle() { return zh ? "正在同步状态…" : "Syncing Sandbox…"; }
+    public String statusErrorTitle() { return zh ? "沙盒启动异常" : "Sandbox Alert"; }
+    public String statusWaitingAckTitle() { return zh ? "正在等待代理确认…" : "Waiting for Proxy Ack…"; }
+    public String statusUpgradingTitle() { return zh ? "隔离升级防护中" : "Upgrade Fence Active"; }
+    public String statusLaunchingTitle(String label) {
+        return zh ? ("正在启动 " + label + "…") : ("Launching " + label + "…");
+    }
+
+    public String alertBannerTitle() { return zh ? "启动与运行异常提醒" : "Startup & Health Alert"; }
+    public String alertTapDiagHint() { return zh ? "点击查看自检详情 →" : "Tap to inspect diagnostics →"; }
+    public String alertTapRetryHint() { return zh ? "点击重新连接并自检 →" : "Tap to reconnect & check →"; }
+    public String alertRpcTimeout() {
+        return zh
+                ? "操作响应超时，守护进程繁忙或代理卡住，请检查代理状态后重试"
+                : "Operation timed out; daemon busy or proxy stalled. Check diagnostics.";
+    }
+    public String alertNotPinned() {
+        return zh
+                ? "policy.json 未加载，请检查 /data/adb/sandbox_guard/policy.json"
+                : "policy.json not loaded; check /data/adb/sandbox_guard/policy.json";
+    }
+    public String alertZygiskDisabled() {
+        return zh
+                ? "Zygisk 隐身模块已熔断关闭（连续异常重启保护），请检查模块状态"
+                : "Zygisk stealth tripped bootloop protection and is disabled";
+    }
+    public String alertTProxyNotReady(int port) {
+        return zh
+                ? ("TProxy 代理核心端口 :" + port + " 未就绪，请检查代理核心进程")
+                : ("TProxy core port :" + port + " is not listening");
+    }
+    public String alertGateNotOpen(String state) {
+        return zh
+                ? ("沙盒隔离网关未放行 (" + state + ")，流量已安全阻断")
+                : ("Sandbox gate locked (" + state + "); traffic fail-closed");
+    }
+    public String alertCrossPool(int hits) {
+        return zh
+                ? ("检测到 " + hits + " 条跨池 198.18 连接命中，请排查规则冲突")
+                : ("Detected " + hits + " cross-pool 198.18 connection hits");
+    }
+    public String alertStuckSockets(int count) {
+        return zh
+                ? ("检测到 " + count + " 个工作区卡死连接，建议暂停后重启沙盒")
+                : ("Detected " + count + " stuck SYN_SENT sockets in workspace");
+    }
 
     public String offlineHint() {
         return zh
@@ -67,6 +112,8 @@ public final class Strings {
     public String freezeDeep() { return zh ? "深度休眠" : "Deep Sleep"; }
     public String freezeAwake() { return zh ? "唤醒" : "Awake"; }
     public String qsActive() { return zh ? "TProxy · 运行中" : "TProxy · Active"; }
+    public String qsError() { return zh ? "启动异常" : "Start Error"; }
+    public String qsTimeout() { return zh ? "响应超时" : "Timeout"; }
 
     public String sectionApps() { return zh ? "工作区应用" : "Workspace Apps"; }
     public String emptyTitle() { return zh ? "工作区暂无应用" : "No Apps in Sandbox"; }
@@ -126,6 +173,8 @@ public final class Strings {
     public String diagLabelVerify() { return zh ? "独立探针状态" : "Verify Probe"; }
     public String diagLabelScorecard() { return zh ? "12 项体检评分" : "Device Scorecard"; }
     public String diagLabelLastError() { return zh ? "最近异常" : "Last Error"; }
+    public String diagLabelBootAlert() { return zh ? "开机自检告警" : "Boot Alert"; }
+    public String diagLabelCrossPool() { return zh ? "跨池泄漏检测" : "Cross-Pool Hits"; }
     public String diagValOk() { return zh ? "正常" : "Ready"; }
     public String diagValWarn() { return zh ? "注意" : "Check"; }
     public String diagValDisabled() { return zh ? "已熔断关闭" : "Disabled"; }

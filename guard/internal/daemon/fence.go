@@ -24,7 +24,7 @@ const (
 )
 
 const (
-	AckWaitTimeoutNs  = int64(3_000_000_000) // 3s AckWait window
+	AckWaitTimeoutNs  = int64(6_000_000_000) // 6s AckWait window
 	SwitchoverGraceNs = int64(1_500_000_000) // 1.5s switchover grace while tun0 remains UP
 )
 

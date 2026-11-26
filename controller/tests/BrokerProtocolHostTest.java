@@ -113,8 +113,12 @@ public final class BrokerProtocolHostTest {
                 + "\"u10_running_procs\":3,"
                 + "\"hibernated_count\":2,"
                 + "\"stuck_work_sockets\":1,"
+                + "\"cross_pool_12c6_hits\":2,"
+                + "\"exemption\":{\"generation\":226},"
+                + "\"sandbox_ack\":{\"applied_generation\":226},"
+                + "\"boot_alert\":\"Zygisk disabled test\","
                 + "\"last_error\":\"\","
-                + "\"vpn_status\":{\"running\":true,\"exit_ip\":\"198.51.100.2\"},"
+                + "\"vpn_status\":{\"running\":true,\"exit_ip\":\"198.51.100.2\",\"quic_udp443_mode\":\"allow\"},"
                 + "\"sandbox_apps\":[\"com.android.chrome\",\"com.example.\\u0061pp\"]"
                 + "}}";
 
@@ -135,6 +139,15 @@ public final class BrokerProtocolHostTest {
         assertEquals(1, resp.snapshot.scorecardWarn, "scorecardWarn");
         assertEquals(12, resp.snapshot.scorecardTotal, "scorecardTotal");
         assertEquals("198.51.100.2", resp.snapshot.exitIp, "exit_ip");
+        assertEquals(2, resp.snapshot.crossPool12c6Hits, "crossPool12c6Hits");
+        assertEquals("Zygisk disabled test", resp.snapshot.bootAlert, "bootAlert");
+        assertEquals("allow", resp.snapshot.quicUdp443Mode, "quicUdp443Mode");
+        assertEquals(226L, resp.snapshot.exemptionGen, "exemptionGen");
+        assertEquals(226L, resp.snapshot.ackAppliedGen, "ackAppliedGen");
+        assertTrue(resp.snapshot.isGateHealthyOpen(), "isGateHealthyOpen=true");
+        assertTrue(resp.snapshot.hasStartupOrHealthAlert(), "hasStartupOrHealthAlert checks stuck sockets / cross pool / bootAlert");
+        String summary = resp.snapshot.buildAlertSummary(new Strings(true));
+        assertTrue(summary.contains("Zygisk disabled test") && summary.contains("198.18"), "alert summary includes bootAlert and crossPool");
         assertEquals(Arrays.asList("com.android.chrome", "com.example.app"),
                 resp.snapshot.sandboxApps, "sandbox_apps");
 
@@ -189,6 +202,11 @@ public final class BrokerProtocolHostTest {
         }
         BrokerProtocol.RpcResponse deepResp = BrokerProtocol.parseResponse(deep.toString());
         assertTrue(!deepResp.ok && deepResp.error.contains("nesting"), "excessive nesting depth rejected");
+
+        BrokerProtocol.RpcResponse timeoutResp = BrokerProtocol.RpcResponse.error(
+                "kb-t1", "RPC timeout: SocketTimeoutException", BrokerProtocol.OfflineReason.RPC_TIMEOUT);
+        assertTrue(!timeoutResp.ok && !timeoutResp.offline, "RPC_TIMEOUT must NOT wipe UI as offline");
+        assertEquals(BrokerProtocol.OfflineReason.RPC_TIMEOUT, timeoutResp.offlineReason, "offlineReason=RPC_TIMEOUT");
     }
 
     private static void testBilingualStrings() {
@@ -200,5 +218,9 @@ public final class BrokerProtocolHostTest {
         assertTrue(!zh.diagScorecardFmt(11, 12, 1, 0).isEmpty() && !en.diagScorecardFmt(11, 12, 1, 0).isEmpty(), "scorecard fmt");
         assertTrue(!zh.freezeDeep().isEmpty() && !en.freezeDeep().isEmpty(), "freezeDeep");
         assertTrue(!zh.a11yRefresh().isEmpty() && !en.a11yClose().isEmpty(), "a11y descriptions");
+        assertTrue(!zh.alertBannerTitle().isEmpty() && !en.alertBannerTitle().isEmpty(), "alertBannerTitle");
+        assertTrue(!zh.alertRpcTimeout().isEmpty() && !en.alertRpcTimeout().isEmpty(), "alertRpcTimeout");
+        assertTrue(!zh.qsTimeout().isEmpty() && !en.qsTimeout().isEmpty(), "qsTimeout");
+        assertTrue(!zh.diagLabelBootAlert().isEmpty() && !en.diagLabelCrossPool().isEmpty(), "diag alert labels");
     }
 }

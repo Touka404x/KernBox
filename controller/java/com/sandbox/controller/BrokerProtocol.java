@@ -33,7 +33,8 @@ public final class BrokerProtocol {
         NONE,
         DAEMON_DOWN,
         CERT_UNPINNED,
-        SELINUX_DENIED
+        SELINUX_DENIED,
+        RPC_TIMEOUT
     }
 
     private BrokerProtocol() {}
@@ -213,6 +214,7 @@ public final class BrokerProtocol {
         int runningProcs = asInt(data.get("u10_running_procs"), 0);
         int hibernatedCount = asInt(data.get("hibernated_count"), 0);
         int stuckWorkSockets = asInt(data.get("stuck_work_sockets"), 0);
+        int crossPool12c6Hits = asInt(data.get("cross_pool_12c6_hits"), 0);
         int tproxyPort = asInt(data.get("tproxy_port"), 1537);
         int stealthBootTries = asInt(data.get("stealth_boot_tries"), 0);
         String privateDnsMode = asString(data.get("private_dns_mode"), "");
@@ -231,12 +233,29 @@ public final class BrokerProtocol {
             }
         }
         String lastError = asString(data.get("last_error"), "");
+        String bootAlert = asString(data.get("boot_alert"), "");
+        String quicUdp443Mode = "";
         String exitIp = "";
         boolean vpnRunning = openGate;
         if (data.get("vpn_status") instanceof Map) {
             Map<String, Object> vpn = (Map<String, Object>) data.get("vpn_status");
             exitIp = asString(vpn.get("exit_ip"), "");
             vpnRunning = asBoolean(vpn.get("running"), openGate);
+            quicUdp443Mode = asString(vpn.get("quic_udp443_mode"), "");
+        }
+        if (quicUdp443Mode.isEmpty() && data.get("pending_config") instanceof Map) {
+            Map<String, Object> pc = (Map<String, Object>) data.get("pending_config");
+            quicUdp443Mode = asString(pc.get("quic_udp443_mode"), "");
+        }
+        long exemptionGen = 0L;
+        if (data.get("exemption") instanceof Map) {
+            Map<String, Object> exMap = (Map<String, Object>) data.get("exemption");
+            exemptionGen = asLong(exMap.get("generation"), 0L);
+        }
+        long ackAppliedGen = 0L;
+        if (data.get("sandbox_ack") instanceof Map) {
+            Map<String, Object> ackMap = (Map<String, Object>) data.get("sandbox_ack");
+            ackAppliedGen = asLong(ackMap.get("applied_generation"), 0L);
         }
         List<String> apps = new ArrayList<String>();
         if (data.get("sandbox_apps") instanceof List) {
@@ -272,6 +291,7 @@ public final class BrokerProtocol {
                 runningProcs,
                 hibernatedCount,
                 stuckWorkSockets,
+                crossPool12c6Hits,
                 tproxyPort,
                 stealthBootTries,
                 privateDnsMode,
@@ -281,6 +301,10 @@ public final class BrokerProtocol {
                 scorecardTotal,
                 exitIp,
                 lastError,
+                bootAlert,
+                quicUdp443Mode,
+                exemptionGen,
+                ackAppliedGen,
                 Collections.unmodifiableList(apps)
         );
     }
@@ -322,6 +346,10 @@ public final class BrokerProtocol {
 
     private static int asInt(Object v, int fallback) {
         return v instanceof Number ? ((Number) v).intValue() : fallback;
+    }
+
+    private static long asLong(Object v, long fallback) {
+        return v instanceof Number ? ((Number) v).longValue() : fallback;
     }
 
     static String quote(String s) {
@@ -390,7 +418,7 @@ public final class BrokerProtocol {
         }
 
         public static RpcResponse error(String id, String error, OfflineReason reason) {
-            boolean off = reason != null && reason != OfflineReason.NONE;
+            boolean off = reason != null && reason != OfflineReason.NONE && reason != OfflineReason.RPC_TIMEOUT;
             return new RpcResponse(id, false, off, reason, error, StatusSnapshot.empty());
         }
     }
@@ -418,6 +446,7 @@ public final class BrokerProtocol {
         public final int runningProcs;
         public final int hibernatedCount;
         public final int stuckWorkSockets;
+        public final int crossPool12c6Hits;
         public final int tproxyPort;
         public final int stealthBootTries;
         public final String privateDnsMode;
@@ -427,6 +456,10 @@ public final class BrokerProtocol {
         public final int scorecardTotal;
         public final String exitIp;
         public final String lastError;
+        public final String bootAlert;
+        public final String quicUdp443Mode;
+        public final long exemptionGen;
+        public final long ackAppliedGen;
         public final List<String> sandboxApps;
 
         public StatusSnapshot(
@@ -462,6 +495,55 @@ public final class BrokerProtocol {
                 String exitIp,
                 String lastError,
                 List<String> sandboxApps) {
+            this(
+                    version, variant, state, mode, activePreset, paused, policyLoaded, sbwOpen, sbwRawArmed,
+                    frozen, hotFrozen, tproxyReady, zygiskDisabled, privateDnsWarning,
+                    probeApkInstalled, instrumentOk, hasProbeData, vpnRunning,
+                    userId, runningProcs, hibernatedCount, stuckWorkSockets, 0,
+                    tproxyPort, stealthBootTries, privateDnsMode,
+                    scorecardPassed, scorecardFailed, scorecardWarn, scorecardTotal,
+                    exitIp, lastError, "", "", 0L, 0L, sandboxApps
+            );
+        }
+
+        public StatusSnapshot(
+                String version,
+                String variant,
+                String state,
+                String mode,
+                String activePreset,
+                boolean paused,
+                boolean policyLoaded,
+                boolean sbwOpen,
+                boolean sbwRawArmed,
+                boolean frozen,
+                boolean hotFrozen,
+                boolean tproxyReady,
+                boolean zygiskDisabled,
+                boolean privateDnsWarning,
+                boolean probeApkInstalled,
+                boolean instrumentOk,
+                boolean hasProbeData,
+                boolean vpnRunning,
+                int userId,
+                int runningProcs,
+                int hibernatedCount,
+                int stuckWorkSockets,
+                int crossPool12c6Hits,
+                int tproxyPort,
+                int stealthBootTries,
+                String privateDnsMode,
+                int scorecardPassed,
+                int scorecardFailed,
+                int scorecardWarn,
+                int scorecardTotal,
+                String exitIp,
+                String lastError,
+                String bootAlert,
+                String quicUdp443Mode,
+                long exemptionGen,
+                long ackAppliedGen,
+                List<String> sandboxApps) {
             this.version = version;
             this.variant = variant;
             this.state = state;
@@ -484,6 +566,7 @@ public final class BrokerProtocol {
             this.runningProcs = runningProcs;
             this.hibernatedCount = hibernatedCount;
             this.stuckWorkSockets = stuckWorkSockets;
+            this.crossPool12c6Hits = crossPool12c6Hits;
             this.tproxyPort = tproxyPort;
             this.stealthBootTries = stealthBootTries;
             this.privateDnsMode = privateDnsMode;
@@ -492,7 +575,11 @@ public final class BrokerProtocol {
             this.scorecardWarn = scorecardWarn;
             this.scorecardTotal = scorecardTotal;
             this.exitIp = exitIp;
-            this.lastError = lastError;
+            this.lastError = lastError == null ? "" : lastError;
+            this.bootAlert = bootAlert == null ? "" : bootAlert;
+            this.quicUdp443Mode = quicUdp443Mode == null ? "" : quicUdp443Mode;
+            this.exemptionGen = exemptionGen;
+            this.ackAppliedGen = ackAppliedGen;
             this.sandboxApps = sandboxApps;
         }
 
@@ -504,11 +591,66 @@ public final class BrokerProtocol {
                     version, variant, state, mode, activePreset, paused, policyLoaded, sbwOpen, sbwRawArmed,
                     frozen, hotFrozen, tproxyReady, zygiskDisabled, privateDnsWarning,
                     prev.probeApkInstalled, prev.instrumentOk, true, vpnRunning,
-                    userId, runningProcs, hibernatedCount, stuckWorkSockets,
+                    userId, runningProcs, hibernatedCount, stuckWorkSockets, crossPool12c6Hits,
                     tproxyPort, stealthBootTries, privateDnsMode,
                     prev.scorecardPassed, prev.scorecardFailed, prev.scorecardWarn, prev.scorecardTotal,
-                    exitIp, lastError, sandboxApps
+                    exitIp, lastError, bootAlert, quicUdp443Mode, exemptionGen, ackAppliedGen, sandboxApps
             );
+        }
+
+        public boolean isGateHealthyOpen() {
+            return !paused && sbwOpen;
+        }
+
+        public boolean hasStartupOrHealthAlert() {
+            return !policyLoaded
+                    || !bootAlert.trim().isEmpty()
+                    || zygiskDisabled
+                    || (!paused && !sbwOpen)
+                    || ("tproxy".equalsIgnoreCase(mode) && !tproxyReady)
+                    || crossPool12c6Hits > 0
+                    || stuckWorkSockets > 0
+                    || !lastError.trim().isEmpty();
+        }
+
+        public String buildAlertSummary(Strings s) {
+            List<String> items = new ArrayList<String>();
+            if (!policyLoaded) {
+                items.add(s.alertNotPinned());
+            }
+            if (!bootAlert.trim().isEmpty()) {
+                items.add(bootAlert.trim());
+            } else if (zygiskDisabled) {
+                items.add(s.alertZygiskDisabled());
+            }
+            if ("tproxy".equalsIgnoreCase(mode) && !tproxyReady) {
+                int port = tproxyPort > 0 ? tproxyPort : 1537;
+                items.add(s.alertTProxyNotReady(port));
+            }
+            if (!paused && !sbwOpen) {
+                items.add(s.alertGateNotOpen(state));
+            }
+            if (crossPool12c6Hits > 0) {
+                items.add(s.alertCrossPool(crossPool12c6Hits));
+            }
+            if (stuckWorkSockets > 0) {
+                items.add(s.alertStuckSockets(stuckWorkSockets));
+            }
+            String errTrim = lastError.trim();
+            if (!errTrim.isEmpty() && !bootAlert.contains(errTrim)) {
+                items.add(errTrim);
+            }
+            if (items.isEmpty()) {
+                return "";
+            }
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < items.size(); i++) {
+                if (i > 0) {
+                    sb.append('\n');
+                }
+                sb.append("• ").append(items.get(i));
+            }
+            return sb.toString();
         }
 
         public String toRedactedDiagnosticJson() {
@@ -524,16 +666,21 @@ public final class BrokerProtocol {
                     + "  \"sbw_raw_armed\": " + sbwRawArmed + ",\n"
                     + "  \"tproxy_ready\": " + tproxyReady + ",\n"
                     + "  \"tproxy_port\": " + tproxyPort + ",\n"
+                    + "  \"quic_udp443_mode\": " + quote(nonNull(quicUdp443Mode)) + ",\n"
+                    + "  \"exemption_gen\": " + exemptionGen + ",\n"
+                    + "  \"ack_applied_gen\": " + ackAppliedGen + ",\n"
                     + "  \"zygisk_disabled\": " + zygiskDisabled + ",\n"
                     + "  \"stealth_boot_tries\": " + stealthBootTries + ",\n"
                     + "  \"private_dns_mode\": " + quote(nonNull(privateDnsMode)) + ",\n"
                     + "  \"private_dns_warning\": " + privateDnsWarning + ",\n"
                     + "  \"stuck_work_sockets\": " + stuckWorkSockets + ",\n"
+                    + "  \"cross_pool_12c6_hits\": " + crossPool12c6Hits + ",\n"
                     + "  \"sandbox_apps_count\": " + sandboxApps.size() + ",\n"
                     + "  \"has_probe_data\": " + hasProbeData + ",\n"
                     + "  \"probe_apk_installed\": " + probeApkInstalled + ",\n"
                     + "  \"instrument_ok\": " + instrumentOk + ",\n"
                     + "  \"scorecard\": {\"passed\": " + scorecardPassed + ", \"warn\": " + scorecardWarn + ", \"failed\": " + scorecardFailed + ", \"total\": " + scorecardTotal + "},\n"
+                    + "  \"boot_alert\": " + quote(nonNull(bootAlert)) + ",\n"
                     + "  \"last_error\": " + quote(nonNull(lastError)) + "\n"
                     + "}";
         }
@@ -542,7 +689,7 @@ public final class BrokerProtocol {
             return new StatusSnapshot(
                     "", "", "OFFLINE", "", "neutral",
                     true, false, false, false, false, false, false, false, false, false, false, false, false,
-                    10, 0, 0, 0, 1537, 0, "", 0, 0, 0, 0, "", "", Collections.<String>emptyList()
+                    10, 0, 0, 0, 0, 1537, 0, "", 0, 0, 0, 0, "", "", "", "", 0L, 0L, Collections.<String>emptyList()
             );
         }
     }

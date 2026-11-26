@@ -58,6 +58,10 @@ public final class MainActivity extends Activity {
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final Map<String, AppTileInfo> tileCache = new ConcurrentHashMap<String, AppTileInfo>();
 
+    private LinearLayout alertBannerCard;
+    private TextView alertBannerTitle;
+    private TextView alertBannerBody;
+    private TextView alertBannerHint;
     private ScrollView mainScroll;
     private LinearLayout scrollContent;
     private BreathingHaloView haloView;
@@ -87,6 +91,8 @@ public final class MainActivity extends Activity {
     private BrokerProtocol.OfflineReason lastOfflineReason = BrokerProtocol.OfflineReason.DAEMON_DOWN;
     private List<String> renderedApps = Collections.emptyList();
     private String certSha256 = "";
+    private String busyStatusText = "";
+    private String lastActionError = "";
     private boolean connected = false;
     private boolean busy = false;
 
@@ -276,6 +282,7 @@ public final class MainActivity extends Activity {
         scrollContent.setPadding(hPad, ThemePalette.dp(this, 16f), hPad, ThemePalette.dp(this, 100f));
 
         scrollContent.addView(buildHeaderRow());
+        scrollContent.addView(buildAlertBannerCard());
         scrollContent.addView(buildHeroStatusCard());
         scrollContent.addView(buildAppsHeaderRow());
         scrollContent.addView(buildAppsGridSection());
@@ -336,6 +343,7 @@ public final class MainActivity extends Activity {
         appActionSheet = new AppActionSheet(this, strings, broker, rpcExecutor, mainHandler, new AppActionSheet.Callback() {
             @Override
             public void onActionSuccess(BrokerProtocol.StatusSnapshot snapshot, String toastMessage) {
+                lastActionError = "";
                 if (snapshot != null && snapshot.policyLoaded) {
                     connected = true;
                     currentSnapshot = snapshot.withPreservedProbeFrom(currentSnapshot);
@@ -367,6 +375,7 @@ public final class MainActivity extends Activity {
         diagnosticsSheet = new DiagnosticsSheet(this, strings, broker, rpcExecutor, mainHandler, new DiagnosticsSheet.Callback() {
             @Override
             public void onSnapshotRefreshed(BrokerProtocol.StatusSnapshot snapshot) {
+                lastActionError = "";
                 if (snapshot != null && snapshot.policyLoaded) {
                     connected = true;
                     currentSnapshot = snapshot.withPreservedProbeFrom(currentSnapshot);
@@ -547,6 +556,60 @@ public final class MainActivity extends Activity {
         row.addView(refreshIconBtn, new LinearLayout.LayoutParams(
                 ThemePalette.dp(this, 42f), ThemePalette.dp(this, 42f)));
         return row;
+    }
+
+    private View buildAlertBannerCard() {
+        alertBannerCard = new LinearLayout(this);
+        alertBannerCard.setOrientation(LinearLayout.VERTICAL);
+        alertBannerCard.setVisibility(View.GONE);
+        alertBannerCard.setBackground(ThemePalette.pillRippleDrawable(
+                this,
+                ThemePalette.accentErrorSoft(this),
+                ThemePalette.surfacePressed(this),
+                ThemePalette.accentError(this),
+                16f));
+        int hPad = ThemePalette.dp(this, 16f);
+        int vPad = ThemePalette.dp(this, 12f);
+        alertBannerCard.setPadding(hPad, vPad, hPad, vPad);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.bottomMargin = ThemePalette.dp(this, 14f);
+        alertBannerCard.setLayoutParams(lp);
+
+        alertBannerTitle = new TextView(this);
+        alertBannerTitle.setText(strings.alertBannerTitle());
+        alertBannerTitle.setTextColor(ThemePalette.accentError(this));
+        alertBannerTitle.setTextSize(13.5f);
+        alertBannerTitle.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+        alertBannerCard.addView(alertBannerTitle);
+
+        alertBannerBody = new TextView(this);
+        alertBannerBody.setTextColor(ThemePalette.inkPrimary(this));
+        alertBannerBody.setTextSize(12.5f);
+        alertBannerBody.setLineSpacing(0f, 1.25f);
+        alertBannerBody.setPadding(0, ThemePalette.dp(this, 4f), 0, ThemePalette.dp(this, 6f));
+        alertBannerCard.addView(alertBannerBody);
+
+        alertBannerHint = new TextView(this);
+        alertBannerHint.setText(strings.alertTapDiagHint());
+        alertBannerHint.setTextColor(ThemePalette.accentError(this));
+        alertBannerHint.setTextSize(11.5f);
+        alertBannerHint.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+        alertBannerCard.addView(alertBannerHint);
+
+        Motion.attachPressScale(alertBannerCard);
+        alertBannerCard.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (connected) {
+                    diagnosticsSheet.show(currentSnapshot, connected);
+                    updateMainAccessibility();
+                } else {
+                    refreshStatus(true);
+                }
+            }
+        });
+        return alertBannerCard;
     }
 
     private View buildHeroStatusCard() {
@@ -864,31 +927,71 @@ public final class MainActivity extends Activity {
     }
 
     private void applyRpcResponse(BrokerProtocol.RpcResponse resp, boolean notifyError) {
-        if (resp.offline) {
+        if (resp.offlineReason == BrokerProtocol.OfflineReason.RPC_TIMEOUT) {
+            lastOfflineReason = BrokerProtocol.OfflineReason.RPC_TIMEOUT;
+            lastActionError = strings.alertRpcTimeout();
+            if (notifyError) {
+                showToast(strings.alertRpcTimeout(), true);
+            }
+        } else if (resp.offline) {
             connected = false;
             lastOfflineReason = resp.offlineReason;
             currentSnapshot = BrokerProtocol.StatusSnapshot.empty();
+            lastActionError = !resp.error.isEmpty() ? resp.error : "";
             if (notifyError && !resp.error.isEmpty()) {
                 showToast(resp.error, true);
             }
         } else if (!resp.ok) {
             connected = true;
             lastOfflineReason = BrokerProtocol.OfflineReason.NONE;
-            if (!resp.error.isEmpty()) {
+            if (resp.snapshot != null && resp.snapshot.policyLoaded) {
+                currentSnapshot = resp.snapshot.withPreservedProbeFrom(currentSnapshot);
+            }
+            lastActionError = !resp.error.isEmpty() ? resp.error : strings.statusErrorTitle();
+            if (notifyError && !resp.error.isEmpty()) {
                 showToast(strings.failPrefix() + resp.error, true);
             }
         } else {
             connected = true;
             lastOfflineReason = BrokerProtocol.OfflineReason.NONE;
             currentSnapshot = resp.snapshot.withPreservedProbeFrom(currentSnapshot);
+            lastActionError = "";
         }
         renderSnapshot();
     }
 
+    private void renderAlertBanner() {
+        if (alertBannerCard == null) {
+            return;
+        }
+        StringBuilder sb = new StringBuilder();
+        if (!lastActionError.trim().isEmpty()) {
+            sb.append("• ").append(lastActionError.trim());
+        }
+        if (connected) {
+            String snapAlert = currentSnapshot.buildAlertSummary(strings);
+            if (!snapAlert.isEmpty()) {
+                if (sb.length() > 0) {
+                    sb.append('\n');
+                }
+                sb.append(snapAlert);
+            }
+        }
+        if (sb.length() == 0) {
+            alertBannerCard.setVisibility(View.GONE);
+            return;
+        }
+        alertBannerTitle.setText(strings.alertBannerTitle());
+        alertBannerBody.setText(sb.toString());
+        alertBannerHint.setText(connected ? strings.alertTapDiagHint() : strings.alertTapRetryHint());
+        alertBannerCard.setVisibility(View.VISIBLE);
+    }
+
     private void renderSnapshot() {
+        renderAlertBanner();
         if (busy) {
             haloView.setMode(BreathingHaloView.Mode.BUSY);
-            statusTitleView.setText(strings.statusBusyTitle());
+            statusTitleView.setText(busyStatusText.isEmpty() ? strings.statusBusyTitle() : busyStatusText);
             primaryToggleBtn.setText(strings.btnSyncing());
             primaryToggleBtn.setEnabled(false);
             primaryToggleBtn.setBackground(ThemePalette.pillRippleDrawable(
@@ -900,7 +1003,8 @@ public final class MainActivity extends Activity {
         primaryToggleBtn.setEnabled(true);
         if (!connected) {
             haloView.setMode(BreathingHaloView.Mode.OFFLINE);
-            modePill.setText(strings.modeOffline());
+            modePill.setText(lastOfflineReason == BrokerProtocol.OfflineReason.RPC_TIMEOUT
+                    ? strings.qsTimeout() : strings.modeOffline());
             modePill.setTextColor(ThemePalette.inkSecondary(this));
             modePill.setBackground(ThemePalette.cardDrawable(
                     this, ThemePalette.surfaceSubtle(this), ThemePalette.borderHairline(this), 16f));
@@ -909,6 +1013,8 @@ public final class MainActivity extends Activity {
                 statusSubtitleView.setText(strings.offlineCertUnpinnedHint());
             } else if (lastOfflineReason == BrokerProtocol.OfflineReason.SELINUX_DENIED) {
                 statusSubtitleView.setText(strings.offlineSelinuxHint());
+            } else if (lastOfflineReason == BrokerProtocol.OfflineReason.RPC_TIMEOUT) {
+                statusSubtitleView.setText(strings.alertRpcTimeout());
             } else {
                 statusSubtitleView.setText(strings.offlineHint());
             }
@@ -925,26 +1031,43 @@ public final class MainActivity extends Activity {
         }
 
         offlineCertBox.setVisibility(View.GONE);
-        boolean active = !currentSnapshot.paused;
-        haloView.setMode(active ? BreathingHaloView.Mode.ACTIVE : BreathingHaloView.Mode.PAUSED);
+        boolean active = currentSnapshot.isGateHealthyOpen();
+        boolean notPaused = !currentSnapshot.paused;
+        boolean abnormalActive = notPaused && !currentSnapshot.sbwOpen;
 
-        if ("tproxy".equalsIgnoreCase(currentSnapshot.mode)) {
-            modePill.setText(active ? strings.modeTProxy() : strings.modeStandby());
+        if (abnormalActive) {
+            haloView.setMode(BreathingHaloView.Mode.ERROR);
+            modePill.setText(strings.qsError());
+            modePill.setTextColor(ThemePalette.accentError(this));
+            modePill.setBackground(ThemePalette.cardDrawable(
+                    this, ThemePalette.accentErrorSoft(this), ThemePalette.accentError(this), 16f));
+            if ("AckWait".equalsIgnoreCase(currentSnapshot.state)) {
+                statusTitleView.setText(strings.statusWaitingAckTitle());
+            } else if ("UpgradingFence".equalsIgnoreCase(currentSnapshot.state)) {
+                statusTitleView.setText(strings.statusUpgradingTitle());
+            } else {
+                statusTitleView.setText(strings.statusErrorTitle());
+            }
         } else {
-            modePill.setText(active ? strings.modeIsolated() : strings.modeStandby());
+            haloView.setMode(active ? BreathingHaloView.Mode.ACTIVE : BreathingHaloView.Mode.PAUSED);
+            if ("tproxy".equalsIgnoreCase(currentSnapshot.mode)) {
+                modePill.setText(active ? strings.modeTProxy() : strings.modeStandby());
+            } else {
+                modePill.setText(active ? strings.modeIsolated() : strings.modeStandby());
+            }
+            modePill.setTextColor(active ? ThemePalette.accentSage(this) : ThemePalette.inkSecondary(this));
+            modePill.setBackground(ThemePalette.cardDrawable(
+                    this,
+                    active ? ThemePalette.accentSageSoft(this) : ThemePalette.surfaceSubtle(this),
+                    ThemePalette.borderHairline(this),
+                    16f));
+            statusTitleView.setText(active ? strings.statusActiveTitle() : strings.statusPausedTitle());
         }
-        modePill.setTextColor(active ? ThemePalette.accentSage(this) : ThemePalette.inkSecondary(this));
-        modePill.setBackground(ThemePalette.cardDrawable(
-                this,
-                active ? ThemePalette.accentSageSoft(this) : ThemePalette.surfaceSubtle(this),
-                ThemePalette.borderHairline(this),
-                16f));
 
-        statusTitleView.setText(active ? strings.statusActiveTitle() : strings.statusPausedTitle());
         statusSubtitleView.setText(strings.userLineFmt(
                 currentSnapshot.userId, currentSnapshot.runningProcs, currentSnapshot.variant));
 
-        if (active) {
+        if (notPaused) {
             primaryToggleBtn.setText(strings.btnPause());
             primaryToggleBtn.setTextColor(ThemePalette.inkPrimary(this));
             primaryToggleBtn.setBackground(ThemePalette.pillRippleDrawable(
@@ -1182,6 +1305,12 @@ public final class MainActivity extends Activity {
     }
 
     private void launchSandboxApp(final AppTileInfo info) {
+        if (busy) {
+            return;
+        }
+        busy = true;
+        busyStatusText = strings.statusLaunchingTitle(info.label);
+        renderSnapshot();
         showToast(strings.launchingFmt(info.label), false);
         rpcExecutor.execute(new Runnable() {
             @Override
@@ -1190,11 +1319,9 @@ public final class MainActivity extends Activity {
                 mainHandler.post(new Runnable() {
                     @Override
                     public void run() {
-                        if (!resp.ok) {
-                            showToast(strings.failPrefix() + resp.error, true);
-                        } else {
-                            refreshStatus(false);
-                        }
+                        busy = false;
+                        busyStatusText = "";
+                        applyRpcResponse(resp, true);
                     }
                 });
             }
@@ -1215,6 +1342,6 @@ public final class MainActivity extends Activity {
         toastCapsule.setAlpha(0f);
         toastCapsule.setTranslationY(ThemePalette.dp(this, 10f));
         toastCapsule.animate().alpha(1f).translationY(0f).setDuration(180L).start();
-        mainHandler.postDelayed(hideToastTask, 2600L);
+        mainHandler.postDelayed(hideToastTask, isError ? 4500L : 2600L);
     }
 }

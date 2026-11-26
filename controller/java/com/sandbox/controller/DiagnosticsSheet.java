@@ -296,6 +296,11 @@ public final class DiagnosticsSheet extends FrameLayout {
         boolean isHyperOs = latestSnapshot.variant != null
                 && latestSnapshot.variant.toLowerCase(Locale.ROOT).startsWith("hyperos");
         syncHideBtn.setVisibility(connected && isHyperOs ? View.VISIBLE : View.GONE);
+        if ("allow".equalsIgnoreCase(latestSnapshot.quicUdp443Mode)
+                || "reject".equalsIgnoreCase(latestSnapshot.quicUdp443Mode)) {
+            quicMode = latestSnapshot.quicUdp443Mode.toLowerCase(Locale.ROOT);
+        }
+        quicToggleBtn.setText("reject".equals(quicMode) ? strings.diagQuicReject() : strings.diagQuicAllow());
         quicToggleBtn.setEnabled(connected && !probing);
         quicToggleBtn.setAlpha(connected && !probing ? 1f : 0.55f);
 
@@ -308,8 +313,16 @@ public final class DiagnosticsSheet extends FrameLayout {
         probeBtn.setEnabled(!probing);
         probeBtn.setAlpha(probing ? 0.55f : 1f);
 
+        if (latestSnapshot.bootAlert != null && !latestSnapshot.bootAlert.trim().isEmpty()) {
+            addRow(ctx, strings.diagLabelBootAlert(), latestSnapshot.bootAlert.trim(), false, false);
+        }
+
         if (latestSnapshot.lastError != null && !latestSnapshot.lastError.trim().isEmpty()) {
             addRow(ctx, strings.diagLabelLastError(), latestSnapshot.lastError.trim(), false, false);
+        }
+
+        if (latestSnapshot.crossPool12c6Hits > 0) {
+            addRow(ctx, strings.diagLabelCrossPool(), String.valueOf(latestSnapshot.crossPool12c6Hits), false, true);
         }
 
         addRow(ctx, strings.diagLabelGate(),
@@ -399,7 +412,7 @@ public final class DiagnosticsSheet extends FrameLayout {
             vTv.setMaxLines(1);
             vTv.setEllipsize(TextUtils.TruncateAt.END);
         } else {
-            vTv.setMaxLines(2);
+            vTv.setMaxLines(4);
             vTv.setEllipsize(TextUtils.TruncateAt.END);
         }
         row.addView(vTv);

@@ -406,7 +406,7 @@ func (w *InotifyWatcher) loop(ch WatchChannels) {
 						}
 					}
 				case "mainbase":
-					if name == "sandbox_ack.v1.json" || name == "core.pid" || name == "status.json" || name == "" {
+					if name == "sandbox_ack.v1.json" || name == "core.pid" || name == "" {
 						wakeUp(ch.AckWake)
 					}
 				case "system":

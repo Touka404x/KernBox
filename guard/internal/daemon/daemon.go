@@ -139,8 +139,13 @@ type Daemon struct {
 	state              State
 	ackWaitDeadlineNs  int64
 	ackWaitBlocked     bool
+	ackWaitBlockedAt   time.Time
+	ackWaitBlockedPID  int
 	switchGraceUntilNs int64
 	lastError          string
+	bootAlert          string
+	alertMu            sync.Mutex
+	alertLastSent      map[string]time.Time
 	lastSession        *netfilter.ActiveSession
 	lastVPNStatus      *contracts.VPNStatus
 	lastRawArmed       bool
@@ -940,7 +945,7 @@ func (d *Daemon) Supervise() int {
 			d.maybeFlushOnRouteChange(ctx, &lastRouteFP, &lastRouteFlushAt)
 			armTimers()
 		case <-ch.AckWake:
-			_ = d.reconcileOnce(ctx, reconcileReq{clearAckBlock: true})
+			_ = d.reconcileOnce(ctx, reconcileReq{clearAckBlock: d.shouldClearAckBlockOnWake()})
 			armTimers()
 		case <-ch.VPNStatusWake:
 			elapsed := time.Since(lastHint)
@@ -1075,6 +1080,8 @@ func (d *Daemon) reconcileOnce(ctx context.Context, req reconcileReq) error {
 	d.mu.Lock()
 	if req.clearAckBlock {
 		d.ackWaitBlocked = false
+		d.ackWaitBlockedAt = time.Time{}
+		d.ackWaitBlockedPID = 0
 	}
 	if req.invalidateID {
 		d.cachedID = nil
@@ -1375,11 +1382,23 @@ func (d *Daemon) reconcileOnce(ctx context.Context, req reconcileReq) error {
 	}
 	if dec.AckTimedOut {
 		d.ackWaitBlocked = true
+		d.ackWaitBlockedAt = time.Now()
+		if ack != nil {
+			d.ackWaitBlockedPID = ack.WriterPID()
+		} else {
+			d.ackWaitBlockedPID = 0
+		}
+		d.lastError = "sandbox_ack timeout: external proxy did not acknowledge exemption"
 	}
 	if dec.OpenGate {
 		d.kickAttempts = 0
 		d.kickNextAt = time.Time{}
 		d.lastError = ""
+		d.ackWaitBlockedAt = time.Time{}
+		d.ackWaitBlockedPID = 0
+		if d.bootAlert != "" && !d.hasPersistentBootIssueLocked() {
+			d.bootAlert = ""
+		}
 	} else if !paused && identityOK && errors.Is(sessionErr, android.ErrWorkVPNMissing) && !FenceActive(d.fence, d.bootID, nowNs) {
 		// Bounded recovery backoff ONLY when work VPN is missing while desired.
 		delays := []time.Duration{2 * time.Second, 7 * time.Second, 16 * time.Second}
@@ -1389,9 +1408,49 @@ func (d *Daemon) reconcileOnce(ctx context.Context, req reconcileReq) error {
 	} else if !errors.Is(sessionErr, android.ErrWorkVPNMissing) {
 		d.kickAttempts = 0
 		d.kickNextAt = time.Time{}
+		if !paused && identityOK && dec.NextState == StateBlockedLocked && !dec.AckTimedOut && d.lastError == "" && dec.Reason != "" {
+			d.lastError = dec.Reason
+		} else if paused && appliedOK && identityOK {
+			d.lastError = ""
+		}
 	}
 	d.mu.Unlock()
+	if dec.AckTimedOut && !paused {
+		d.notifyAlertAsync("runtime_ack_timeout", "kernbox_runtime_alert",
+			"KernBox 沙盒链路异常", "代理确认超时 (sandbox_ack timeout)，隔离网关已闭锁防漏流，请打开 KernBox 检查")
+	}
 	return nil
+}
+
+func (d *Daemon) shouldClearAckBlockOnWake() bool {
+	d.mu.Lock()
+	blocked := d.ackWaitBlocked
+	blockedAt := d.ackWaitBlockedAt
+	blockedPID := d.ackWaitBlockedPID
+	loaded := d.policyLoaded
+	policy := d.policy
+	curEx := d.currentExemption
+	d.mu.Unlock()
+	if !blocked {
+		return false
+	}
+	var ack *contracts.SandboxAckV1
+	if loaded {
+		ack = d.readCurrentAck(policy)
+	} else {
+		ack = d.readCurrentAck()
+	}
+	if ack == nil || ack.BootID != d.bootID {
+		return false
+	}
+	if blockedPID > 0 && ack.WriterPID() > 0 && ack.WriterPID() != blockedPID {
+		return true
+	}
+	if curEx != nil && AckMatchesExemption(ack, curEx, d.bootID) &&
+		(blockedAt.IsZero() || time.Since(blockedAt) >= 10*time.Second) {
+		return true
+	}
+	return false
 }
 
 func inspectAnyFreeze(clientUID, pid int) android.FreezeState {
@@ -1777,7 +1836,7 @@ func (d *Daemon) bootMaintain(ctx context.Context, enforceDeepPause bool) {
 		for i := 0; i < 10; i++ {
 			if uid, err := d.RefreshBrokerAuth(ctx); err == nil && uid > 0 {
 				d.log.Printf("broker_auth ready after boot (uid=%d)", uid)
-				return
+				break
 			}
 			if i == 9 {
 				break
@@ -1789,6 +1848,7 @@ func (d *Daemon) bootMaintain(ctx context.Context, enforceDeepPause bool) {
 			}
 		}
 	}
+	d.checkBootHealthAndAlert(ctx)
 }
 
 func (d *Daemon) maybePruneBloatOnBoot(ctx context.Context) {
@@ -2040,16 +2100,32 @@ func (d *Daemon) startTProxySandboxWithPriorityTraced(ctx context.Context, polic
 	if alreadyReady {
 		recWg.Wait()
 		if recErr != nil {
+			if !d.isPaused() {
+				d.mu.Lock()
+				d.lastError = recErr.Error()
+				d.mu.Unlock()
+			}
 			return thawUs, restoreUs, reconcileUs, recErr
 		}
 	} else {
 		if !tproxyUp {
 			_ = d.requestReconcile(ctx, reconcileReq{clearAckBlock: true, invalidateID: true})
-			return thawUs, restoreUs, reconcileUs, errors.New("proxy core not running and auto-start failed")
+			perr := errors.New("proxy core not running and auto-start failed")
+			if !d.isPaused() {
+				d.mu.Lock()
+				d.lastError = perr.Error()
+				d.mu.Unlock()
+			}
+			return thawUs, restoreUs, reconcileUs, perr
 		}
 		tRec := time.Now()
 		if err := d.requestReconcile(ctx, reconcileReq{clearAckBlock: true, invalidateID: true}); err != nil {
 			reconcileUs = time.Since(tRec).Microseconds()
+			if !d.isPaused() {
+				d.mu.Lock()
+				d.lastError = err.Error()
+				d.mu.Unlock()
+			}
 			return thawUs, restoreUs, reconcileUs, err
 		}
 		reconcileUs = time.Since(tRec).Microseconds()
@@ -2064,7 +2140,7 @@ func (d *Daemon) startTProxySandboxWithPriorityTraced(ctx context.Context, polic
 		if curSt != StateAckWait {
 			return curSt, curErr
 		}
-		deadline := time.Now().Add(3500 * time.Millisecond)
+		deadline := time.Now().Add(time.Duration(AckWaitTimeoutNs) + 500*time.Millisecond)
 		for curSt == StateAckWait && time.Now().Before(deadline) {
 			if ack := d.readCurrentAck(policy); ack != nil && ack.BootID == bootID &&
 				ack.AppliedGeneration > 0 && (curGen == 0 || ack.AppliedGeneration >= curGen) {
@@ -2088,31 +2164,45 @@ func (d *Daemon) startTProxySandboxWithPriorityTraced(ctx context.Context, polic
 		return curSt, curErr
 	}
 
+	failErr := func(ferr error) (int64, int64, int64, error) {
+		if ferr != nil && !d.isPaused() {
+			d.mu.Lock()
+			d.lastError = ferr.Error()
+			d.mu.Unlock()
+		}
+		return thawUs, restoreUs, reconcileUs, ferr
+	}
+
 	stAfterRec, lastErr := waitAck()
 	if stAfterRec != StateOpen {
 		if stAfterRec == StateBlockedLocked {
 			d.mu.Lock()
-			d.userUnlockedBoot = false
+			needUserRetry := d.cachedID == nil && !d.ackWaitBlocked
 			d.mu.Unlock()
-			d.lifecycleMu.Lock()
-			if uerr := android.StartSandboxUserAndWait(ctx, d.runner, policy.UserID, timeout); uerr == nil {
+			if needUserRetry && d.tproxyReady(policy) {
 				d.mu.Lock()
-				d.userUnlockedBoot = true
+				d.userUnlockedBoot = false
 				d.mu.Unlock()
+				d.lifecycleMu.Lock()
+				if uerr := android.StartSandboxUserAndWait(ctx, d.runner, policy.UserID, timeout); uerr == nil {
+					d.mu.Lock()
+					d.userUnlockedBoot = true
+					d.mu.Unlock()
+				}
+				d.lifecycleMu.Unlock()
+				if rerr := d.requestReconcile(ctx, reconcileReq{clearAckBlock: true, invalidateID: true}); rerr != nil {
+					return failErr(rerr)
+				}
+				stAfterRec, lastErr = waitAck()
 			}
-			d.lifecycleMu.Unlock()
-			if err := d.requestReconcile(ctx, reconcileReq{clearAckBlock: true, invalidateID: true}); err != nil {
-				return thawUs, restoreUs, reconcileUs, err
-			}
-			stAfterRec, lastErr = waitAck()
 		}
 		if stAfterRec != StateOpen {
-			return thawUs, restoreUs, reconcileUs, fmt.Errorf("sandbox gate did not open (%s: %s)", stAfterRec, lastErr)
+			return failErr(fmt.Errorf("sandbox gate did not open (%s: %s)", stAfterRec, lastErr))
 		}
 	}
 
 	if !d.tproxyReady(policy) {
-		return thawUs, restoreUs, reconcileUs, errors.New("sandbox TProxy port not ready")
+		return failErr(errors.New("sandbox TProxy port not ready"))
 	}
 
 	d.scheduleMaintenance(policy, len(remaining) > 0)
@@ -2375,7 +2465,11 @@ func (d *Daemon) HandleRPC(ctx context.Context, req contracts.RPCRequest) contra
 		callerPkg := policy.EffectiveCallerPackage()
 		uid, err := android.WorkClientUID(ctx, d.runner, policy.UserID, callerPkg)
 		if err != nil {
-			return contracts.RPCResponse{ID: req.ID, OK: false, Error: err.Error(), Data: map[string]any{}}
+			if policy.IsTProxy() {
+				uid = 0
+			} else {
+				return contracts.RPCResponse{ID: req.ID, OK: false, Error: err.Error(), Data: map[string]any{}}
+			}
 		}
 		quicMode := "reject"
 		logLevel := "warning"
@@ -2943,6 +3037,7 @@ func (d *Daemon) buildStatusData(ctx context.Context) map[string]any {
 	rawArmed := d.lastRawArmed
 	openGate := d.lastOpen
 	lastErr := d.lastError
+	bootAlert := d.bootAlert
 	d.mu.Unlock()
 
 	var vpnStatus *contracts.VPNStatus
@@ -3000,6 +3095,7 @@ func (d *Daemon) buildStatusData(ctx context.Context) map[string]any {
 		"stuck_work_sockets":   stuckWork,
 		"cross_pool_12c6_hits": crossPool,
 		"last_error":           lastErr,
+		"boot_alert":           bootAlert,
 	}
 	if curEx != nil {
 		data["exemption"] = curEx

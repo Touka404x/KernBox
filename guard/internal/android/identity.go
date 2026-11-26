@@ -411,6 +411,14 @@ func VerifyStaticIdentity(ctx context.Context, r Runner, policy contracts.Policy
 	}
 
 	clientUID, err := WorkClientUID(ctx, r, policy.UserID, callerPkg)
+	if err != nil && policy.IsTProxy() {
+		if adminPkg := policy.EffectiveAdminPackage(); adminPkg != "" && adminPkg != callerPkg {
+			if adminUID, aerr := WorkClientUID(ctx, r, policy.UserID, adminPkg); aerr == nil {
+				clientUID = adminUID
+				err = nil
+			}
+		}
+	}
 	if err != nil {
 		return VerifiedIdentity{}, err
 	}

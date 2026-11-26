@@ -89,6 +89,27 @@ umask 077
 
 BROKER_SELINUX_OK=1
 
+post_boot_alert() {
+    local tag=$1
+    local msg=$2
+    [ -n "$msg" ] || return 0
+    local stamp="/dev/sandbox_cfg/.boot_alert_${tag}"
+    if [ -f "$stamp" ]; then
+        return 0
+    fi
+    (
+        local w=0
+        while [ "$w" -lt 30 ] && [ "$(getprop sys.boot_completed 2>/dev/null || true)" != "1" ]; do
+            sleep 2
+            w=$((w + 1))
+        done
+        if [ ! -f "$stamp" ]; then
+            : > "$stamp" 2>/dev/null || true
+            cmd notification post -S bigtext -t "KernBox 启动异常" "$tag" "$msg" >/dev/null 2>&1 || true
+        fi
+    ) </dev/null >/dev/null 2>&1 9>&- &
+}
+
 prepare_env() {
     mkdir -p "$GUARD_HOME" "$GUARD_HOME/staging"
     chown 0:0 "$GUARD_HOME" "$GUARD_HOME/staging"
@@ -106,6 +127,7 @@ prepare_env() {
 
     [ -f "$GUARD_BIN" ] || {
         echo "missing guard binary in $GUARD_HOME" > "$GUARD_HOME/service.status"
+        post_boot_alert "kernbox_guard_missing" "sandbox_guard 核心二进制缺失，请重新刷入模块"
         return 1
     }
     chown 0:0 "$GUARD_BIN"
@@ -117,9 +139,11 @@ prepare_env() {
         if ! chcon u:object_r:sandbox_broker_exec:s0 "$BROKER_BIN" 2>/dev/null; then
             BROKER_SELINUX_OK=0
             echo "warn: chcon sandbox_broker_exec failed; starting sandbox_guard in degraded mode" > "$GUARD_HOME/service.status"
+            post_boot_alert "kernbox_broker_selinux" "sandbox_broker SELinux 标签配置失败，控制端 App 将无法连接"
         fi
     else
         BROKER_SELINUX_OK=0
+        post_boot_alert "kernbox_broker_missing" "sandbox_broker 缺失，控制端 App 将无法连接"
     fi
     return 0
 }
@@ -211,14 +235,18 @@ elif [ -f "$GUARD_HOME/service.pid" ]; then
 fi
 echo "$$" > "$GUARD_HOME/service.pid"
 
-# Reset bootloop counter once Android confirms sys.boot_completed=1, and protect core daemons from LMK.
+# Reset bootloop counter once Android confirms sys.boot_completed=1, protect core daemons from LMK,
+# and verify startup sockets / Zygisk health so boot failures never go silent.
 (
     bn=0
     boot_cleared=0
+    post_boot_ticks=0
+    health_checked=0
     while [ "$bn" -lt 120 ] && [ ! -e "$MODDIR/disable" ] && [ ! -e "$MODDIR/remove" ]; do
         protect_oom_pidfile "$GUARD_HOME/guard.pid" "$GUARD_BIN"
         protect_oom_pidfile "$GUARD_HOME/broker-svc.pid" "$BROKER_BIN"
         protect_oom_pidfile "/data/adb/sandbox_proxy/core.pid" "/data/adb/sandbox_proxy/mihomo"
+        protect_oom_pidfile "/data/adb/legend_proxy/core.pid" "/data/adb/legend_proxy/mihomo"
         if [ "$boot_cleared" = 0 ] && [ "$(getprop sys.boot_completed 2>/dev/null || true)" = "1" ]; then
             tmp_tries="$GUARD_HOME/stealth_boot_tries.tmp.$$"
             echo 0 > "$tmp_tries"
@@ -227,8 +255,27 @@ echo "$$" > "$GUARD_HOME/service.pid"
             apply_kernel_perf_tuning
             boot_cleared=1
         fi
-        if [ "$boot_cleared" = 1 ] && [ -f "$GUARD_HOME/guard.pid" ] && [ -f "$GUARD_HOME/broker-svc.pid" ] && [ -f "/data/adb/sandbox_proxy/core.pid" ]; then
-            break
+        if [ "$boot_cleared" = 1 ]; then
+            post_boot_ticks=$((post_boot_ticks + 1))
+            if [ "$health_checked" = 0 ] && [ "$post_boot_ticks" -ge 8 ]; then
+                health_checked=1
+                if [ -e "$MODDIR/zygisk_disabled" ]; then
+                    echo "zygisk_disabled triggered during boot" > "$GUARD_HOME/service.status"
+                    post_boot_alert "kernbox_zygisk_disabled" "Zygisk 隐身组件因启动异常已自动熔断关闭，请打开 KernBox 检查"
+                fi
+                if [ ! -S /dev/socket/sandbox_priv/guard.sock ]; then
+                    echo "guard.sock missing 16s after boot_completed" > "$GUARD_HOME/service.status"
+                    post_boot_alert "kernbox_guard_sock" "sandbox_guard 守护进程启动异常 (guard.sock 未就绪)"
+                elif [ "$BROKER_SELINUX_OK" = 1 ] && [ ! -S /dev/socket/sandbox_ctrl/ctrl.sock ]; then
+                    echo "ctrl.sock missing 16s after boot_completed" > "$GUARD_HOME/service.status"
+                    post_boot_alert "kernbox_broker_sock" "sandbox_broker 通信接口未就绪，KernBox 控制端无法连接"
+                fi
+            fi
+            if [ -f "$GUARD_HOME/guard.pid" ] && [ -f "$GUARD_HOME/broker-svc.pid" ]; then
+                if [ -f "/data/adb/sandbox_proxy/core.pid" ] || [ -f "/data/adb/legend_proxy/core.pid" ] || [ "$post_boot_ticks" -ge 15 ]; then
+                    break
+                fi
+            fi
         fi
         sleep 2
         bn=$((bn + 1))
@@ -329,8 +376,15 @@ supervise_proc() {
             rapid_fails=$((rapid_fails + 1))
         fi
 
+        if [ "$rapid_fails" -eq 3 ]; then
+            echo "$name crash-looping ($rapid_fails rapid failures rc=$rc)" > "$GUARD_HOME/service.status"
+            post_boot_alert "kernbox_crash_${name}" "$name 服务连续异常退出 ($rapid_fails 次, rc=$rc)，请检查 service-sup.log"
+        fi
+
         if [ "$rapid_fails" -ge "$max_rapid" ]; then
             log_sup "$name exceeded max rapid restarts ($max_rapid); stopping loop"
+            echo "$name stopped after $max_rapid rapid restarts (rc=$rc)" > "$GUARD_HOME/service.status"
+            post_boot_alert "kernbox_stopped_${name}" "$name 已连续崩溃 $max_rapid 次并停止重启 (rc=$rc)"
             [ "$name" = "guard" ] && kill -TERM "$SUP_ROOT_PID" 2>/dev/null || true
             break
         fi

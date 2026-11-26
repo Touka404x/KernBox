@@ -19,7 +19,8 @@ public final class BreathingHaloView extends View {
         ACTIVE,
         PAUSED,
         OFFLINE,
-        BUSY
+        BUSY,
+        ERROR
     }
 
     private final Paint dialPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -93,6 +94,9 @@ public final class BreathingHaloView extends View {
                 break;
             case BUSY:
                 targetColor = ThemePalette.accentCopper(ctx);
+                break;
+            case ERROR:
+                targetColor = ThemePalette.accentError(ctx);
                 break;
             case PAUSED:
             case OFFLINE:

@@ -18,6 +18,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 public final class BrokerClient {
 
     private static final int DEFAULT_TIMEOUT_MS = 8000;
+    private static final int LIFECYCLE_TIMEOUT_MS = 18000;
     private static final int PROBE_TIMEOUT_MS = 34000;
     private static final int MAX_RESPONSE_BYTES = 65536;
     private static final AtomicInteger SEQ = new AtomicInteger(1);
@@ -33,12 +34,12 @@ public final class BrokerClient {
 
     public BrokerProtocol.RpcResponse startSandbox() {
         String id = nextId();
-        return exchange(id, BrokerProtocol.buildStartVpn(id), DEFAULT_TIMEOUT_MS);
+        return exchange(id, BrokerProtocol.buildStartVpn(id), LIFECYCLE_TIMEOUT_MS);
     }
 
     public BrokerProtocol.RpcResponse pauseSandbox() {
         String id = nextId();
-        return exchange(id, BrokerProtocol.buildPauseVpn(id), DEFAULT_TIMEOUT_MS);
+        return exchange(id, BrokerProtocol.buildPauseVpn(id), LIFECYCLE_TIMEOUT_MS);
     }
 
     public BrokerProtocol.RpcResponse runProbe() {
@@ -73,7 +74,7 @@ public final class BrokerClient {
 
     public BrokerProtocol.RpcResponse launchApp(String pkg) {
         String id = nextId();
-        return exchange(id, BrokerProtocol.buildLaunchApp(id, pkg), DEFAULT_TIMEOUT_MS);
+        return exchange(id, BrokerProtocol.buildLaunchApp(id, pkg), LIFECYCLE_TIMEOUT_MS);
     }
 
     public BrokerProtocol.RpcResponse stopApp(String pkg) {
@@ -110,6 +111,14 @@ public final class BrokerClient {
         } catch (IOException ex) {
             String msg = ex.getMessage() != null ? ex.getMessage() : "socket unreachable";
             String lower = msg.toLowerCase(Locale.ROOT);
+            if (ex instanceof java.net.SocketTimeoutException
+                    || lower.contains("timed out")
+                    || lower.contains("timeout")
+                    || lower.contains("try again")
+                    || lower.contains("eagain")) {
+                return BrokerProtocol.RpcResponse.error(
+                        id, "RPC timeout: " + msg, BrokerProtocol.OfflineReason.RPC_TIMEOUT);
+            }
             BrokerProtocol.OfflineReason reason = (lower.contains("permission") || lower.contains("eacces"))
                     ? BrokerProtocol.OfflineReason.SELINUX_DENIED
                     : BrokerProtocol.OfflineReason.DAEMON_DOWN;
