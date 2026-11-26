@@ -958,9 +958,13 @@ public final class MainActivity extends Activity {
 
         metricAppsVal.setText(String.valueOf(currentSnapshot.sandboxApps.size()));
         metricGateVal.setText(currentSnapshot.sbwOpen ? strings.gateOpen() : strings.gateLocked());
-        metricFreezeVal.setText((currentSnapshot.hotFrozen || currentSnapshot.frozen)
-                ? strings.freezeHot()
-                : strings.freezeAwake());
+        if (currentSnapshot.hotFrozen || currentSnapshot.frozen) {
+            metricFreezeVal.setText(strings.freezeHot());
+        } else if (currentSnapshot.paused && currentSnapshot.hibernatedCount > 0) {
+            metricFreezeVal.setText(strings.freezeDeep());
+        } else {
+            metricFreezeVal.setText(strings.freezeAwake());
+        }
 
         renderSandboxApps(currentSnapshot.sandboxApps);
     }

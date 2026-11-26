@@ -155,6 +155,8 @@ type Policy struct {
 	ProxySkipPrefix        string `json:"proxy_skip_prefix,omitempty"`
 	ProxyExemptionPath     string `json:"proxy_exemption_path,omitempty"`
 	ProxyNetfilterLockPath string `json:"proxy_netfilter_lock_path,omitempty"`
+	GuardChainOut          string `json:"guard_chain_out,omitempty"`
+	GuardChainPost         string `json:"guard_chain_post,omitempty"`
 }
 
 func ValidateTProxyParams(port int, mark uint32) error {
@@ -351,6 +353,12 @@ func (p *Policy) NormalizeAndValidate() error {
 	}
 	if p.ProxySkipPrefix != "" && !ChainPrefixRegex.MatchString(p.ProxySkipPrefix) {
 		return fmt.Errorf("invalid proxy_skip_prefix %q", p.ProxySkipPrefix)
+	}
+	if p.GuardChainOut != "" && !ChainPrefixRegex.MatchString(p.GuardChainOut) {
+		return fmt.Errorf("invalid guard_chain_out %q", p.GuardChainOut)
+	}
+	if p.GuardChainPost != "" && !ChainPrefixRegex.MatchString(p.GuardChainPost) {
+		return fmt.Errorf("invalid guard_chain_post %q", p.GuardChainPost)
 	}
 	if p.ProxyInboundName != "" && !InboundTokenRegex.MatchString(p.ProxyInboundName) {
 		return fmt.Errorf("invalid proxy_inbound_name %q", p.ProxyInboundName)

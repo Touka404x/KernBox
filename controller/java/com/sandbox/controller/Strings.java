@@ -64,6 +64,7 @@ public final class Strings {
     public String gateOpen() { return zh ? "闭锁防护" : "Fail-Closed"; }
     public String gateLocked() { return zh ? "待就绪" : "Standby"; }
     public String freezeHot() { return zh ? "热冻结" : "Hot-Frozen"; }
+    public String freezeDeep() { return zh ? "深度休眠" : "Deep Sleep"; }
     public String freezeAwake() { return zh ? "唤醒" : "Awake"; }
 
     public String sectionApps() { return zh ? "工作区应用" : "Workspace Apps"; }

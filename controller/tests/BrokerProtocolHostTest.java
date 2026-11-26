@@ -149,7 +149,9 @@ public final class BrokerProtocolHostTest {
 
         BrokerProtocol.RpcResponse scWarnings = BrokerProtocol.parseResponse(
                 "{\"id\":\"kb-1c\",\"ok\":true,\"data\":{\"probe_apk_installed\":true,\"instrument_ok\":true,"
+                + "\"variant\":{\"oem\":\"hyperos\",\"kernel\":\"k510\",\"transport\":\"tproxy\"},"
                 + "\"probe_result\":{\"real_device_scorecard\":{\"passed\":10,\"warnings\":2,\"failed\":0}}}}");
+        assertEquals("hyperos-k510", scWarnings.snapshot.variant, "variant object parsed");
         assertEquals(2, scWarnings.snapshot.scorecardWarn, "scorecard 'warnings' alias parsed");
         assertEquals(12, scWarnings.snapshot.scorecardTotal, "scorecard computed total=12");
 
@@ -196,6 +198,7 @@ public final class BrokerProtocolHostTest {
         assertTrue(!zh.offlineSelinuxHint().isEmpty() && !en.offlineSelinuxHint().isEmpty(), "selinux hint");
         assertTrue(!zh.diagCopyReport().isEmpty() && !en.diagCopyReport().isEmpty(), "diag copy report");
         assertTrue(!zh.diagScorecardFmt(11, 12, 1, 0).isEmpty() && !en.diagScorecardFmt(11, 12, 1, 0).isEmpty(), "scorecard fmt");
+        assertTrue(!zh.freezeDeep().isEmpty() && !en.freezeDeep().isEmpty(), "freezeDeep");
         assertTrue(!zh.a11yRefresh().isEmpty() && !en.a11yClose().isEmpty(), "a11y descriptions");
     }
 }

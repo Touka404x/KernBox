@@ -193,7 +193,7 @@ public final class BrokerProtocol {
             return StatusSnapshot.empty();
         }
         String version = asString(data.get("version"), "");
-        String variant = asString(data.get("variant"), "");
+        String variant = extractVariant(data.get("variant"));
         String state = asString(data.get("state"), "UNKNOWN");
         String mode = asString(data.get("mode"), "");
         String activePreset = asString(data.get("active_preset"), "neutral");
@@ -295,6 +295,25 @@ public final class BrokerProtocol {
 
     private static String asString(Object v, String fallback) {
         return v instanceof String ? (String) v : fallback;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static String extractVariant(Object raw) {
+        if (raw instanceof String) {
+            return (String) raw;
+        }
+        if (raw instanceof Map) {
+            Map<String, Object> m = (Map<String, Object>) raw;
+            String oem = asString(m.get("oem"), "").trim();
+            String kernel = asString(m.get("kernel"), "").trim();
+            if (!oem.isEmpty() && !kernel.isEmpty()) {
+                return oem + "-" + kernel;
+            }
+            if (!oem.isEmpty()) {
+                return oem;
+            }
+        }
+        return "";
     }
 
     private static boolean asBoolean(Object v, boolean fallback) {

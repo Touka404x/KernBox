@@ -1302,6 +1302,8 @@ func (d *Daemon) reconcileOnce(ctx context.Context, req reconcileReq) error {
 		TProxyPort:             policy.TProxyPort,
 		TProxyMark:             policy.TProxyMark,
 		ProxySkipPrefix:        policy.ProxySkipPrefix,
+		GuardChainOut:          policy.GuardChainOut,
+		GuardChainPost:         policy.GuardChainPost,
 		KernelRejectQuicUDP443: quicReject,
 	}
 
@@ -1435,6 +1437,7 @@ func closedGateSpec(p contracts.Policy, armRaw bool) netfilter.GateSpec {
 		IPv6Enabled: p.IPv6Enabled, ArmRawDrop: armRaw, Open: false,
 		Mode: p.Mode, TProxyPort: p.TProxyPort, TProxyMark: p.TProxyMark,
 		ProxySkipPrefix: p.ProxySkipPrefix,
+		GuardChainOut: p.GuardChainOut, GuardChainPost: p.GuardChainPost,
 	}
 }
 
@@ -3612,6 +3615,7 @@ func RunCtl(args []string) error {
 			UserID: p.UserID, UIDStart: uidStart, UIDEnd: uidEnd,
 			PortalDNS4: p.PortalDNS4, EndpointV4: p.EndpointV4, EndpointPort: p.EndpointPort,
 			IPv6Enabled: p.IPv6Enabled, ProxySkipPrefix: p.ProxySkipPrefix,
+			GuardChainOut: p.GuardChainOut, GuardChainPost: p.GuardChainPost,
 			Mode: p.Mode, TProxyPort: p.TProxyPort, TProxyMark: p.TProxyMark,
 		}
 		insp, err := nf.InspectRuntime(ctx, spec)

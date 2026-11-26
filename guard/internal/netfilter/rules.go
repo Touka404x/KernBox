@@ -418,23 +418,26 @@ func jumpTarget(spec string) string {
 	return ""
 }
 
-// HasExternalCapture reports whether an external proxy core capture chain (<prefix>OUTPUT / <prefix>OUTPUT6)
-// is currently installed in mangle.
+// HasExternalCapture reports whether an external proxy core capture chain
+// (matching <prefix>*OUTPUT / <prefix>*OUTPUT6) is currently installed in mangle.
 func HasExternalCapture(mangle Save, family int, prefix string) bool {
 	if prefix == "" {
 		return false
 	}
-	want := prefix + "OUTPUT"
+	suffix := "OUTPUT"
 	if family == 6 {
-		want = prefix + "OUTPUT6"
+		suffix = "OUTPUT6"
+	}
+	matches := func(name string) bool {
+		return strings.HasPrefix(name, prefix) && strings.HasSuffix(name, suffix)
 	}
 	for _, c := range mangle.Chains {
-		if c == want {
+		if matches(c) {
 			return true
 		}
 	}
 	for _, r := range mangle.Rules["OUTPUT"] {
-		if jumpTarget(r) == want {
+		if matches(jumpTarget(r)) {
 			return true
 		}
 	}

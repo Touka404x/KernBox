@@ -175,3 +175,21 @@ func TestAdminPackageExcludedFromSandboxAppsAndProtectedFromStopRemove(t *testin
 		t.Fatalf("expected OpRemoveApp to refuse profile owner package, got %+v", remResp)
 	}
 }
+
+func TestPolicyGuardChainValidation(t *testing.T) {
+	p := testPolicy()
+	p.GuardChainOut = "LGC_PRIVACY"
+	p.GuardChainPost = "LGC_EGRESS"
+	if err := p.NormalizeAndValidate(); err != nil {
+		t.Fatalf("expected valid guard chains accepted, got %v", err)
+	}
+	p.GuardChainOut = "bad chain"
+	if err := p.NormalizeAndValidate(); err == nil {
+		t.Fatal("expected invalid guard_chain_out rejected")
+	}
+	p = testPolicy()
+	p.GuardChainPost = "lowercase_bad"
+	if err := p.NormalizeAndValidate(); err == nil {
+		t.Fatal("expected invalid guard_chain_post rejected")
+	}
+}
