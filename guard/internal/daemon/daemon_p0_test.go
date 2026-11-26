@@ -193,3 +193,47 @@ func TestPolicyGuardChainValidation(t *testing.T) {
 		t.Fatal("expected invalid guard_chain_post rejected")
 	}
 }
+
+type playStoreStatusRunner struct {
+	enabled bool
+}
+
+func (r *playStoreStatusRunner) Run(_ context.Context, _ time.Duration, _ string, name string, args ...string) (string, error) {
+	line := name + " " + strings.Join(args, " ")
+	if line == "cmd package list packages -3 --user 10" {
+		return "package:com.android.chrome\npackage:com.sandbox.controller\n", nil
+	}
+	if line == "cmd package list packages -e --user 10 com.android.vending" {
+		if r.enabled {
+			return "package:com.android.vending\n", nil
+		}
+		return "", nil
+	}
+	return "", nil
+}
+
+func TestBuildStatusDataPrependsEnabledPlayStore(t *testing.T) {
+	dir := t.TempDir()
+	pol := testPolicy()
+	d := &Daemon{
+		bootID:               "boot-play-1",
+		policy:               pol,
+		policyLoaded:         true,
+		runner:               &playStoreStatusRunner{enabled: true},
+		hibernatedPkgsPath:   filepath.Join(dir, "hibernated.json"),
+		perfConfigPath:       filepath.Join(dir, "perf.json"),
+		stealthConfigPath:    filepath.Join(dir, "stealth.json"),
+		zygiskDisabledFlag:   filepath.Join(dir, "zygisk_disabled"),
+		stealthBootTriesPath: filepath.Join(dir, "stealth_boot_tries"),
+	}
+	apps := d.buildStatusData(context.Background())["sandbox_apps"].([]string)
+	if len(apps) != 2 || apps[0] != "com.android.vending" || apps[1] != "com.android.chrome" {
+		t.Fatalf("expected Play Store prepended, got %v", apps)
+	}
+
+	d.runner = &playStoreStatusRunner{enabled: false}
+	appsNoPlay := d.buildStatusData(context.Background())["sandbox_apps"].([]string)
+	if len(appsNoPlay) != 1 || appsNoPlay[0] != "com.android.chrome" {
+		t.Fatalf("expected Play Store omitted when disabled, got %v", appsNoPlay)
+	}
+}

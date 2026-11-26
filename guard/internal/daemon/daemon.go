@@ -3046,6 +3046,19 @@ func (d *Daemon) buildStatusData(ctx context.Context) map[string]any {
 			data["frozen_uids"] = []int{}
 		}
 		if apps, err := android.ListSandboxApps(ctx, d.runner, policy.UserID, policy.EffectiveCallerPackage(), policy.EffectiveAdminPackage(), contracts.VerifyProbePackage); err == nil {
+			const playPkg = "com.android.vending"
+			hasPlay := false
+			for _, a := range apps {
+				if a == playPkg {
+					hasPlay = true
+					break
+				}
+			}
+			if !hasPlay {
+				if out, perr := d.runner.Run(ctx, 2*time.Second, "", "cmd", "package", "list", "packages", "-e", "--user", strconv.Itoa(policy.UserID), playPkg); perr == nil && strings.Contains(out, "package:"+playPkg) {
+					apps = append([]string{playPkg}, apps...)
+				}
+			}
 			data["sandbox_apps"] = apps
 		} else {
 			data["sandbox_apps"] = []string{}

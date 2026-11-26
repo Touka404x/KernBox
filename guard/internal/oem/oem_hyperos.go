@@ -76,5 +76,9 @@ var currentProfile = Profile{
 		"com.miui.backup",
 		"com.miui.huanji",
 		"com.miui.newhome",
+		"com.xiaomi.mtb",
+		"com.modemdebug",
+		"com.mediatek.smartratswitch.service",
+		"com.miui.daemon",
 	},
 }

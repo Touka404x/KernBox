@@ -66,6 +66,7 @@ public final class Strings {
     public String freezeHot() { return zh ? "热冻结" : "Hot-Frozen"; }
     public String freezeDeep() { return zh ? "深度休眠" : "Deep Sleep"; }
     public String freezeAwake() { return zh ? "唤醒" : "Awake"; }
+    public String qsActive() { return zh ? "TProxy · 运行中" : "TProxy · Active"; }
 
     public String sectionApps() { return zh ? "工作区应用" : "Workspace Apps"; }
     public String emptyTitle() { return zh ? "工作区暂无应用" : "No Apps in Sandbox"; }
