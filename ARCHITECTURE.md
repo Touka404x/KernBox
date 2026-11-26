@@ -6,9 +6,9 @@ KernBox separates control, enforcement, privilege brokering, and in-process stea
 
 ```mermaid
 flowchart TD
-    Ctrl["Work Profile Controller<br/>com.sandbox.controller (User 0)"] -->|"Unix Stream Socket<br/>/dev/socket/sandbox_ctrl/ctrl.sock"| Broker["sandbox_broker<br/>(SO_PEERCRED + SO_PEERSEC + Cert SHA-256)"]
+    Ctrl["Work Profile Controller<br/>com.sandbox.controller (User 0)"] -->|"Unix Stream Socket<br/>/dev/socket/sandbox_ctrl/ctrl.sock"| Broker["sandbox_broker<br/>Static C11 epoll (~258 KB) · SO_PEERCRED + SO_PEERSEC + Cert SHA-256"]
     Broker -->|"Mutual Auth Private UDS<br/>/dev/socket/sandbox_priv/guard.sock"| Guard["sandbox_guard<br/>(Root Netfilter + Freeze + Presets)"]
-    Guard -->|"iptables-restore --noflush<br/>SBW_RAW_OUTPUT / SBW_TPROXY_*"| Kernel["Kernel Netfilter &amp; cgroup<br/>Fail-Closed UID Range + Hot-Freeze"]
+    Guard -->|"iptables-restore --noflush + AF_NETLINK<br/>SBW_RAW_OUTPUT / SBW_TPROXY_*"| Kernel["Kernel Netfilter &amp; cgroup<br/>Fail-Closed UID Range + Hot-Freeze"]
     Guard -.->|"0600 root:root<br/>stealth.json (Companion UDS JSON bytes)"| Stealth["Zygisk + Binder Proxy<br/>Native PLT + system_server &amp; phone"]
 ```
 

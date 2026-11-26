@@ -2,6 +2,13 @@
 
 All notable changes to **KernBox** are documented in this file.
 
+## [Unreleased]
+
+### Changed & Optimized
+- **Static C11 Zero-GC `sandbox_broker` (`broker/`)**: Replaced the Go broker runtime with a pure C11 single-thread `epoll` + `signalfd` daemon (~258 KB static ARM64 ELF, zero `PT_INTERP`/`DT_NEEDED`/`TEXTREL`, ~244–312 KB RSS), cutting variant module ZIP sizes from ~4.1 MB to ~3.2 MB while preserving strict `SO_PEERCRED` + `SO_PEERSEC` + APK cert validation.
+- **Native Linux `AF_NETLINK` (`NETLINK_ROUTE`) TProxy Routing (`guard/internal/netfilter/rtnetlink_*.go`)**: Replaced `ip` subprocess forks in `verifyTProxyRouting`, `ensureTProxyRouting`, and `cleanupTProxyRouting` with direct `NETLINK_ROUTE` syscalls supporting stale `pref 2025` rule self-healing and CLI fallback.
+- **Build & Packaging Polish (`controller/`, `stealth/`, `verify/`, `packaging/`)**: Fixed Windows SDK/NDK space-in-path invocations by calling `java -cp d8.jar`, `java -jar apksigner.jar`, and `clang++.exe --target=...` directly, and removed obsolete `GOMAXPROCS`/`GOGC`/`GOMEMLIMIT` env vars from `service.sh.tmpl` for `sandbox_broker`.
+
 ## [1.2.0] - 2026-11-25
 
 ### Added

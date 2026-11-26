@@ -46,7 +46,7 @@
 | **1. 瞬断漏流与 IPv6 泄漏** | 开机未连代理、锁屏杀后台、切换节点或升级代理核的瞬间，工作区 App 直接走真实宽带/IPv6 直连暴露。 | **Fail-Closed 原子防火墙 + 升级围栏**：通过 `iptables-restore --noflush` 维护 `SBW_RAW_OUTPUT` / `SBW_TPROXY_*`，默认主路径 **零 `TRANSPORT_VPN` 特征**，未收到代理核确认前确定性阻断。 |
 | **2. 工作空间与区域环境矛盾** | 目标 App（含 `isolatedProcess` 进程）可读取 Work Profile 管理状态、本地回环 VPN 特征，或发现「代理出口在日本但系统语言/时区/运营商仍是本地」。 | **双层 Zygisk PLT + Binder 动态代理**：拦截 Work Profile/Connectivity/Wifi/Bluetooth/Location 等接口与 Native 属性，配套 6 套可热切换的 [`presets/`](presets/) 区域预设，并保持真实硬件属性前后一致。 |
 | **3. 全家桶后台唤醒狂掉电** | 工作空间里常驻的 GMS 与海外应用在息屏后频繁唤醒，导致主力机发热掉电。 | **微秒级 cgroup v2 热冻结 & 内存回收**：暂停时原生写入 `cgroup.freeze`（`k419` 回退 cgroup v1）并按需触发 `process_madvise(MADV_PAGEOUT)`，用完即冻、打开即恢复。 |
-| **4. 通用模块臃肿、容易卡开机** | 单个模块硬塞所有 OEM 适配和老内核兼容代码，包体庞大、SELinux 规则过宽、刷错即变砖。 | **30 个编译期特化精简版 + AI Agent 选包**：按 `5 OEM × 2 内核 × 3 Root` 编译裁剪（单包 ~4.1 MB），自动 **两连开机失败关闭隐身熔断**，配套浅/深色自适应 [`KernBox.apk`](controller/)（支持离线指纹复制、长按强停/卸载、App 内实时自检）。 |
+| **4. 通用模块臃肿、容易卡开机** | 单个模块硬塞所有 OEM 适配和老内核兼容代码，包体庞大、SELinux 规则过宽、刷错即变砖。 | **30 个编译期特化精简版 + AI Agent 选包**：按 `5 OEM × 2 内核 × 3 Root` 编译裁剪（单包 ~3.2 MB），自动 **两连开机失败关闭隐身熔断**，配套浅/深色自适应 [`KernBox.apk`](controller/)（支持离线指纹复制、长按强停/卸载、App 内实时自检）。 |
 
 > [!NOTE]
 > **能力边界声明（不吹牛、讲真话）**  
@@ -105,7 +105,8 @@ flowchart LR
 
 | 目录 | 职责说明 |
 | :--- | :--- |
-| [`guard/`](guard/) | Root 守护进程 `sandbox_guard`、SELinux 隔离代理 `sandbox_broker`、防火墙状态机与 `-race` 单测 |
+| [`guard/`](guard/) | Root 守护进程 `sandbox_guard`、原生 `AF_NETLINK` TProxy 路由、防火墙状态机与 `-race` 单测 |
+| [`broker/`](broker/) | 纯 C11 静态零 GC 单线程 `epoll` 权限隔离代理 `sandbox_broker`（~258 KB，零动态库依赖）与宿主机单测 |
 | [`stealth/`](stealth/) | C++17 Zygisk PLT Hook + 内存加载 DEX Binder 动态代理与宿主机校验测试 |
 | [`controller/`](controller/) | 纯 SDK 极简控制端源码与构建器（[`KernBox.apk`](controller/)，`com.sandbox.controller`） |
 | [`verify/`](verify/) | 独立非特权 12 项真机隔离验证探针源码与构建器（[`KernBoxVerify.apk`](verify/)，`com.sandbox.verify`） |

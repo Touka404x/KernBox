@@ -43,10 +43,10 @@ Keeping privacy-sensitive or region-locked ecosystems (isolated Google services,
 
 | Pain Point | Why Common Setups Fail | How KernBox Solves It |
 | :--- | :--- | :--- |
-| **1. Transient & IPv6 Leaks** | Apps leak direct IPv4/IPv6 traffic during boot, screen-off kills, proxy switches, or proxy-core upgrades. | **Fail-Closed Netfilter & Upgrade Fence**: Atomic `iptables-restore --noflush` rules across `SBW_RAW_OUTPUT` / `SBW_TPROXY_*`, zero `TRANSPORT_VPN` footprint on the default TProxy path. |
+| **1. Transient & IPv6 Leaks** | Apps leak direct IPv4/IPv6 traffic during boot, screen-off kills, proxy switches, or proxy-core upgrades. | **Fail-Closed Netfilter & Upgrade Fence**: Atomic `iptables-restore --noflush` rules across `SBW_RAW_OUTPUT` / `SBW_TPROXY_*` paired with native `AF_NETLINK` TProxy policy routing, zero `TRANSPORT_VPN` footprint on the default TProxy path. |
 | **2. Work Profile & Locale Mismatches** | Sandboxed apps (and `isolatedProcess`) inspect Work Profile APIs, `VpnTransport`, or notice locale/timezone/carrier contradictions. | **Two-Layer Zygisk PLT + Binder Proxy**: In-memory DEX proxy + zero-alloc native hooks + 6 hot-switchable [`presets/`](presets/) keeping true hardware identity consistent. |
 | **3. Heavy Idle Battery Drain** | Isolated GMS and background services keep waking the CPU even when unused. | **Microsecond Hot-Freeze & Reclaim**: Native cgroup v2 `cgroup.freeze` (`k510`) + `process_madvise(MADV_PAGEOUT)`, falling back cleanly to cgroup v1 on `k419`. |
-| **4. Bloated Modules & Bootloops** | Universal zip bundles carry dead OEM workarounds, wide SELinux rules, and brittle installs. | **30 Lean Variants + AI Co-Install**: Compile-time specialization (`5 OEMs × 2 Kernel Tiers × 3 Root Managers`, ~4.1 MB), automatic 2-strike bootloop kill-switch, and Light/Dark adaptive [`KernBox.apk`](controller/) (offline cert copy, long-press Stop/Remove, in-app `RUN_PROBE` diagnostics). |
+| **4. Bloated Modules & Bootloops** | Universal zip bundles carry dead OEM workarounds, wide SELinux rules, and brittle installs. | **30 Lean Variants + AI Co-Install**: Compile-time specialization (`5 OEMs × 2 Kernel Tiers × 3 Root Managers`, ~3.2 MB), automatic 2-strike bootloop kill-switch, and Light/Dark adaptive [`KernBox.apk`](controller/) (offline cert copy, long-press Stop/Remove, in-app `RUN_PROBE` diagnostics). |
 
 > [!NOTE]
 > **Honest Threat-Model Boundary**  

@@ -351,7 +351,7 @@ supervise_proc() {
         if [ "$name" = "broker" ]; then
             chcon u:object_r:sandbox_broker_exec:s0 "$bin" 2>/dev/null || true
             # Never inherit adb_data_file stdout/stderr or lock fd 9 into u:r:sandbox_broker:s0.
-            GOMAXPROCS=1 GOGC=25 GOMEMLIMIT=3MiB "$bin" </dev/null >/dev/null 2>&1 9>&- &
+            "$bin" </dev/null >/dev/null 2>&1 9>&- &
         else
             if [ -f "$GUARD_HOME/guard-svc.log" ]; then
                 local g_sz

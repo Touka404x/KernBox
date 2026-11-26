@@ -28,10 +28,11 @@ for tags in oem_hyperos oem_aosp oem_oplus oem_oneui oem_generic oem_generic,ker
 done
 cd ..
 
-# 3. C++ 5-OEM unit tests
+# 3. C++ 5-OEM & C11 Broker unit tests
 for oem in OEM_HYPEROS OEM_OPLUS OEM_ONEUI OEM_AOSP OEM_GENERIC; do
   g++ -std=c++17 -O2 -Wall -Wextra -Werror "-D$oem" stealth/tests/stealth_logic_test.cpp -o /tmp/stealth_test && /tmp/stealth_test
 done
+gcc -std=c11 -O2 -Wall -Wextra -Werror broker/broker_core.c broker/tests/broker_test.c -o /tmp/broker_test && /tmp/broker_test
 
 # 4. Java Host Unit Tests & APK Compilation
 javac --release 11 -encoding UTF-8 -Xlint:all,-options -Werror -cp "$ANDROID_HOME/platforms/android-35/android.jar" -d /tmp/stealth_classes stealth/java/com/sandbox/stealth/*.java stealth/tests/StealthHookHostTest.java
