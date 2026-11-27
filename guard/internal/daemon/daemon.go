@@ -194,6 +194,9 @@ type Daemon struct {
 	timerRefreshCh chan struct{}
 	quitCh         chan struct{}
 	quitOnce       sync.Once
+
+	trickyStoreDir    string
+	trickyStoreModDir string
 }
 
 type reconcileReq struct {
@@ -444,6 +447,16 @@ func (d *Daemon) loadPersistedState() {
 	d.perfLoaded = true
 }
 
+func (d *Daemon) resolvedTrickyStoreDirs() (tsDir, modDir string) {
+	if d.trickyStoreDir != "" || d.trickyStoreModDir != "" {
+		return d.trickyStoreDir, d.trickyStoreModDir
+	}
+	if d.workCfgDir != "" && d.workCfgDir != contracts.GuardHome {
+		return "", ""
+	}
+	return android.DefaultTrickyStoreDir, android.DefaultTrickyStoreModuleDir
+}
+
 func (d *Daemon) syncPolicies(ctx context.Context, policy contracts.Policy) (android.AppPolicySyncResult, error) {
 	perf := d.getPerfConfig()
 	cfgPath, _, _ := d.resolvedStealthPaths()
@@ -468,6 +481,19 @@ func (d *Daemon) syncPolicies(ctx context.Context, policy contracts.Policy) (and
 		d.mu.Lock()
 		d.lastPolicySyncHash = res.PackagesHash
 		d.mu.Unlock()
+	}
+	tsDir, _ := d.resolvedTrickyStoreDirs()
+	if tsDir != "" {
+		if st, serr := os.Stat(tsDir); serr == nil && st.IsDir() {
+			apps, _ := d.getSandboxAppsForPolicy(ctx, policy, true)
+			if tsRes, terr := android.SyncTrickyStoreTargets(ctx, d.runner, tsDir, apps, policy.EffectiveCallerPackage()); terr != nil {
+				if d.log != nil {
+					d.log.Printf("trickystore sync warn: %v", terr)
+				}
+			} else if tsRes.Updated && d.log != nil {
+				d.log.Printf("trickystore target.txt updated (%d sandbox targets, patch_seeded=%v)", tsRes.TargetsWritten, tsRes.PatchSeeded)
+			}
+		}
 	}
 	return res, err
 }
@@ -3444,6 +3470,10 @@ func (d *Daemon) buildStatusDataEx(ctx context.Context, forceFresh bool) map[str
 		"last_error":           lastErr,
 		"boot_alert":           bootAlert,
 	}
+	tsDir, tsModDir := d.resolvedTrickyStoreDirs()
+	tsSt := android.ProbeTrickyStoreStatus(tsDir, tsModDir)
+	data["tricky_store_active"] = tsSt.Active
+	data["tricky_store_keybox"] = tsSt.KeyboxPresent
 	if curEx != nil {
 		data["exemption"] = curEx
 	}
