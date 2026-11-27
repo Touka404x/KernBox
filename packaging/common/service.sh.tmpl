@@ -99,7 +99,7 @@ post_boot_alert() {
     fi
     : > "$stamp" 2>/dev/null || true
     (
-        local w=0
+        w=0
         while [ "$w" -lt 30 ] && [ "$(getprop sys.boot_completed 2>/dev/null || true)" != "1" ]; do
             sleep 2
             w=$((w + 1))
@@ -247,7 +247,7 @@ echo "$$" > "$GUARD_HOME/service.pid"
     while [ "$bn" -lt 120 ] && [ ! -e "$MODDIR/disable" ] && [ ! -e "$MODDIR/remove" ]; do
         protect_oom_pidfile "$GUARD_HOME/guard.pid" "$GUARD_BIN"
         protect_oom_pidfile "$GUARD_HOME/broker-svc.pid" "$BROKER_BIN"
-        local custom_proxy_dir=""
+        custom_proxy_dir=""
         if [ -r "$GUARD_HOME/policy.json" ]; then
             custom_proxy_dir=$(sed -n 's/.*"proxy_base_dir"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$GUARD_HOME/policy.json" 2>/dev/null | head -n 1)
         fi

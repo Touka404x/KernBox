@@ -343,6 +343,65 @@ public final class SystemServerHook {
         }
     }
 
+    static void resetSettingsWrapStateForTest() {
+        settingsWrapped.set(false);
+        settingsRetryStarted.set(false);
+        activityServiceRef = null;
+    }
+
+    private static Object resolveProviderMap(Object ams) throws IllegalAccessException {
+        if (ams == null) {
+            return null;
+        }
+        // Android 12-16 (AOSP / HyperOS): ActivityManagerService.mCpHelper.mProviderMap
+        for (String helperFieldName : new String[]{"mCpHelper", "mContentProviderHelper"}) {
+            Field helperField = findField(ams.getClass(), helperFieldName);
+            if (helperField != null) {
+                helperField.setAccessible(true);
+                Object helper = helperField.get(ams);
+                if (helper != null) {
+                    Field pmField = findField(helper.getClass(), "mProviderMap");
+                    if (pmField != null) {
+                        pmField.setAccessible(true);
+                        Object pm = pmField.get(helper);
+                        if (pm != null) {
+                            return pm;
+                        }
+                    }
+                }
+            }
+        }
+        // Android 11 legacy: ActivityManagerService.mProviderMap
+        Field directPm = findField(ams.getClass(), "mProviderMap");
+        if (directPm != null) {
+            directPm.setAccessible(true);
+            Object pm = directPm.get(ams);
+            if (pm != null) {
+                return pm;
+            }
+        }
+        // Final fallback: scan class hierarchy for any *ContentProviderHelper field holding mProviderMap
+        for (Class<?> c = ams.getClass(); c != null && c != Object.class; c = c.getSuperclass()) {
+            for (Field f : c.getDeclaredFields()) {
+                if (f.getType().getName().endsWith("ContentProviderHelper")) {
+                    f.setAccessible(true);
+                    Object helper = f.get(ams);
+                    if (helper != null) {
+                        Field pmField = findField(helper.getClass(), "mProviderMap");
+                        if (pmField != null) {
+                            pmField.setAccessible(true);
+                            Object pm = pmField.get(helper);
+                            if (pm != null) {
+                                return pm;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
     public static boolean tryWrapSettingsProvider(Object ams, StealthConfig config) {
         return tryWrapSettingsProvider(ams, config, SETTINGS_FACTORY);
     }
@@ -356,12 +415,7 @@ public final class SystemServerHook {
             return true;
         }
         try {
-            Field providerMapField = findField(ams.getClass(), "mProviderMap");
-            if (providerMapField == null) {
-                return false;
-            }
-            providerMapField.setAccessible(true);
-            Object providerMap = providerMapField.get(ams);
+            Object providerMap = resolveProviderMap(ams);
             if (providerMap == null) {
                 return false;
             }

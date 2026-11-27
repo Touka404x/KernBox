@@ -570,6 +570,14 @@ public final class StealthHookHostTest {
         public final FakeProviderMap mProviderMap = new FakeProviderMap();
     }
 
+    public static final class FakeContentProviderHelper {
+        public final FakeProviderMap mProviderMap = new FakeProviderMap();
+    }
+
+    public static final class FakeActivityManagerServiceApi33 {
+        public final FakeContentProviderHelper mCpHelper = new FakeContentProviderHelper();
+    }
+
     public static final class FakeSettingsBinderWrapper {
         public final Object delegate;
         public FakeSettingsBinderWrapper(Object delegate) {
@@ -578,6 +586,31 @@ public final class StealthHookHostTest {
     }
 
     private static void testSettingsProviderWrapping(StealthConfig cfg) {
+        SystemServerHook.SettingsProviderWrapperFactory mockFactory = new SystemServerHook.SettingsProviderWrapperFactory() {
+            @Override public Class<?> providerInterface(Object provider) { return FakeIContentProvider.class; }
+            @Override public Object asBinder(Object provider) { return ((FakeIContentProvider) provider).asBinder(); }
+            @Override public Object wrapBinder(Object delegateBinder, StealthConfig c) { return new FakeSettingsBinderWrapper(delegateBinder); }
+        };
+
+        // 1. Android 12-16 path: AMS.mCpHelper.mProviderMap
+        final Object rawBinder33 = new Object();
+        FakeIContentProvider realProvider33 = new FakeIContentProvider() {
+            @Override public Object asBinder() { return rawBinder33; }
+            @Override public String callDirect(String arg) { return "direct33:" + arg; }
+        };
+        FakeActivityManagerServiceApi33 fakeAms33 = new FakeActivityManagerServiceApi33();
+        fakeAms33.mCpHelper.mProviderMap.mSingletonByName.put("settings", new FakeContentProviderRecord(realProvider33));
+
+        SystemServerHook.resetSettingsWrapStateForTest();
+        boolean wrapped33 = SystemServerHook.tryWrapSettingsProvider(fakeAms33, cfg, mockFactory);
+        check(wrapped33, "tryWrapSettingsProvider must wrap Android 12-16 mCpHelper settings record");
+        FakeIContentProvider stored33 = fakeAms33.mCpHelper.mProviderMap.mSingletonByName.get("settings").provider;
+        check(stored33 != realProvider33, "stored mCpHelper settings provider must be wrapped proxy");
+        check(stored33.asBinder() instanceof FakeSettingsBinderWrapper, "mCpHelper asBinder() must return wrapped binder");
+        check(((FakeSettingsBinderWrapper) stored33.asBinder()).delegate == rawBinder33, "mCpHelper wrapped binder delegates to rawBinder33");
+        check("direct33:ok".equals(stored33.callDirect("ok")), "mCpHelper in-process direct methods must pass through");
+
+        // 2. Android 11 legacy path: AMS.mProviderMap
         final Object rawSettingsBinder = new Object();
         FakeIContentProvider realProvider = new FakeIContentProvider() {
             @Override public Object asBinder() { return rawSettingsBinder; }
@@ -586,14 +619,9 @@ public final class StealthHookHostTest {
         FakeActivityManagerService fakeAms = new FakeActivityManagerService();
         fakeAms.mProviderMap.mSingletonByName.put("settings", new FakeContentProviderRecord(realProvider));
 
-        SystemServerHook.SettingsProviderWrapperFactory mockFactory = new SystemServerHook.SettingsProviderWrapperFactory() {
-            @Override public Class<?> providerInterface(Object provider) { return FakeIContentProvider.class; }
-            @Override public Object asBinder(Object provider) { return ((FakeIContentProvider) provider).asBinder(); }
-            @Override public Object wrapBinder(Object delegateBinder, StealthConfig c) { return new FakeSettingsBinderWrapper(delegateBinder); }
-        };
-
+        SystemServerHook.resetSettingsWrapStateForTest();
         boolean wrapped = SystemServerHook.tryWrapSettingsProvider(fakeAms, cfg, mockFactory);
-        check(wrapped, "tryWrapSettingsProvider must wrap settings record");
+        check(wrapped, "tryWrapSettingsProvider must wrap legacy mProviderMap settings record");
         FakeIContentProvider storedProvider = fakeAms.mProviderMap.mSingletonByName.get("settings").provider;
         check(storedProvider != realProvider, "stored settings provider must be wrapped proxy");
         check(storedProvider.asBinder() instanceof FakeSettingsBinderWrapper, "asBinder() must return wrapped binder");
