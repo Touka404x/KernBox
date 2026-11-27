@@ -227,9 +227,11 @@ func NewDaemon() (*Daemon, error) {
 		zygiskDisabledFlag:   contracts.ZygiskDisabledFlag,
 		stealthBootTriesPath: contracts.StealthBootTriesPath,
 		perfConfigPath:     contracts.PerfConfigPath,
-		prunedPkgsPath:     contracts.PrunedPkgsPath,
-		packagesListPath:   contracts.PackagesListPath,
-		reconcileCh:        make(chan reconcileReq, 16),
+		prunedPkgsPath:       contracts.PrunedPkgsPath,
+		packagesListPath:     contracts.PackagesListPath,
+		trickyStoreDir:       android.DefaultTrickyStoreDir,
+		trickyStoreModDir:    android.DefaultTrickyStoreModuleDir,
+		reconcileCh:          make(chan reconcileReq, 16),
 		timerRefreshCh:     make(chan struct{}, 1),
 		quitCh:             make(chan struct{}),
 	}
@@ -451,7 +453,7 @@ func (d *Daemon) resolvedTrickyStoreDirs() (tsDir, modDir string) {
 	if d.trickyStoreDir != "" || d.trickyStoreModDir != "" {
 		return d.trickyStoreDir, d.trickyStoreModDir
 	}
-	if d.workCfgDir != "" && d.workCfgDir != contracts.GuardHome {
+	if d.workCfgDir != "" && d.workCfgDir != contracts.WorkCfgDir {
 		return "", ""
 	}
 	return android.DefaultTrickyStoreDir, android.DefaultTrickyStoreModuleDir
@@ -469,6 +471,7 @@ func (d *Daemon) syncPolicies(ctx context.Context, policy contracts.Policy) (and
 	if stealthCfg.SpoofBluetooth {
 		btName = stealthCfg.DeviceName
 	}
+	tsDir, _ := d.resolvedTrickyStoreDirs()
 	res, err := android.SyncSandboxAppPoliciesWithOpts(ctx, d.runner, policy.UserID, android.PolicySyncOptions{
 		CallerPackage:       policy.EffectiveCallerPackage(),
 		DefaultLocale:       baseLocale,
@@ -476,24 +479,12 @@ func (d *Daemon) syncPolicies(ctx context.Context, policy contracts.Policy) (and
 		SkipLocale:          !stealthCfg.SpoofLocale,
 		LocaleOverrides:     perf.LocaleOverrides,
 		BluetoothDeviceName: btName,
+		TrickyStoreDir:      tsDir,
 	})
 	if err == nil && res.PackagesHash != "" {
 		d.mu.Lock()
 		d.lastPolicySyncHash = res.PackagesHash
 		d.mu.Unlock()
-	}
-	tsDir, _ := d.resolvedTrickyStoreDirs()
-	if tsDir != "" {
-		if st, serr := os.Stat(tsDir); serr == nil && st.IsDir() {
-			apps, _ := d.getSandboxAppsForPolicy(ctx, policy, true)
-			if tsRes, terr := android.SyncTrickyStoreTargets(ctx, d.runner, tsDir, apps, policy.EffectiveCallerPackage()); terr != nil {
-				if d.log != nil {
-					d.log.Printf("trickystore sync warn: %v", terr)
-				}
-			} else if tsRes.Updated && d.log != nil {
-				d.log.Printf("trickystore target.txt updated (%d sandbox targets, patch_seeded=%v)", tsRes.TargetsWritten, tsRes.PatchSeeded)
-			}
-		}
 	}
 	return res, err
 }

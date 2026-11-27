@@ -36,14 +36,15 @@ var (
 )
 
 type AppPolicySyncResult struct {
-	UserID            int      `json:"user_id"`
-	Locale            string   `json:"locale"`
-	LocaleApps        int      `json:"locale_apps"`
-	LocalePreserved   int      `json:"locale_preserved,omitempty"`
-	LocaleUnsupported bool     `json:"locale_unsupported,omitempty"`
-	LocationApps      int      `json:"location_apps"`
-	PackagesHash      string   `json:"packages_hash,omitempty"`
-	Errors            []string `json:"errors,omitempty"`
+	UserID             int      `json:"user_id"`
+	Locale             string   `json:"locale"`
+	LocaleApps         int      `json:"locale_apps"`
+	LocalePreserved    int      `json:"locale_preserved,omitempty"`
+	LocaleUnsupported  bool     `json:"locale_unsupported,omitempty"`
+	LocationApps       int      `json:"location_apps"`
+	TrickyStoreTargets int      `json:"tricky_store_targets,omitempty"`
+	PackagesHash       string   `json:"packages_hash,omitempty"`
+	Errors             []string `json:"errors,omitempty"`
 }
 
 // PolicySyncOptions controls Per-App Locale, Bluetooth name, and appops enforcement inside the sandbox user.
@@ -54,6 +55,7 @@ type PolicySyncOptions struct {
 	SkipLocale          bool
 	LocaleOverrides     map[string]string
 	BluetoothDeviceName string
+	TrickyStoreDir      string
 }
 
 type InstallAPKResult struct {
@@ -416,6 +418,11 @@ func SyncSandboxAppPoliciesWithOpts(ctx context.Context, r Runner, userID int, o
 	if btName := strings.TrimSpace(opts.BluetoothDeviceName); btName != "" && !strings.ContainsAny(btName, "\r\n\t\x00") {
 		if _, err := r.Run(ctx, 3*time.Second, "", "settings", "--user", u, "put", "secure", "bluetooth_name", btName); err != nil {
 			res.Errors = append(res.Errors, "settings bluetooth_name: "+err.Error())
+		}
+	}
+	if opts.TrickyStoreDir != "" {
+		if tsRes, terr := SyncTrickyStoreTargets(ctx, r, opts.TrickyStoreDir, userPkgs, callerPkg); terr == nil && tsRes.Active {
+			res.TrickyStoreTargets = tsRes.TargetsWritten
 		}
 	}
 
