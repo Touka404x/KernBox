@@ -8,19 +8,35 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"sandbox_guard/internal/contracts"
 	"sandbox_guard/internal/oem"
 )
 
+func parseInstallSessionID(out string) (string, bool) {
+	for i := 0; i < len(out); i++ {
+		if out[i] != '[' {
+			continue
+		}
+		j := i + 1
+		for j < len(out) && out[j] >= '0' && out[j] <= '9' {
+			j++
+		}
+		if j > i+1 && j < len(out) && out[j] == ']' {
+			return out[i+1 : j], true
+		}
+	}
+	return "", false
+}
+
 var (
-	installSessionIDRegex = regexp.MustCompile(`\[(\d+)\]`)
-	coreSandboxApps       = []string{
+	coreSandboxApps = []string{
 		"com.android.vending",
 		"com.google.android.googlequicksearchbox",
 		"com.google.android.apps.bard",
@@ -332,77 +348,147 @@ func SyncSandboxAppPoliciesWithOpts(ctx context.Context, r Runner, userID int, o
 	locTargets := mergeSortedUnique(userPkgs, coreSandboxApps, oem.Current().ExtraLocationDenyPackages)
 	res.PackagesHash = computePolicyFingerprint(userID, localeTargets, opts)
 
-	localeSupported := !opts.SkipLocale
-	for _, pkg := range localeTargets {
-		if !localeSupported {
-			break
+	if !opts.SkipLocale && len(localeTargets) > 0 {
+		type localeItemResult struct {
+			preserved   bool
+			applied     bool
+			unsupported bool
+			errMsg      string
 		}
-		if pkg == callerPkg || !contracts.ValidPackageName(pkg) {
-			continue
+		locRes := make([]localeItemResult, len(localeTargets))
+		var idx atomic.Int32
+		var unsupported atomic.Bool
+		workers := sandboxWorkerPoolSize
+		if len(localeTargets) < workers {
+			workers = len(localeTargets)
 		}
-		targetLoc := defLoc
-		if opts.LocaleOverrides != nil {
-			if ov, hasOv := opts.LocaleOverrides[pkg]; hasOv {
-				ov = strings.TrimSpace(ov)
-				if ov == "" {
-					res.LocalePreserved++
-					continue
+		var wg sync.WaitGroup
+		wg.Add(workers)
+		for w := 0; w < workers; w++ {
+			go func() {
+				defer wg.Done()
+				for {
+					i := int(idx.Add(1) - 1)
+					if i >= len(localeTargets) || unsupported.Load() {
+						return
+					}
+					pkg := localeTargets[i]
+					if pkg == callerPkg || !contracts.ValidPackageName(pkg) {
+						continue
+					}
+					targetLoc := defLoc
+					if opts.LocaleOverrides != nil {
+						if ov, hasOv := opts.LocaleOverrides[pkg]; hasOv {
+							ov = strings.TrimSpace(ov)
+							if ov == "" {
+								locRes[i].preserved = true
+								continue
+							}
+							if !contracts.ValidLocaleTag(ov) {
+								locRes[i].errMsg = fmt.Sprintf("invalid override locale %q for %s", ov, pkg)
+								continue
+							}
+							targetLoc = ov
+						}
+					}
+					if opts.PreserveUserLocales {
+						curOut, gerr := r.Run(ctx, 3*time.Second, "", "cmd", "locale", "get-app-locales", pkg, "--user", u)
+						if gerr != nil {
+							if isLocaleServiceUnsupported(curOut, gerr) {
+								unsupported.Store(true)
+								locRes[i].unsupported = true
+								continue
+							}
+							// Fail safe: never overwrite an existing user locale if current locale cannot be inspected.
+							locRes[i].errMsg = "get-locale " + pkg + ": " + gerr.Error()
+							continue
+						}
+						if HasNonEmptyAppLocale(curOut) {
+							locRes[i].preserved = true
+							continue
+						}
+					}
+					if setOut, err := r.Run(ctx, 4*time.Second, "", "cmd", "locale", "set-app-locales", pkg, "--user", u, "--locales", targetLoc); err != nil {
+						if isLocaleServiceUnsupported(setOut, err) {
+							unsupported.Store(true)
+							locRes[i].unsupported = true
+							continue
+						}
+						locRes[i].errMsg = "locale " + pkg + ": " + err.Error()
+					} else {
+						locRes[i].applied = true
+					}
 				}
-				if !contracts.ValidLocaleTag(ov) {
-					res.Errors = append(res.Errors, fmt.Sprintf("invalid override locale %q for %s", ov, pkg))
-					continue
-				}
-				targetLoc = ov
-			}
+			}()
 		}
-		if opts.PreserveUserLocales {
-			curOut, gerr := r.Run(ctx, 3*time.Second, "", "cmd", "locale", "get-app-locales", pkg, "--user", u)
-			if gerr != nil {
-				if isLocaleServiceUnsupported(curOut, gerr) {
-					localeSupported = false
-					res.LocaleUnsupported = true
-					continue
-				}
-				// Fail safe: never overwrite an existing user locale if current locale cannot be inspected.
-				res.Errors = append(res.Errors, "get-locale "+pkg+": "+gerr.Error())
-				continue
-			}
-			if HasNonEmptyAppLocale(curOut) {
-				res.LocalePreserved++
-				continue
-			}
-		}
-		if setOut, err := r.Run(ctx, 4*time.Second, "", "cmd", "locale", "set-app-locales", pkg, "--user", u, "--locales", targetLoc); err != nil {
-			if isLocaleServiceUnsupported(setOut, err) {
-				localeSupported = false
+		wg.Wait()
+		for _, item := range locRes {
+			if item.unsupported {
 				res.LocaleUnsupported = true
-				continue
 			}
-			res.Errors = append(res.Errors, "locale "+pkg+": "+err.Error())
-		} else {
-			res.LocaleApps++
+			if item.preserved {
+				res.LocalePreserved++
+			}
+			if item.applied {
+				res.LocaleApps++
+			}
+			if item.errMsg != "" {
+				res.Errors = append(res.Errors, item.errMsg)
+			}
 		}
 	}
 
-	for _, pkg := range locTargets {
-		if pkg == callerPkg || !contracts.ValidPackageName(pkg) {
-			continue
+	if len(locTargets) > 0 {
+		type locItemResult struct {
+			ok     bool
+			errMsg []string
 		}
-		pkgOK := true
-		for _, op := range locationOps {
-			if _, err := r.Run(ctx, 3*time.Second, "", "appops", "set", "--user", u, pkg, op, "ignore"); err != nil {
-				pkgOK = false
-				res.Errors = append(res.Errors, "appops "+pkg+" "+op+": "+err.Error())
-			}
-			if pkg == "com.google.android.gms" || isExtraLocationUIDPkg(pkg) {
-				if _, err := r.Run(ctx, 3*time.Second, "", "appops", "set", "--user", u, "--uid", pkg, op, "ignore"); err != nil {
-					pkgOK = false
-					res.Errors = append(res.Errors, "appops-uid "+pkg+" "+op+": "+err.Error())
+		appopsRes := make([]locItemResult, len(locTargets))
+		var idx atomic.Int32
+		workers := sandboxWorkerPoolSize
+		if len(locTargets) < workers {
+			workers = len(locTargets)
+		}
+		var wg sync.WaitGroup
+		wg.Add(workers)
+		for w := 0; w < workers; w++ {
+			go func() {
+				defer wg.Done()
+				for {
+					i := int(idx.Add(1) - 1)
+					if i >= len(locTargets) {
+						return
+					}
+					pkg := locTargets[i]
+					if pkg == callerPkg || !contracts.ValidPackageName(pkg) {
+						continue
+					}
+					pkgOK := true
+					var errs []string
+					for _, op := range locationOps {
+						if _, err := r.Run(ctx, 3*time.Second, "", "appops", "set", "--user", u, pkg, op, "ignore"); err != nil {
+							pkgOK = false
+							errs = append(errs, "appops "+pkg+" "+op+": "+err.Error())
+						}
+						if pkg == "com.google.android.gms" || isExtraLocationUIDPkg(pkg) {
+							if _, err := r.Run(ctx, 3*time.Second, "", "appops", "set", "--user", u, "--uid", pkg, op, "ignore"); err != nil {
+								pkgOK = false
+								errs = append(errs, "appops-uid "+pkg+" "+op+": "+err.Error())
+							}
+						}
+					}
+					appopsRes[i] = locItemResult{ok: pkgOK, errMsg: errs}
 				}
-			}
+			}()
 		}
-		if pkgOK {
-			res.LocationApps++
+		wg.Wait()
+		for _, item := range appopsRes {
+			if item.ok {
+				res.LocationApps++
+			}
+			if len(item.errMsg) > 0 {
+				res.Errors = append(res.Errors, item.errMsg...)
+			}
 		}
 	}
 
@@ -536,11 +622,10 @@ func InstallSandboxAPKs(ctx context.Context, r Runner, userID int, apkPaths []st
 	if err != nil {
 		return InstallAPKResult{}, fmt.Errorf("pm install-create: %w (%s)", err, strings.TrimSpace(createOut))
 	}
-	m := installSessionIDRegex.FindStringSubmatch(createOut)
-	if len(m) != 2 {
+	sid, ok := parseInstallSessionID(createOut)
+	if !ok {
 		return InstallAPKResult{}, fmt.Errorf("failed to parse install session id from %q", strings.TrimSpace(createOut))
 	}
-	sid := m[1]
 
 	abandonSession := func() {
 		abCtx, cancel := context.WithTimeout(context.Background(), 4*time.Second)

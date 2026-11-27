@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -22,11 +21,7 @@ import (
 
 const sandboxWorkerPoolSize = 4
 
-var (
-	actUserStateRegex = regexp.MustCompile(`(?m)^\s*User #([0-9]+):\s*state=([A-Z_]+)`)
-	audioUIDRegex     = regexp.MustCompile(`(?i)\b(?:uid[:=\s]+|u/pid:)([0-9]+)(?:/[0-9]+)?`)
-	hibFileMu         sync.Mutex
-)
+var hibFileMu sync.Mutex
 
 type SandboxActivitySnapshot struct {
 	UserState      string `json:"user_state"`
@@ -253,10 +248,23 @@ func hibernationProtectedPkgSet(extra ...string) map[string]bool {
 
 // ParseUserStateFromActivityUsers extracts state=... for userID from `dumpsys activity users`.
 func ParseUserStateFromActivityUsers(output string, userID int) string {
-	want := strconv.Itoa(userID)
-	for _, m := range actUserStateRegex.FindAllStringSubmatch(output, -1) {
-		if len(m) == 3 && m[1] == want {
-			return strings.TrimSpace(m[2])
+	want := "User #" + strconv.Itoa(userID) + ":"
+	for _, raw := range strings.Split(output, "\n") {
+		line := strings.TrimSpace(raw)
+		if !strings.HasPrefix(line, want) {
+			continue
+		}
+		rest := strings.TrimLeft(line[len(want):], " \t")
+		if !strings.HasPrefix(rest, "state=") {
+			continue
+		}
+		val := rest[len("state="):]
+		end := 0
+		for end < len(val) && ((val[end] >= 'A' && val[end] <= 'Z') || val[end] == '_') {
+			end++
+		}
+		if end > 0 {
+			return val[:end]
 		}
 	}
 	return ""
@@ -1543,19 +1551,36 @@ func StopSandboxUserDeep(ctx context.Context, r Runner, userID int) (int, error)
 	return HibernateSandboxUser(ctx, r, userID, contracts.HibernatedPkgsPath)
 }
 
+func containsWordBoundaryToken(line, token string) bool {
+	for idx := 0; idx < len(line); {
+		rel := strings.Index(line[idx:], token)
+		if rel < 0 {
+			return false
+		}
+		pos := idx + rel
+		end := pos + len(token)
+		if (pos == 0 || !isIdentWordByte(line[pos-1])) && (end == len(line) || !isIdentWordByte(line[end])) {
+			return true
+		}
+		idx = pos + 1
+	}
+	return false
+}
+
 // ParseTopActivityIsUser inspects `dumpsys activity activities` or `dumpsys activity top` lines for `u<userID>` / `userId=<userID>`.
 func ParseTopActivityIsUser(section string, userID int) bool {
 	if oem.IsForbiddenUser(userID) {
 		return false
 	}
 	u := strconv.Itoa(userID)
-	tokenRe := regexp.MustCompile(`(?:\bu` + u + `\b|\buserId=` + u + `\b)`)
+	tokU := "u" + u
+	tokUserId := "userId=" + u
 	for _, raw := range strings.Split(section, "\n") {
 		line := strings.TrimSpace(raw)
 		if line == "" {
 			continue
 		}
-		if tokenRe.MatchString(line) {
+		if containsWordBoundaryToken(line, tokU) || containsWordBoundaryToken(line, tokUserId) {
 			return true
 		}
 	}
@@ -1596,14 +1621,34 @@ func ParseIptablesChainBytes(section string, uidStart, uidEnd int) uint64 {
 func ParseAudioActiveForUser(section string, uidStart, uidEnd int) bool {
 	for _, raw := range strings.Split(section, "\n") {
 		line := strings.TrimSpace(raw)
-		if line == "" || !strings.Contains(strings.ToLower(line), "state:started") {
+		if line == "" {
 			continue
 		}
-		for _, m := range audioUIDRegex.FindAllStringSubmatch(line, -1) {
-			if len(m) != 2 {
+		lower := strings.ToLower(line)
+		if !strings.Contains(lower, "state:started") {
+			continue
+		}
+		for i := 0; i < len(lower); i++ {
+			if i > 0 && isIdentWordByte(lower[i-1]) {
 				continue
 			}
-			uid, err := strconv.Atoi(m[1])
+			var numStart int
+			switch {
+			case strings.HasPrefix(lower[i:], "u/pid:"):
+				numStart = i + len("u/pid:")
+			case strings.HasPrefix(lower[i:], "uid:") || strings.HasPrefix(lower[i:], "uid=") || strings.HasPrefix(lower[i:], "uid "):
+				numStart = i + 4
+				for numStart < len(lower) && (lower[numStart] == ':' || lower[numStart] == '=' || lower[numStart] == ' ' || lower[numStart] == '\t') {
+					numStart++
+				}
+			default:
+				continue
+			}
+			d, _ := scanDigits(lower, numStart)
+			if d == "" {
+				continue
+			}
+			uid, err := strconv.Atoi(d)
 			if err == nil && uid >= uidStart && uid <= uidEnd {
 				return true
 			}

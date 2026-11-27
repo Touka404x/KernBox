@@ -1,10 +1,9 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <string>
-#include <vector>
 
 #if !defined(OEM_HYPEROS) && !defined(OEM_OPLUS) && !defined(OEM_ONEUI) && !defined(OEM_AOSP) && !defined(OEM_GENERIC)
 #define OEM_GENERIC 1
@@ -35,29 +34,100 @@ inline constexpr const char* kOemProfileName = "generic";
 inline constexpr size_t kBakedPropCount = 18;
 #endif
 
+template <size_t Cap>
+struct FixedStr {
+    static_assert(Cap > 1, "FixedStr capacity must exceed 1");
+    char buf[Cap] = {};
+    size_t len = 0;
+
+    FixedStr() = default;
+    FixedStr(const char* s) { assign(s); }
+
+    const char* c_str() const { return buf; }
+    const char* data() const { return buf; }
+    size_t size() const { return len; }
+    bool empty() const { return len == 0; }
+    void clear() {
+        len = 0;
+        buf[0] = '\0';
+    }
+    void push_back(char c) {
+        if (len + 1 < Cap) {
+            buf[len++] = c;
+            buf[len] = '\0';
+        }
+    }
+    void assign(const char* s, size_t n) {
+        if (!s || n == 0) {
+            clear();
+            return;
+        }
+        size_t copy_n = n < (Cap - 1) ? n : (Cap - 1);
+        std::memcpy(buf, s, copy_n);
+        len = copy_n;
+        buf[len] = '\0';
+    }
+    void assign(const char* s) {
+        if (!s) {
+            clear();
+            return;
+        }
+        assign(s, strnlen(s, Cap - 1));
+    }
+    char operator[](size_t i) const { return buf[i]; }
+    char& operator[](size_t i) { return buf[i]; }
+    bool operator==(const char* rhs) const {
+        if (!rhs) return len == 0;
+        return std::strcmp(buf, rhs) == 0;
+    }
+    bool operator!=(const char* rhs) const { return !(*this == rhs); }
+    template <size_t OtherCap>
+    bool operator==(const FixedStr<OtherCap>& rhs) const {
+        return len == rhs.len && std::memcmp(buf, rhs.buf, len) == 0;
+    }
+};
+
+template <size_t Cap>
+struct FixedIntVec {
+    int items[Cap] = {};
+    size_t len = 0;
+
+    size_t size() const { return len; }
+    bool empty() const { return len == 0; }
+    void clear() { len = 0; }
+    void push_back(int v) {
+        if (len < Cap) {
+            items[len++] = v;
+        }
+    }
+    int operator[](size_t i) const { return items[i]; }
+    const int* begin() const { return items; }
+    const int* end() const { return items + len; }
+};
+
 struct StealthConfig {
     bool enabled = false;
     int sandbox_user_id = 10;
     int exempt_work_uid = -1;
-    std::vector<int> exempt_uids;
-    std::string timezone = "UTC";
-    std::string locale = "en-US";
-    std::string sim_operator = "";
-    std::string sim_operator_name = "";
-    std::string sim_country_iso = "";
-    std::string network_operator = "";
-    std::string network_operator_name = "";
-    std::string network_country_iso = "";
-    std::string prop_hook_mode = "plt";
+    FixedIntVec<32> exempt_uids;
+    FixedStr<96> timezone = "UTC";
+    FixedStr<96> locale = "en-US";
+    FixedStr<96> sim_operator = "";
+    FixedStr<96> sim_operator_name = "";
+    FixedStr<96> sim_country_iso = "";
+    FixedStr<96> network_operator = "";
+    FixedStr<96> network_operator_name = "";
+    FixedStr<96> network_country_iso = "";
+    FixedStr<32> prop_hook_mode = "plt";
     bool spoof_carrier = false;
     bool spoof_timezone = true;
     bool spoof_locale = true;
     bool sanitize_network = true;
     bool spoof_device_region = false;
     bool hide_adb = true;
-    std::string sandbox_link_ipv4 = "10.172.10.2";
-    std::string device_region = "";
-    std::string boot_hwc = "";
+    FixedStr<64> sandbox_link_ipv4 = "10.172.10.2";
+    FixedStr<64> device_region = "";
+    FixedStr<64> boot_hwc = "";
 };
 
 struct BakedProps {
@@ -67,27 +137,28 @@ struct BakedProps {
 
 namespace detail {
 
-inline void skipJsonWs(const std::string& json, size_t& p) {
-    while (p < json.size() && (json[p] == ' ' || json[p] == '\t' || json[p] == '\r' || json[p] == '\n')) {
+inline void skipJsonWs(const char* json, size_t json_len, size_t& p) {
+    while (p < json_len && (json[p] == ' ' || json[p] == '\t' || json[p] == '\r' || json[p] == '\n')) {
         p++;
     }
 }
 
-inline bool readJsonStringToken(const std::string& json, size_t& p, std::string* out_val) {
-    if (p >= json.size() || json[p] != '"') {
+template <size_t Cap>
+inline bool readJsonStringToken(const char* json, size_t json_len, size_t& p, FixedStr<Cap>* out_val) {
+    if (p >= json_len || json[p] != '"') {
         return false;
     }
     if (out_val) {
         out_val->clear();
     }
     p++;
-    while (p < json.size()) {
+    while (p < json_len) {
         char c = json[p++];
         if (c == '"') {
             return true;
         }
         if (c == '\\') {
-            if (p >= json.size()) {
+            if (p >= json_len) {
                 return false;
             }
             char e = json[p++];
@@ -102,7 +173,7 @@ inline bool readJsonStringToken(const std::string& json, size_t& p, std::string*
                     case 'r': out_val->push_back('\r'); break;
                     case 't': out_val->push_back('\t'); break;
                     case 'u': {
-                        if (p + 4 <= json.size()) {
+                        if (p + 4 <= json_len) {
                             uint32_t cp = 0;
                             bool hex_ok = true;
                             for (int k = 0; k < 4; k++) {
@@ -141,21 +212,23 @@ inline bool readJsonStringToken(const std::string& json, size_t& p, std::string*
     return false;
 }
 
+template <size_t Cap>
 inline bool readJsonCompoundToken(
-    const std::string& json,
+    const char* json,
+    size_t json_len,
     size_t& p,
     char open_ch,
     char close_ch,
-    std::string* out_raw) {
-    if (p >= json.size() || json[p] != open_ch) {
+    FixedStr<Cap>* out_raw) {
+    if (p >= json_len || json[p] != open_ch) {
         return false;
     }
     size_t start = p;
     int depth = 0;
-    while (p < json.size()) {
+    while (p < json_len) {
         char c = json[p];
         if (c == '"') {
-            if (!readJsonStringToken(json, p, nullptr)) {
+            if (!readJsonStringToken<2>(json, json_len, p, nullptr)) {
                 return false;
             }
             continue;
@@ -167,7 +240,7 @@ inline bool readJsonCompoundToken(
             if (depth == 0) {
                 p++;
                 if (out_raw) {
-                    out_raw->assign(json.data() + start, p - start);
+                    out_raw->assign(json + start, p - start);
                 }
                 return true;
             }
@@ -177,72 +250,70 @@ inline bool readJsonCompoundToken(
     return false;
 }
 
-inline bool skipJsonValueToken(const std::string& json, size_t& p) {
-    skipJsonWs(json, p);
-    if (p >= json.size()) {
+inline bool skipJsonValueToken(const char* json, size_t json_len, size_t& p) {
+    skipJsonWs(json, json_len, p);
+    if (p >= json_len) {
         return false;
     }
     char c = json[p];
     if (c == '"') {
-        return readJsonStringToken(json, p, nullptr);
+        return readJsonStringToken<2>(json, json_len, p, nullptr);
     }
     if (c == '[') {
-        return readJsonCompoundToken(json, p, '[', ']', nullptr);
+        return readJsonCompoundToken<2>(json, json_len, p, '[', ']', nullptr);
     }
     if (c == '{') {
-        return readJsonCompoundToken(json, p, '{', '}', nullptr);
+        return readJsonCompoundToken<2>(json, json_len, p, '{', '}', nullptr);
     }
     size_t start = p;
-    while (p < json.size() && json[p] != ',' && json[p] != '}' && json[p] != ']' &&
+    while (p < json_len && json[p] != ',' && json[p] != '}' && json[p] != ']' &&
            json[p] != ' ' && json[p] != '\t' && json[p] != '\r' && json[p] != '\n') {
         p++;
     }
     return p > start;
 }
 
-inline bool parseFlatJsonValue(const std::string& json, const char* key, std::string& out_val, bool& is_string) {
+template <size_t Cap>
+inline bool parseFlatJsonValue(const char* json, size_t json_len, const char* key, FixedStr<Cap>& out_val, bool& is_string) {
     out_val.clear();
     is_string = false;
-    if (!key || key[0] == '\0') {
+    if (!json || json_len == 0 || !key || key[0] == '\0') {
         return false;
     }
     size_t p = 0;
-    skipJsonWs(json, p);
-    if (p >= json.size() || json[p] != '{') {
+    skipJsonWs(json, json_len, p);
+    if (p >= json_len || json[p] != '{') {
         return false;
     }
     p++;
-    std::string cur_key;
-    std::string tmp_val;
+    FixedStr<64> cur_key;
+    FixedStr<Cap> tmp_val;
     bool found = false;
-    while (p < json.size()) {
-        skipJsonWs(json, p);
-        if (p < json.size() && json[p] == ',') {
+    while (p < json_len) {
+        skipJsonWs(json, json_len, p);
+        if (p < json_len && json[p] == ',') {
             p++;
-            skipJsonWs(json, p);
+            skipJsonWs(json, json_len, p);
         }
-        if (p >= json.size()) {
+        if (p >= json_len || json[p] == '}') {
             return found;
         }
-        if (json[p] == '}') {
+        if (!readJsonStringToken(json, json_len, p, &cur_key)) {
             return found;
         }
-        if (!readJsonStringToken(json, p, &cur_key)) {
-            return found;
-        }
-        skipJsonWs(json, p);
-        if (p >= json.size() || json[p] != ':') {
+        skipJsonWs(json, json_len, p);
+        if (p >= json_len || json[p] != ':') {
             return found;
         }
         p++;
-        skipJsonWs(json, p);
-        if (p >= json.size()) {
+        skipJsonWs(json, json_len, p);
+        if (p >= json_len) {
             return found;
         }
         const bool match = (cur_key == key);
         char c = json[p];
         if (!match) {
-            if (!skipJsonValueToken(json, p)) {
+            if (!skipJsonValueToken(json, json_len, p)) {
                 return found;
             }
             continue;
@@ -252,18 +323,18 @@ inline bool parseFlatJsonValue(const std::string& json, const char* key, std::st
         bool val_ok = false;
         if (c == '"') {
             tmp_is_string = true;
-            val_ok = readJsonStringToken(json, p, &tmp_val);
+            val_ok = readJsonStringToken(json, json_len, p, &tmp_val);
         } else if (c == '[') {
-            val_ok = readJsonCompoundToken(json, p, '[', ']', &tmp_val);
+            val_ok = readJsonCompoundToken(json, json_len, p, '[', ']', &tmp_val);
         } else if (c == '{') {
-            val_ok = readJsonCompoundToken(json, p, '{', '}', &tmp_val);
+            val_ok = readJsonCompoundToken(json, json_len, p, '{', '}', &tmp_val);
         } else {
             size_t start = p;
-            while (p < json.size() && json[p] != ',' && json[p] != '}' &&
+            while (p < json_len && json[p] != ',' && json[p] != '}' &&
                    json[p] != ' ' && json[p] != '\t' && json[p] != '\r' && json[p] != '\n') {
                 p++;
             }
-            tmp_val.assign(json.data() + start, p - start);
+            tmp_val.assign(json + start, p - start);
             val_ok = !tmp_val.empty();
         }
         if (!val_ok) {
@@ -276,30 +347,30 @@ inline bool parseFlatJsonValue(const std::string& json, const char* key, std::st
     return found;
 }
 
-inline bool readBoolField(const std::string& json, const char* key, bool def) {
-    std::string v;
+inline bool readBoolField(const char* json, size_t json_len, const char* key, bool def) {
+    FixedStr<16> v;
     bool is_str = false;
-    if (!parseFlatJsonValue(json, key, v, is_str)) return def;
+    if (!parseFlatJsonValue(json, json_len, key, v, is_str)) return def;
     if (v == "true") return true;
     if (v == "false") return false;
     return def;
 }
 
-inline int readIntField(const std::string& json, const char* key, int def) {
-    std::string v;
+inline int readIntField(const char* json, size_t json_len, const char* key, int def) {
+    FixedStr<32> v;
     bool is_str = false;
-    if (!parseFlatJsonValue(json, key, v, is_str) || v.empty()) return def;
+    if (!parseFlatJsonValue(json, json_len, key, v, is_str) || v.empty()) return def;
     char* end = nullptr;
     long parsed = std::strtol(v.c_str(), &end, 10);
     if (end == v.c_str() || *end != '\0') return def;
     return static_cast<int>(parsed);
 }
 
-inline std::vector<int> readIntArrayField(const std::string& json, const char* key) {
-    std::vector<int> out;
-    std::string raw;
+inline FixedIntVec<32> readIntArrayField(const char* json, size_t json_len, const char* key) {
+    FixedIntVec<32> out;
+    FixedStr<384> raw;
     bool is_str = false;
-    if (!parseFlatJsonValue(json, key, raw, is_str) || is_str || raw.empty()) {
+    if (!parseFlatJsonValue(json, json_len, key, raw, is_str) || is_str || raw.empty()) {
         return out;
     }
     size_t i = 0;
@@ -321,54 +392,66 @@ inline std::vector<int> readIntArrayField(const std::string& json, const char* k
     return out;
 }
 
-inline std::string readStringField(const std::string& json, const char* key, const std::string& def) {
-    std::string v;
+template <size_t Cap>
+inline FixedStr<Cap> readStringField(const char* json, size_t json_len, const char* key, const FixedStr<Cap>& def) {
+    FixedStr<Cap> v;
     bool is_str = false;
-    if (!parseFlatJsonValue(json, key, v, is_str) || !is_str || v.empty()) return def;
+    if (!parseFlatJsonValue(json, json_len, key, v, is_str) || !is_str || v.empty()) return def;
     return v;
+}
+
+template <size_t Cap>
+inline FixedStr<Cap> readStringFieldLit(const char* json, size_t json_len, const char* key, const char* def_lit) {
+    FixedStr<Cap> def(def_lit);
+    return readStringField(json, json_len, key, def);
 }
 
 } // namespace detail
 
-inline StealthConfig parseStealthConfig(const std::string& json) {
+inline StealthConfig parseStealthConfig(const char* json, size_t json_len) {
     StealthConfig cfg;
-    if (json.empty()) {
+    if (!json || json_len == 0) {
         return cfg;
     }
-    cfg.enabled = detail::readBoolField(json, "enabled", false);
-    cfg.sandbox_user_id = detail::readIntField(json, "sandbox_user_id", 10);
-    cfg.exempt_work_uid = detail::readIntField(json, "exempt_work_uid", -1);
-    cfg.exempt_uids = detail::readIntArrayField(json, "exempt_uids");
-    cfg.timezone = detail::readStringField(json, "timezone", cfg.timezone);
-    cfg.locale = detail::readStringField(json, "locale", cfg.locale);
-    cfg.sim_operator = detail::readStringField(json, "sim_operator", cfg.sim_operator);
-    cfg.sim_operator_name = detail::readStringField(json, "sim_operator_name", cfg.sim_operator_name);
-    cfg.sim_country_iso = detail::readStringField(json, "sim_country_iso", cfg.sim_country_iso);
-    cfg.network_operator = detail::readStringField(json, "network_operator", cfg.sim_operator);
-    cfg.network_operator_name = detail::readStringField(json, "network_operator_name", cfg.sim_operator_name);
-    cfg.network_country_iso = detail::readStringField(json, "network_country_iso", cfg.sim_country_iso);
-    cfg.prop_hook_mode = detail::readStringField(json, "prop_hook_mode", "plt");
-    cfg.spoof_carrier = detail::readBoolField(json, "spoof_carrier", false);
-    cfg.spoof_timezone = detail::readBoolField(json, "spoof_timezone", true);
-    cfg.spoof_locale = detail::readBoolField(json, "spoof_locale", true);
-    cfg.sanitize_network = detail::readBoolField(json, "sanitize_network", true);
-    cfg.spoof_device_region = detail::readBoolField(json, "spoof_device_region", false);
-    cfg.hide_adb = detail::readBoolField(json, "hide_adb", true);
-    cfg.sandbox_link_ipv4 = detail::readStringField(json, "sandbox_link_ipv4", cfg.sandbox_link_ipv4);
+    cfg.enabled = detail::readBoolField(json, json_len, "enabled", false);
+    cfg.sandbox_user_id = detail::readIntField(json, json_len, "sandbox_user_id", 10);
+    cfg.exempt_work_uid = detail::readIntField(json, json_len, "exempt_work_uid", -1);
+    cfg.exempt_uids = detail::readIntArrayField(json, json_len, "exempt_uids");
+    cfg.timezone = detail::readStringField(json, json_len, "timezone", cfg.timezone);
+    cfg.locale = detail::readStringField(json, json_len, "locale", cfg.locale);
+    cfg.sim_operator = detail::readStringField(json, json_len, "sim_operator", cfg.sim_operator);
+    cfg.sim_operator_name = detail::readStringField(json, json_len, "sim_operator_name", cfg.sim_operator_name);
+    cfg.sim_country_iso = detail::readStringField(json, json_len, "sim_country_iso", cfg.sim_country_iso);
+    cfg.network_operator = detail::readStringField(json, json_len, "network_operator", cfg.sim_operator);
+    cfg.network_operator_name = detail::readStringField(json, json_len, "network_operator_name", cfg.sim_operator_name);
+    cfg.network_country_iso = detail::readStringField(json, json_len, "network_country_iso", cfg.sim_country_iso);
+    cfg.prop_hook_mode = detail::readStringFieldLit<32>(json, json_len, "prop_hook_mode", "plt");
+    cfg.spoof_carrier = detail::readBoolField(json, json_len, "spoof_carrier", false);
+    cfg.spoof_timezone = detail::readBoolField(json, json_len, "spoof_timezone", true);
+    cfg.spoof_locale = detail::readBoolField(json, json_len, "spoof_locale", true);
+    cfg.sanitize_network = detail::readBoolField(json, json_len, "sanitize_network", true);
+    cfg.spoof_device_region = detail::readBoolField(json, json_len, "spoof_device_region", false);
+    cfg.hide_adb = detail::readBoolField(json, json_len, "hide_adb", true);
+    cfg.sandbox_link_ipv4 = detail::readStringField(json, json_len, "sandbox_link_ipv4", cfg.sandbox_link_ipv4);
 
-    std::string legacy_region = detail::readStringField(json, "miui_region", "");
-    std::string primary_region = detail::readStringField(json, "device_region", "");
+    FixedStr<64> legacy_region = detail::readStringFieldLit<64>(json, json_len, "miui_region", "");
+    FixedStr<64> primary_region = detail::readStringFieldLit<64>(json, json_len, "device_region", "");
     if (!primary_region.empty()) {
         cfg.device_region = primary_region;
     } else if (!legacy_region.empty()) {
         cfg.device_region = legacy_region;
     }
-    cfg.boot_hwc = detail::readStringField(json, "boot_hwc", "");
+    cfg.boot_hwc = detail::readStringFieldLit<64>(json, json_len, "boot_hwc", "");
     return cfg;
 }
 
+inline StealthConfig parseStealthConfig(const char* json) {
+    return parseStealthConfig(json, json ? std::strlen(json) : 0);
+}
+
 // Strict 4-octet decimal IPv4 parser (zero heap allocation).
-inline bool parseIPv4Octets(const std::string& ip, uint8_t out[4]) {
+template <size_t Cap>
+inline bool parseIPv4Octets(const FixedStr<Cap>& ip, uint8_t out[4]) {
     if (!out || ip.empty()) {
         return false;
     }
@@ -407,6 +490,38 @@ inline bool parseIPv4Octets(const std::string& ip, uint8_t out[4]) {
     return idx == n;
 }
 
+inline bool parseIPv4Octets(const char* ip_str, uint8_t out[4]) {
+    FixedStr<64> fs(ip_str);
+    return parseIPv4Octets(fs, out);
+}
+
+inline bool parseMccMnc(const char* op, int& out_mcc, int& out_mnc) {
+    if (!op) return false;
+    int d[6]{};
+    size_t n = 0;
+    while (op[n] != '\0') {
+        if (op[n] < '0' || op[n] > '9' || n >= 6) {
+            return false;
+        }
+        d[n] = op[n] - '0';
+        n++;
+    }
+    if (n != 5 && n != 6) {
+        return false;
+    }
+    int mcc = d[0] * 100 + d[1] * 10 + d[2];
+    int mnc = d[3] * 10 + d[4];
+    if (n == 6) {
+        mnc = mnc * 10 + d[5];
+    }
+    if (mcc <= 0) {
+        return false;
+    }
+    out_mcc = mcc;
+    out_mnc = mnc;
+    return true;
+}
+
 inline bool shouldSpoofAppUid(const StealthConfig& cfg, int uid) {
     if (!cfg.enabled || cfg.sandbox_user_id <= 0 || cfg.sandbox_user_id == kXSpaceUserId) {
         return false;
@@ -430,31 +545,6 @@ inline bool shouldSpoofAppUid(const StealthConfig& cfg, int uid) {
         }
     }
     return true;
-}
-
-/**
- * Formats dual-SIM comma-separated TelephonyProperties while preserving empty slots.
- */
-inline std::string formatMultiSimValue(const std::string& orig, const std::string& spoof) {
-    if (orig.empty() || orig.find(',') == std::string::npos) {
-        return spoof;
-    }
-    std::string out;
-    out.reserve(orig.size() + spoof.size() * 2);
-    size_t start = 0;
-    while (start <= orig.size()) {
-        size_t comma = orig.find(',', start);
-        size_t end = (comma == std::string::npos) ? orig.size() : comma;
-        if (end > start) {
-            out.append(spoof);
-        }
-        if (comma == std::string::npos) {
-            break;
-        }
-        out.push_back(',');
-        start = comma + 1;
-    }
-    return out;
 }
 
 // Allocation-free dual-SIM formatter into caller stack buffer. Returns false on overflow.
@@ -591,53 +681,79 @@ inline const char* spoofablePropNameByIndex(int idx) {
 
 namespace detail {
 
-inline std::string asciiLower(const std::string& in) {
-    std::string out = in;
-    for (size_t i = 0; i < out.size(); i++) {
-        if (out[i] >= 'A' && out[i] <= 'Z') {
-            out[i] = static_cast<char>(out[i] - 'A' + 'a');
+template <size_t Cap>
+inline FixedStr<Cap> asciiLower(const char* in, size_t n) {
+    FixedStr<Cap> out;
+    for (size_t i = 0; i < n; i++) {
+        char c = in[i];
+        if (c >= 'A' && c <= 'Z') {
+            c = static_cast<char>(c - 'A' + 'a');
         }
+        out.push_back(c);
     }
     return out;
 }
 
-inline std::string asciiUpper(const std::string& in) {
-    std::string out = in;
-    for (size_t i = 0; i < out.size(); i++) {
-        if (out[i] >= 'a' && out[i] <= 'z') {
-            out[i] = static_cast<char>(out[i] - 'a' + 'A');
+template <size_t Cap>
+inline FixedStr<Cap> asciiUpper(const char* in, size_t n) {
+    FixedStr<Cap> out;
+    for (size_t i = 0; i < n; i++) {
+        char c = in[i];
+        if (c >= 'a' && c <= 'z') {
+            c = static_cast<char>(c - 'a' + 'A');
         }
+        out.push_back(c);
     }
     return out;
 }
 
-inline void splitLocaleTag(const std::string& locale, const std::string& fallback_region, std::string& out_lang, std::string& out_country) {
+template <size_t Cap1, size_t Cap2, size_t OutCap>
+inline void splitLocaleTag(
+    const FixedStr<Cap1>& locale,
+    const FixedStr<Cap2>& fallback_region,
+    FixedStr<OutCap>& out_lang,
+    FixedStr<OutCap>& out_country) {
     out_lang.clear();
     out_country.clear();
-    size_t sep = locale.find_first_of("-_");
-    if (sep == std::string::npos) {
-        out_lang = asciiLower(locale);
-        out_country = asciiUpper(fallback_region);
+    const char* s = locale.c_str();
+    const size_t n = locale.size();
+    size_t sep = 0;
+    while (sep < n && s[sep] != '-' && s[sep] != '_') {
+        sep++;
+    }
+    if (sep >= n) {
+        out_lang = asciiLower<OutCap>(s, n);
+        out_country = asciiUpper<OutCap>(fallback_region.c_str(), fallback_region.size());
         return;
     }
-    out_lang = asciiLower(locale.substr(0, sep));
+    out_lang = asciiLower<OutCap>(s, sep);
     size_t rest = sep + 1;
-    while (rest < locale.size() && (locale[rest] == '-' || locale[rest] == '_')) {
+    while (rest < n && (s[rest] == '-' || s[rest] == '_')) {
         rest++;
     }
-    size_t next_sep = locale.find_first_of("-_", rest);
-    std::string seg = (next_sep == std::string::npos) ? locale.substr(rest) : locale.substr(rest, next_sep - rest);
-    if (seg.size() == 4) {
+    size_t next_sep = rest;
+    while (next_sep < n && s[next_sep] != '-' && s[next_sep] != '_') {
+        next_sep++;
+    }
+    const char* seg_ptr = s + rest;
+    size_t seg_len = next_sep - rest;
+    if (seg_len == 4) {
         // Skip BCP-47 4-letter script subtag (e.g. zh-Hans-CN -> CN)
-        if (next_sep != std::string::npos) {
+        if (next_sep < n) {
             size_t r2 = next_sep + 1;
-            size_t s2 = locale.find_first_of("-_", r2);
-            seg = (s2 == std::string::npos) ? locale.substr(r2) : locale.substr(r2, s2 - r2);
+            size_t s2 = r2;
+            while (s2 < n && s[s2] != '-' && s[s2] != '_') {
+                s2++;
+            }
+            seg_ptr = s + r2;
+            seg_len = s2 - r2;
         } else {
-            seg.clear();
+            seg_len = 0;
         }
     }
-    out_country = seg.empty() ? asciiUpper(fallback_region) : asciiUpper(seg);
+    out_country = seg_len == 0
+        ? asciiUpper<OutCap>(fallback_region.c_str(), fallback_region.size())
+        : asciiUpper<OutCap>(seg_ptr, seg_len);
 }
 
 } // namespace detail
@@ -647,53 +763,57 @@ inline BakedProps bakeSpoofedProps(const StealthConfig& cfg) {
     if (!cfg.enabled) {
         return baked;
     }
-    auto setSlot = [&](size_t idx, bool cond, const std::string& val) {
-        if (idx >= kBakedPropCount || !cond || val.empty() || val.size() >= kMaxBakedValueBytes) return;
+    auto setSlot = [&](size_t idx, bool cond, const char* val, size_t val_len) {
+        if (idx >= kBakedPropCount || !cond || !val || val_len == 0 || val_len >= kMaxBakedValueBytes) return;
         baked.active[idx] = true;
-        std::memcpy(baked.values[idx], val.c_str(), val.size() + 1);
+        std::memcpy(baked.values[idx], val, val_len);
+        baked.values[idx][val_len] = '\0';
     };
-    std::string lang;
-    std::string country;
+    FixedStr<32> lang;
+    FixedStr<32> country;
     detail::splitLocaleTag(cfg.locale, cfg.device_region, lang, country);
-    const std::string effective_region = !cfg.device_region.empty() ? cfg.device_region : country;
-    const std::string region_lower = detail::asciiLower(effective_region);
-    const std::string region_upper = detail::asciiUpper(effective_region);
-    const std::string effective_hwc = !cfg.boot_hwc.empty() ? cfg.boot_hwc : region_upper;
+    const char* eff_reg_ptr = !cfg.device_region.empty() ? cfg.device_region.c_str() : country.c_str();
+    const size_t eff_reg_len = !cfg.device_region.empty() ? cfg.device_region.size() : country.size();
+    FixedStr<64> region_lower = detail::asciiLower<64>(eff_reg_ptr, eff_reg_len);
+    (void)region_lower;
+    FixedStr<64> region_upper = detail::asciiUpper<64>(eff_reg_ptr, eff_reg_len);
+    const char* eff_hwc_ptr = !cfg.boot_hwc.empty() ? cfg.boot_hwc.c_str() : region_upper.c_str();
+    const size_t eff_hwc_len = !cfg.boot_hwc.empty() ? cfg.boot_hwc.size() : region_upper.size();
 
-    setSlot(0, cfg.spoof_timezone, cfg.timezone);
-    setSlot(1, cfg.spoof_carrier, cfg.sim_operator);
-    setSlot(2, cfg.spoof_carrier, cfg.sim_country_iso);
-    setSlot(3, cfg.spoof_carrier, cfg.sim_operator_name);
-    setSlot(4, cfg.spoof_carrier, cfg.network_operator);
-    setSlot(5, cfg.spoof_carrier, cfg.network_country_iso);
-    setSlot(6, cfg.spoof_carrier, cfg.network_operator_name);
-    setSlot(7, cfg.spoof_locale, cfg.locale);
-    setSlot(8, cfg.spoof_locale, cfg.locale);
-    setSlot(9, cfg.spoof_locale, country);
-    setSlot(10, cfg.spoof_locale, lang);
-    setSlot(11, cfg.spoof_carrier, std::string("READY"));
-    setSlot(12, cfg.spoof_device_region, effective_hwc);
-    setSlot(13, cfg.spoof_carrier, std::string("LTE"));
-    setSlot(14, cfg.hide_adb, std::string("stopped"));
-    setSlot(15, cfg.hide_adb, std::string("none"));
-    setSlot(16, cfg.hide_adb, std::string("none"));
-    setSlot(17, cfg.hide_adb, std::string("none"));
+    setSlot(0, cfg.spoof_timezone, cfg.timezone.c_str(), cfg.timezone.size());
+    setSlot(1, cfg.spoof_carrier, cfg.sim_operator.c_str(), cfg.sim_operator.size());
+    setSlot(2, cfg.spoof_carrier, cfg.sim_country_iso.c_str(), cfg.sim_country_iso.size());
+    setSlot(3, cfg.spoof_carrier, cfg.sim_operator_name.c_str(), cfg.sim_operator_name.size());
+    setSlot(4, cfg.spoof_carrier, cfg.network_operator.c_str(), cfg.network_operator.size());
+    setSlot(5, cfg.spoof_carrier, cfg.network_country_iso.c_str(), cfg.network_country_iso.size());
+    setSlot(6, cfg.spoof_carrier, cfg.network_operator_name.c_str(), cfg.network_operator_name.size());
+    setSlot(7, cfg.spoof_locale, cfg.locale.c_str(), cfg.locale.size());
+    setSlot(8, cfg.spoof_locale, cfg.locale.c_str(), cfg.locale.size());
+    setSlot(9, cfg.spoof_locale, country.c_str(), country.size());
+    setSlot(10, cfg.spoof_locale, lang.c_str(), lang.size());
+    setSlot(11, cfg.spoof_carrier, "READY", 5);
+    setSlot(12, cfg.spoof_device_region, eff_hwc_ptr, eff_hwc_len);
+    setSlot(13, cfg.spoof_carrier, "LTE", 3);
+    setSlot(14, cfg.hide_adb, "stopped", 7);
+    setSlot(15, cfg.hide_adb, "none", 4);
+    setSlot(16, cfg.hide_adb, "none", 4);
+    setSlot(17, cfg.hide_adb, "none", 4);
 #if defined(OEM_HYPEROS)
-    setSlot(18, cfg.spoof_device_region, effective_hwc);
-    setSlot(19, cfg.spoof_device_region, region_upper);
-    setSlot(20, cfg.spoof_device_region, region_lower);
-    setSlot(21, cfg.spoof_device_region, region_lower);
+    setSlot(18, cfg.spoof_device_region, eff_hwc_ptr, eff_hwc_len);
+    setSlot(19, cfg.spoof_device_region, region_upper.c_str(), region_upper.size());
+    setSlot(20, cfg.spoof_device_region, region_lower.c_str(), region_lower.size());
+    setSlot(21, cfg.spoof_device_region, region_lower.c_str(), region_lower.size());
 #elif defined(OEM_OPLUS)
-    setSlot(18, cfg.spoof_device_region, region_upper);
-    setSlot(19, cfg.spoof_device_region, region_upper);
-    setSlot(20, cfg.spoof_device_region, region_upper);
-    setSlot(21, cfg.spoof_device_region, region_upper);
+    setSlot(18, cfg.spoof_device_region, region_upper.c_str(), region_upper.size());
+    setSlot(19, cfg.spoof_device_region, region_upper.c_str(), region_upper.size());
+    setSlot(20, cfg.spoof_device_region, region_upper.c_str(), region_upper.size());
+    setSlot(21, cfg.spoof_device_region, region_upper.c_str(), region_upper.size());
 #elif defined(OEM_ONEUI)
-    setSlot(18, cfg.spoof_device_region, region_upper);
-    setSlot(19, cfg.spoof_device_region, region_upper);
-    setSlot(20, cfg.spoof_device_region, region_upper);
-    setSlot(21, cfg.spoof_device_region, region_upper);
-    setSlot(22, cfg.spoof_device_region, region_upper);
+    setSlot(18, cfg.spoof_device_region, region_upper.c_str(), region_upper.size());
+    setSlot(19, cfg.spoof_device_region, region_upper.c_str(), region_upper.size());
+    setSlot(20, cfg.spoof_device_region, region_upper.c_str(), region_upper.size());
+    setSlot(21, cfg.spoof_device_region, region_upper.c_str(), region_upper.size());
+    setSlot(22, cfg.spoof_device_region, region_upper.c_str(), region_upper.size());
 #endif
     return baked;
 }
@@ -732,14 +852,18 @@ inline bool lookupSpoofedProperty(
     const StealthConfig& cfg,
     const char* name,
     const char* orig_val,
-    std::string& out) {
+    char* out_buf,
+    size_t out_cap) {
+    if (!out_buf || out_cap == 0) return false;
     BakedProps baked = bakeSpoofedProps(cfg);
     char buf[192];
     const char* res = nullptr;
     if (!lookupSpoofedPropertyIntoBuf(baked, name, orig_val, buf, sizeof(buf), &res) || !res) {
         return false;
     }
-    out.assign(res);
+    const size_t n = std::strlen(res);
+    if (n >= out_cap) return false;
+    std::memcpy(out_buf, res, n + 1);
     return true;
 }
 

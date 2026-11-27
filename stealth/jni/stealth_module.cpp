@@ -17,7 +17,6 @@
 #include <linux/if_packet.h>
 #include <net/if.h>
 #include <netinet/in.h>
-#include <string>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
@@ -52,10 +51,14 @@ constexpr size_t kMaxConfigBytes = 16384;
 
 stealth::StealthConfig g_cfg;
 stealth::BakedProps g_baked_props;
-std::string g_cfg_json;
+char g_cfg_json[kMaxConfigBytes + 1] = {};
+size_t g_cfg_json_len = 0;
 bool g_is_phone_proc = false;
 bool g_is_sandbox_app = false;
 bool g_plt_hooked = false;
+bool g_jni_hooked = false;
+int g_spoof_mcc = 0;
+int g_spoof_mnc = 0;
 uint32_t g_sandbox_ipv4_nbo = 0;
 
 struct alignas(uint32_t) FakePropInfo {
@@ -649,50 +652,71 @@ bool readExact(int fd, void* buf, size_t len) {
     return true;
 }
 
-std::string readSafeRootConfig() {
+size_t readSafeRootConfig(char* out_buf, size_t out_cap) {
+    auto fallbackDisabled = [&]() -> size_t {
+        const size_t dlen = std::strlen(kDisabledJson);
+        if (dlen < out_cap) {
+            std::memcpy(out_buf, kDisabledJson, dlen + 1);
+            return dlen;
+        }
+        return 0;
+    };
+    if (!out_buf || out_cap <= std::strlen(kDisabledJson)) {
+        return 0;
+    }
     if (access(kZygiskDisabledFlag, F_OK) == 0) {
-        return kDisabledJson;
+        return fallbackDisabled();
     }
     int fd = open(kStealthConfigPath, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
     if (fd < 0) {
-        return kDisabledJson;
+        return fallbackDisabled();
     }
     struct stat st{};
     if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_uid != 0 ||
-        st.st_size <= 0 || static_cast<size_t>(st.st_size) > kMaxConfigBytes) {
+        st.st_size <= 0 || static_cast<size_t>(st.st_size) > kMaxConfigBytes ||
+        static_cast<size_t>(st.st_size) >= out_cap) {
         close(fd);
-        return kDisabledJson;
+        return fallbackDisabled();
     }
-    std::string out(static_cast<size_t>(st.st_size), '\0');
+    const size_t want = static_cast<size_t>(st.st_size);
     size_t total = 0;
-    while (total < out.size()) {
-        ssize_t r = read(fd, &out[total], out.size() - total);
+    while (total < want) {
+        ssize_t r = read(fd, out_buf + total, want - total);
         if (r < 0) {
             if (errno == EINTR) continue;
             close(fd);
-            return kDisabledJson;
+            return fallbackDisabled();
         }
         if (r == 0) break;
         total += static_cast<size_t>(r);
     }
     close(fd);
-    out.resize(total);
-    return out.empty() ? kDisabledJson : out;
+    if (total == 0) {
+        return fallbackDisabled();
+    }
+    out_buf[total] = '\0';
+    return total;
 }
 
 void companionHandler(int client_fd) {
-    std::string json = readSafeRootConfig();
-    if (json.size() > kMaxConfigBytes) {
-        json = kDisabledJson;
+    char json_buf[kMaxConfigBytes + 1];
+    size_t len_sz = readSafeRootConfig(json_buf, sizeof(json_buf));
+    if (len_sz == 0 || len_sz > kMaxConfigBytes) {
+        len_sz = std::strlen(kDisabledJson);
+        std::memcpy(json_buf, kDisabledJson, len_sz + 1);
     }
-    uint32_t len = static_cast<uint32_t>(json.size());
+    uint32_t len = static_cast<uint32_t>(len_sz);
     if (writeExact(client_fd, &len, sizeof(len))) {
-        (void)writeExact(client_fd, json.data(), json.size());
+        (void)writeExact(client_fd, json_buf, len_sz);
     }
     close(client_fd);
 }
 
-bool fetchConfigFromCompanion(zygisk::Api* api, std::string& out_json) {
+bool fetchConfigFromCompanion(zygisk::Api* api, char* out_buf, size_t out_cap, size_t& out_len) {
+    out_len = 0;
+    if (!api || !out_buf || out_cap <= kMaxConfigBytes) {
+        return false;
+    }
     int fd = api->connectCompanion();
     if (fd < 0) {
         return false;
@@ -706,13 +730,15 @@ bool fetchConfigFromCompanion(zygisk::Api* api, std::string& out_json) {
         close(fd);
         return false;
     }
-    out_json.resize(len);
-    bool ok = readExact(fd, &out_json[0], len);
+    bool ok = readExact(fd, out_buf, len);
     close(fd);
     if (!ok) {
-        out_json.clear();
+        out_buf[0] = '\0';
+        return false;
     }
-    return ok;
+    out_buf[len] = '\0';
+    out_len = len;
+    return true;
 }
 
 struct ResolvedTarget {
@@ -886,30 +912,31 @@ void clearJniException(JNIEnv* env) {
     }
 }
 
-jstring newJniStringSafe(JNIEnv* env, const std::string& s) {
-    if (!env) return nullptr;
+jstring newJniStringSafe(JNIEnv* env, const char* s, size_t len) {
+    if (!env || !s) return nullptr;
     bool ascii_safe = true;
-    for (unsigned char c : s) {
+    for (size_t i = 0; i < len; i++) {
+        const unsigned char c = static_cast<unsigned char>(s[i]);
         if (c == 0 || c >= 0x80) {
             ascii_safe = false;
             break;
         }
     }
     if (ascii_safe) {
-        jstring out = env->NewStringUTF(s.c_str());
+        jstring out = env->NewStringUTF(s);
         if (!out || env->ExceptionCheck()) {
             clearJniException(env);
             return nullptr;
         }
         return out;
     }
-    jbyteArray arr = env->NewByteArray(static_cast<jsize>(s.size()));
+    jbyteArray arr = env->NewByteArray(static_cast<jsize>(len));
     if (!arr || env->ExceptionCheck()) {
         clearJniException(env);
         return nullptr;
     }
-    env->SetByteArrayRegion(arr, 0, static_cast<jsize>(s.size()),
-                            reinterpret_cast<const jbyte*>(s.data()));
+    env->SetByteArrayRegion(arr, 0, static_cast<jsize>(len),
+                            reinterpret_cast<const jbyte*>(s));
     if (env->ExceptionCheck()) {
         clearJniException(env);
         env->DeleteLocalRef(arr);
@@ -941,8 +968,12 @@ jstring newJniStringSafe(JNIEnv* env, const std::string& s) {
     return res;
 }
 
+jstring newJniStringSafe(JNIEnv* env, const char* s) {
+    return s ? newJniStringSafe(env, s, std::strlen(s)) : nullptr;
+}
+
 void injectDexAndInstallSystemHook(JNIEnv* env, const char* process_name) {
-    if (!env || g_cfg_json.empty()) return;
+    if (!env || g_cfg_json_len == 0) return;
     if (env->PushLocalFrame(32) != 0) {
         clearJniException(env);
         return;
@@ -1004,6 +1035,113 @@ void injectDexAndInstallSystemHook(JNIEnv* env, const char* process_name) {
     LOGI("SystemServerHook.install(%s, oem=%s) => %s", process_name, stealth::kOemProfileName, ok ? "true" : "false");
 }
 
+void applyJavaLocaleOnly(JNIEnv* env, const stealth::StealthConfig& cfg) {
+    if (!env || !cfg.spoof_locale || cfg.locale.empty()) return;
+    if (env->PushLocalFrame(24) != 0) {
+        clearJniException(env);
+        return;
+    }
+
+    jclass loc_cls = env->FindClass("java/util/Locale");
+    if (loc_cls && !env->ExceptionCheck()) {
+        jmethodID get_def = env->GetStaticMethodID(loc_cls, "getDefault", "()Ljava/util/Locale;");
+        jmethodID to_tag = env->GetMethodID(loc_cls, "toLanguageTag", "()Ljava/lang/String;");
+        if (get_def && to_tag && !env->ExceptionCheck()) {
+            jobject cur_loc = env->CallStaticObjectMethod(loc_cls, get_def);
+            if (!env->ExceptionCheck() && cur_loc) {
+                auto cur_tag_j = static_cast<jstring>(env->CallObjectMethod(cur_loc, to_tag));
+                if (!env->ExceptionCheck() && cur_tag_j) {
+                    const char* cur_tag = env->GetStringUTFChars(cur_tag_j, nullptr);
+                    bool already_matches = cur_tag != nullptr && strcasecmp(cur_tag, cfg.locale.c_str()) == 0;
+                    if (cur_tag) {
+                        env->ReleaseStringUTFChars(cur_tag_j, cur_tag);
+                    }
+                    if (already_matches) {
+                        env->PopLocalFrame(nullptr);
+                        return;
+                    }
+                }
+            }
+        }
+        clearJniException(env);
+
+        jmethodID for_tag = env->GetStaticMethodID(loc_cls, "forLanguageTag", "(Ljava/lang/String;)Ljava/util/Locale;");
+        jmethodID set_def = env->GetStaticMethodID(loc_cls, "setDefault", "(Ljava/util/Locale;)V");
+        if (for_tag && set_def && !env->ExceptionCheck()) {
+            jstring tag = newJniStringSafe(env, cfg.locale.c_str(), cfg.locale.size());
+            if (tag) {
+                jobject loc_obj = env->CallStaticObjectMethod(loc_cls, for_tag, tag);
+                if (!env->ExceptionCheck() && loc_obj) {
+                    env->CallStaticVoidMethod(loc_cls, set_def, loc_obj);
+                }
+            }
+        }
+    }
+    clearJniException(env);
+
+    jclass uloc_cls = env->FindClass("android/icu/util/ULocale");
+    if (uloc_cls && !env->ExceptionCheck()) {
+        jmethodID for_utag = env->GetStaticMethodID(uloc_cls, "forLanguageTag", "(Ljava/lang/String;)Landroid/icu/util/ULocale;");
+        jmethodID set_udef = env->GetStaticMethodID(uloc_cls, "setDefault", "(Landroid/icu/util/ULocale;)V");
+        if (for_utag && set_udef && !env->ExceptionCheck()) {
+            jstring tag = newJniStringSafe(env, cfg.locale.c_str(), cfg.locale.size());
+            if (tag) {
+                jobject uloc_obj = env->CallStaticObjectMethod(uloc_cls, for_utag, tag);
+                if (!env->ExceptionCheck() && uloc_obj) {
+                    env->CallStaticVoidMethod(uloc_cls, set_udef, uloc_obj);
+                }
+            }
+        }
+    }
+    clearJniException(env);
+
+    jclass ll_cls = env->FindClass("android/os/LocaleList");
+    if (ll_cls && !env->ExceptionCheck()) {
+        jmethodID for_tags = env->GetStaticMethodID(ll_cls, "forLanguageTags", "(Ljava/lang/String;)Landroid/os/LocaleList;");
+        jmethodID set_ll = env->GetStaticMethodID(ll_cls, "setDefault", "(Landroid/os/LocaleList;)V");
+        if (for_tags && set_ll && !env->ExceptionCheck()) {
+            jstring tags = newJniStringSafe(env, cfg.locale.c_str(), cfg.locale.size());
+            if (tags) {
+                jobject ll_obj = env->CallStaticObjectMethod(ll_cls, for_tags, tags);
+                if (!env->ExceptionCheck() && ll_obj) {
+                    env->CallStaticVoidMethod(ll_cls, set_ll, ll_obj);
+                }
+            }
+        }
+    }
+    clearJniException(env);
+
+    // Clear stale Zygote pre-fork user.language/country/region system properties.
+    stealth::FixedStr<32> lang;
+    stealth::FixedStr<32> country;
+    stealth::detail::splitLocaleTag(cfg.locale, cfg.device_region, lang, country);
+    jclass sys_cls = env->FindClass("java/lang/System");
+    if (sys_cls && !env->ExceptionCheck()) {
+        jmethodID set_prop = env->GetStaticMethodID(
+            sys_cls, "setProperty", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;");
+        if (set_prop && !env->ExceptionCheck()) {
+            auto setSysProp = [&](const char* k, const char* v, size_t vlen) {
+                if (!v || vlen == 0) return;
+                jstring jk = newJniStringSafe(env, k);
+                jstring jv = newJniStringSafe(env, v, vlen);
+                jobject prev = nullptr;
+                if (jk && jv && !env->ExceptionCheck()) {
+                    prev = env->CallStaticObjectMethod(sys_cls, set_prop, jk, jv);
+                }
+                clearJniException(env);
+                if (prev) env->DeleteLocalRef(prev);
+                if (jk) env->DeleteLocalRef(jk);
+                if (jv) env->DeleteLocalRef(jv);
+            };
+            setSysProp("user.language", lang.c_str(), lang.size());
+            setSysProp("user.country", country.c_str(), country.size());
+            setSysProp("user.region", country.c_str(), country.size());
+        }
+    }
+    clearJniException(env);
+    env->PopLocalFrame(nullptr);
+}
+
 void applyJavaTimezoneAndLocale(JNIEnv* env, const stealth::StealthConfig& cfg) {
     if (!env) return;
     if (env->PushLocalFrame(16) != 0) {
@@ -1018,7 +1156,7 @@ void applyJavaTimezoneAndLocale(JNIEnv* env, const stealth::StealthConfig& cfg) 
             if (get_tz && !env->ExceptionCheck()) {
                 jmethodID set_tz = env->GetStaticMethodID(tz_cls, "setDefault", "(Ljava/util/TimeZone;)V");
                 if (set_tz && !env->ExceptionCheck()) {
-                    jstring tz_id = newJniStringSafe(env, cfg.timezone);
+                    jstring tz_id = newJniStringSafe(env, cfg.timezone.c_str(), cfg.timezone.size());
                     if (tz_id) {
                         jobject tz_obj = env->CallStaticObjectMethod(tz_cls, get_tz, tz_id);
                         if (!env->ExceptionCheck() && tz_obj) {
@@ -1036,7 +1174,7 @@ void applyJavaTimezoneAndLocale(JNIEnv* env, const stealth::StealthConfig& cfg) 
             if (get_icu_tz && !env->ExceptionCheck()) {
                 jmethodID set_icu_tz = env->GetStaticMethodID(icu_tz_cls, "setDefault", "(Landroid/icu/util/TimeZone;)V");
                 if (set_icu_tz && !env->ExceptionCheck()) {
-                    jstring tz_id = newJniStringSafe(env, cfg.timezone);
+                    jstring tz_id = newJniStringSafe(env, cfg.timezone.c_str(), cfg.timezone.size());
                     if (tz_id) {
                         jobject tz_obj = env->CallStaticObjectMethod(icu_tz_cls, get_icu_tz, tz_id);
                         if (!env->ExceptionCheck() && tz_obj) {
@@ -1047,119 +1185,150 @@ void applyJavaTimezoneAndLocale(JNIEnv* env, const stealth::StealthConfig& cfg) 
             }
         }
         clearJniException(env);
-    }
 
-    auto setJavaSystemProperty = [&](const char* k, const std::string& v) {
-        if (!k || v.empty()) return;
         jclass sys_cls = env->FindClass("java/lang/System");
         if (sys_cls && !env->ExceptionCheck()) {
             jmethodID set_prop = env->GetStaticMethodID(
                 sys_cls, "setProperty", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;");
             if (set_prop && !env->ExceptionCheck()) {
-                jstring jk = newJniStringSafe(env, k);
-                jstring jv = newJniStringSafe(env, v);
+                jstring jk = newJniStringSafe(env, "user.timezone");
+                jstring jv = newJniStringSafe(env, cfg.timezone.c_str(), cfg.timezone.size());
                 jobject prev = nullptr;
                 if (jk && jv && !env->ExceptionCheck()) {
                     prev = env->CallStaticObjectMethod(sys_cls, set_prop, jk, jv);
                 }
                 clearJniException(env);
                 if (prev) env->DeleteLocalRef(prev);
-                if (jk) env->DeleteLocalRef(jk);
-                if (jv) env->DeleteLocalRef(jv);
-            }
-        }
-        clearJniException(env);
-    };
-
-    if (cfg.spoof_timezone && !cfg.timezone.empty()) {
-        setJavaSystemProperty("user.timezone", cfg.timezone);
-    }
-
-    if (cfg.spoof_locale && !cfg.locale.empty()) {
-        jclass loc_cls = env->FindClass("java/util/Locale");
-        if (loc_cls && !env->ExceptionCheck()) {
-            jmethodID for_tag = env->GetStaticMethodID(loc_cls, "forLanguageTag", "(Ljava/lang/String;)Ljava/util/Locale;");
-            if (for_tag && !env->ExceptionCheck()) {
-                jmethodID set_def = env->GetStaticMethodID(loc_cls, "setDefault", "(Ljava/util/Locale;)V");
-                if (set_def && !env->ExceptionCheck()) {
-                    jstring tag = newJniStringSafe(env, cfg.locale);
-                    if (tag) {
-                        jobject loc_obj = env->CallStaticObjectMethod(loc_cls, for_tag, tag);
-                        if (!env->ExceptionCheck() && loc_obj) {
-                            env->CallStaticVoidMethod(loc_cls, set_def, loc_obj);
-                        }
-                    }
-                }
-            }
-        }
-        clearJniException(env);
-
-        jclass uloc_cls = env->FindClass("android/icu/util/ULocale");
-        if (uloc_cls && !env->ExceptionCheck()) {
-            jmethodID for_utag = env->GetStaticMethodID(uloc_cls, "forLanguageTag", "(Ljava/lang/String;)Landroid/icu/util/ULocale;");
-            if (for_utag && !env->ExceptionCheck()) {
-                jmethodID set_udef = env->GetStaticMethodID(uloc_cls, "setDefault", "(Landroid/icu/util/ULocale;)V");
-                if (set_udef && !env->ExceptionCheck()) {
-                    jstring tag = newJniStringSafe(env, cfg.locale);
-                    if (tag) {
-                        jobject uloc_obj = env->CallStaticObjectMethod(uloc_cls, for_utag, tag);
-                        if (!env->ExceptionCheck() && uloc_obj) {
-                            env->CallStaticVoidMethod(uloc_cls, set_udef, uloc_obj);
-                        }
-                    }
-                }
-            }
-        }
-        clearJniException(env);
-
-        jclass ll_cls = env->FindClass("android/os/LocaleList");
-        if (ll_cls && !env->ExceptionCheck()) {
-            jmethodID for_tags = env->GetStaticMethodID(ll_cls, "forLanguageTags", "(Ljava/lang/String;)Landroid/os/LocaleList;");
-            if (for_tags && !env->ExceptionCheck()) {
-                jmethodID set_ll = env->GetStaticMethodID(ll_cls, "setDefault", "(Landroid/os/LocaleList;)V");
-                if (set_ll && !env->ExceptionCheck()) {
-                    jstring tags = newJniStringSafe(env, cfg.locale);
-                    if (tags) {
-                        jobject ll_obj = env->CallStaticObjectMethod(ll_cls, for_tags, tags);
-                        if (!env->ExceptionCheck() && ll_obj) {
-                            env->CallStaticVoidMethod(ll_cls, set_ll, ll_obj);
-                        }
-                    }
-                }
-            }
-        }
-        clearJniException(env);
-
-        // Clear stale Zygote pre-fork user.language/country/region system properties.
-        std::string lang;
-        std::string country;
-        stealth::detail::splitLocaleTag(cfg.locale, cfg.device_region, lang, country);
-        jclass sys_cls = env->FindClass("java/lang/System");
-        if (sys_cls && !env->ExceptionCheck()) {
-            jmethodID set_prop = env->GetStaticMethodID(
-                sys_cls, "setProperty", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;");
-            if (set_prop && !env->ExceptionCheck()) {
-                auto setSysProp = [&](const char* k, const std::string& v) {
-                    if (v.empty()) return;
-                    jstring jk = newJniStringSafe(env, k);
-                    jstring jv = newJniStringSafe(env, v);
-                    jobject prev = nullptr;
-                    if (jk && jv && !env->ExceptionCheck()) {
-                        prev = env->CallStaticObjectMethod(sys_cls, set_prop, jk, jv);
-                    }
-                    clearJniException(env);
-                    if (prev) env->DeleteLocalRef(prev);
-                    if (jk) env->DeleteLocalRef(jk);
-                    if (jv) env->DeleteLocalRef(jv);
-                };
-                setSysProp("user.language", lang);
-                setSysProp("user.country", country);
-                setSysProp("user.region", country);
             }
         }
         clearJniException(env);
     }
+
     env->PopLocalFrame(nullptr);
+    applyJavaLocaleOnly(env, cfg);
+}
+
+using FnNativeSetConfigV33 = void (*)(
+    JNIEnv*, jclass, jlong, jint, jint, jstring,
+    jint, jint, jint, jint, jint, jint, jint, jint, jint, jint, jint, jint, jint, jint, jint);
+using FnNativeSetConfigV34 = void (*)(
+    JNIEnv*, jclass, jlong, jint, jint, jstring, jobjectArray,
+    jint, jint, jint, jint, jint, jint, jint, jint, jint, jint, jint, jint, jint, jint, jint, jint);
+
+FnNativeSetConfigV33 g_orig_nativeSetConfig_v33 = nullptr;
+FnNativeSetConfigV34 g_orig_nativeSetConfig_v34 = nullptr;
+
+void hook_nativeSetConfiguration_v33(
+    JNIEnv* env, jclass clazz, jlong ptr, jint mcc, jint mnc, jstring locale,
+    jint orientation, jint touchscreen, jint density, jint keyboard,
+    jint keyboardHidden, jint navigation, jint screenWidth, jint screenHeight,
+    jint smallestScreenWidthDp, jint screenWidthDp, jint screenHeightDp,
+    jint screenLayout, jint uiMode, jint colorMode, jint majorVersion) {
+    jint eff_mcc = (g_cfg.spoof_carrier && g_spoof_mcc > 0) ? g_spoof_mcc : mcc;
+    jint eff_mnc = (g_cfg.spoof_carrier && g_spoof_mcc > 0) ? g_spoof_mnc : mnc;
+    jstring spoofed_loc = nullptr;
+    jstring eff_locale = locale;
+    if (g_cfg.spoof_locale && !g_cfg.locale.empty()) {
+        spoofed_loc = newJniStringSafe(env, g_cfg.locale.c_str(), g_cfg.locale.size());
+        if (spoofed_loc) {
+            eff_locale = spoofed_loc;
+        }
+    }
+    if (g_orig_nativeSetConfig_v33) {
+        g_orig_nativeSetConfig_v33(
+            env, clazz, ptr, eff_mcc, eff_mnc, eff_locale,
+            orientation, touchscreen, density, keyboard,
+            keyboardHidden, navigation, screenWidth, screenHeight,
+            smallestScreenWidthDp, screenWidthDp, screenHeightDp,
+            screenLayout, uiMode, colorMode, majorVersion);
+    }
+    if (spoofed_loc) {
+        env->DeleteLocalRef(spoofed_loc);
+    }
+    applyJavaLocaleOnly(env, g_cfg);
+}
+
+void hook_nativeSetConfiguration_v34(
+    JNIEnv* env, jclass clazz, jlong ptr, jint mcc, jint mnc, jstring defaultLocale, jobjectArray locales,
+    jint orientation, jint touchscreen, jint density, jint keyboard,
+    jint keyboardHidden, jint navigation, jint screenWidth, jint screenHeight,
+    jint smallestScreenWidthDp, jint screenWidthDp, jint screenHeightDp,
+    jint screenLayout, jint uiMode, jint colorMode, jint grammaticalGender, jint majorVersion) {
+    jint eff_mcc = (g_cfg.spoof_carrier && g_spoof_mcc > 0) ? g_spoof_mcc : mcc;
+    jint eff_mnc = (g_cfg.spoof_carrier && g_spoof_mcc > 0) ? g_spoof_mnc : mnc;
+    jstring spoofed_loc = nullptr;
+    jstring eff_default = defaultLocale;
+    jobjectArray spoofed_arr = nullptr;
+    jobjectArray eff_locales = locales;
+    if (g_cfg.spoof_locale && !g_cfg.locale.empty()) {
+        spoofed_loc = newJniStringSafe(env, g_cfg.locale.c_str(), g_cfg.locale.size());
+        if (spoofed_loc) {
+            eff_default = spoofed_loc;
+            if (locales != nullptr) {
+                jclass str_cls = env->FindClass("java/lang/String");
+                if (str_cls && !env->ExceptionCheck()) {
+                    spoofed_arr = env->NewObjectArray(1, str_cls, spoofed_loc);
+                    if (spoofed_arr && !env->ExceptionCheck()) {
+                        eff_locales = spoofed_arr;
+                    }
+                    env->DeleteLocalRef(str_cls);
+                }
+                clearJniException(env);
+            }
+        }
+    }
+    if (g_orig_nativeSetConfig_v34) {
+        g_orig_nativeSetConfig_v34(
+            env, clazz, ptr, eff_mcc, eff_mnc, eff_default, eff_locales,
+            orientation, touchscreen, density, keyboard,
+            keyboardHidden, navigation, screenWidth, screenHeight,
+            smallestScreenWidthDp, screenWidthDp, screenHeightDp,
+            screenLayout, uiMode, colorMode, grammaticalGender, majorVersion);
+    }
+    if (spoofed_arr) env->DeleteLocalRef(spoofed_arr);
+    if (spoofed_loc) env->DeleteLocalRef(spoofed_loc);
+    applyJavaLocaleOnly(env, g_cfg);
+}
+
+void installAssetManagerConfigHook(zygisk::Api* api, JNIEnv* env) {
+    if (!api || !env || (!g_cfg.spoof_locale && !g_cfg.spoof_carrier)) {
+        return;
+    }
+    static constexpr const char* kSigV33 = "(JIILjava/lang/String;IIIIIIIIIIIIIII)V";
+    static constexpr const char* kSigV34 = "(JIILjava/lang/String;[Ljava/lang/String;IIIIIIIIIIIIIIII)V";
+
+    jclass am_cls = env->FindClass("android/content/res/AssetManager");
+    if (!am_cls || env->ExceptionCheck()) {
+        clearJniException(env);
+        return;
+    }
+    jmethodID mid33 = env->GetStaticMethodID(am_cls, "nativeSetConfiguration", kSigV33);
+    if (mid33 && !env->ExceptionCheck()) {
+        JNINativeMethod method = {
+            "nativeSetConfiguration",
+            kSigV33,
+            reinterpret_cast<void*>(hook_nativeSetConfiguration_v33),
+        };
+        api->hookJniNativeMethods(env, "android/content/res/AssetManager", &method, 1);
+        g_orig_nativeSetConfig_v33 = reinterpret_cast<FnNativeSetConfigV33>(method.fnPtr);
+        g_jni_hooked = (g_orig_nativeSetConfig_v33 != nullptr);
+    } else {
+        clearJniException(env);
+        jmethodID mid34 = env->GetStaticMethodID(am_cls, "nativeSetConfiguration", kSigV34);
+        if (mid34 && !env->ExceptionCheck()) {
+            JNINativeMethod method = {
+                "nativeSetConfiguration",
+                kSigV34,
+                reinterpret_cast<void*>(hook_nativeSetConfiguration_v34),
+            };
+            api->hookJniNativeMethods(env, "android/content/res/AssetManager", &method, 1);
+            g_orig_nativeSetConfig_v34 = reinterpret_cast<FnNativeSetConfigV34>(method.fnPtr);
+            g_jni_hooked = (g_orig_nativeSetConfig_v34 != nullptr);
+        } else {
+            clearJniException(env);
+        }
+    }
+    env->DeleteLocalRef(am_cls);
 }
 
 class SandboxStealthModule : public zygisk::ModuleBase {
@@ -1170,12 +1339,12 @@ public:
     }
 
     void preServerSpecialize([[maybe_unused]] zygisk::ServerSpecializeArgs* args) override {
-        if (!fetchConfigFromCompanion(api_, g_cfg_json)) {
+        if (!fetchConfigFromCompanion(api_, g_cfg_json, sizeof(g_cfg_json), g_cfg_json_len)) {
             g_cfg = stealth::StealthConfig{};
             api_->setOption(zygisk::DLCLOSE_MODULE_LIBRARY);
             return;
         }
-        g_cfg = stealth::parseStealthConfig(g_cfg_json);
+        g_cfg = stealth::parseStealthConfig(g_cfg_json, g_cfg_json_len);
         if (!g_cfg.enabled) {
             api_->setOption(zygisk::DLCLOSE_MODULE_LIBRARY);
         } else {
@@ -1207,7 +1376,7 @@ public:
                 }
             }
         }
-        std::string proc_name = raw_name ? raw_name : "";
+        stealth::FixedStr<128> proc_name(raw_name ? raw_name : "");
         if (raw_name != nullptr) {
             env_->ReleaseStringUTFChars(args->nice_name, raw_name);
         }
@@ -1218,8 +1387,8 @@ public:
 
         // 1. Phone service host process: inject ServiceManager wrapper only, never PLT hook.
         if (uid == 1001 && proc_name == "com.android.phone") {
-            if (fetchConfigFromCompanion(api_, g_cfg_json)) {
-                g_cfg = stealth::parseStealthConfig(g_cfg_json);
+            if (fetchConfigFromCompanion(api_, g_cfg_json, sizeof(g_cfg_json), g_cfg_json_len)) {
+                g_cfg = stealth::parseStealthConfig(g_cfg_json, g_cfg_json_len);
                 g_is_phone_proc = g_cfg.enabled;
             }
             if (!g_is_phone_proc) {
@@ -1236,17 +1405,21 @@ public:
         }
 
         // 3. Sandbox user process: verify against companion policy.
-        if (!fetchConfigFromCompanion(api_, g_cfg_json)) {
+        if (!fetchConfigFromCompanion(api_, g_cfg_json, sizeof(g_cfg_json), g_cfg_json_len)) {
             api_->setOption(zygisk::DLCLOSE_MODULE_LIBRARY);
             return;
         }
-        g_cfg = stealth::parseStealthConfig(g_cfg_json);
+        g_cfg = stealth::parseStealthConfig(g_cfg_json, g_cfg_json_len);
         if (!stealth::shouldSpoofAppUid(g_cfg, uid)) {
             api_->setOption(zygisk::DLCLOSE_MODULE_LIBRARY);
             return;
         }
         g_baked_props = stealth::bakeSpoofedProps(g_cfg);
         populateFakeProps(g_baked_props, g_fake_props);
+        if (!stealth::parseMccMnc(g_cfg.sim_operator.c_str(), g_spoof_mcc, g_spoof_mnc)) {
+            g_spoof_mcc = 0;
+            g_spoof_mnc = 0;
+        }
 
         g_is_sandbox_app = true;
         if (g_cfg.sanitize_network) {
@@ -1344,9 +1517,10 @@ public:
                     if (g_orig_open[i] || g_orig_open2[i] || g_orig_fopen[i]) any_orig = true;
                 }
                 g_plt_hooked = committed || any_orig;
-                if (g_plt_hooked) {
-                    LOGI("pltHookCommit active for %s (%d) oem=%s committed=%d prop_libs=%zu net_libs=%zu proc_libs=%zu",
-                         proc_name.c_str(), uid, stealth::kOemProfileName, committed ? 1 : 0, prop_libs_registered, net_libs_registered, proc_libs_registered);
+                installAssetManagerConfigHook(api_, env_);
+                if (g_plt_hooked || g_jni_hooked) {
+                    LOGI("pltHookCommit active for %s (%d) oem=%s committed=%d prop_libs=%zu net_libs=%zu proc_libs=%zu jni_cfg=%d",
+                         proc_name.c_str(), uid, stealth::kOemProfileName, committed ? 1 : 0, prop_libs_registered, net_libs_registered, proc_libs_registered, g_jni_hooked ? 1 : 0);
                 } else {
                     LOGW("pltHookCommit failed in %s (%d)", proc_name.c_str(), uid);
                 }
@@ -1365,7 +1539,7 @@ public:
             applyJavaTimezoneAndLocale(env_, g_cfg);
         }
 
-        if (!g_plt_hooked) {
+        if (!g_plt_hooked && !g_jni_hooked) {
             api_->setOption(zygisk::DLCLOSE_MODULE_LIBRARY);
         }
     }

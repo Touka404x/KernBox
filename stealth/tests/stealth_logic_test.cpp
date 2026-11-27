@@ -20,13 +20,13 @@ int main() {
         assert(empty.boot_hwc.empty());
         assert(!stealth::shouldSpoofAppUid(empty, 1010377));
 
-        std::string out;
-        assert(!stealth::lookupSpoofedProperty(empty, "gsm.sim.operator.numeric", "46002", out));
+        char out[192];
+        assert(!stealth::lookupSpoofedProperty(empty, "gsm.sim.operator.numeric", "46002", out, sizeof(out)));
     }
 
     // 2. Active sandbox config parsing + UID filter
     {
-        std::string json = R"({
+        const char* json = R"({
             "enabled": true,
             "sandbox_user_id": 10,
             "exempt_work_uid": 1010376,
@@ -65,34 +65,35 @@ int main() {
 
     // 3. Multi-SIM formatting
     {
-        assert(stealth::formatMultiSimValue("", "44010") == "44010");
-        assert(stealth::formatMultiSimValue("46002", "44010") == "44010");
-        assert(stealth::formatMultiSimValue("46002,46000", "44010") == "44010,44010");
-        assert(stealth::formatMultiSimValue(",46002", "44010") == ",44010");
-        assert(stealth::formatMultiSimValue("46002,", "44010") == "44010,");
-        assert(stealth::formatMultiSimValue(",", "jp") == ",");
+        char mbuf[64];
+        assert(stealth::formatMultiSimIntoBuf("", "44010", mbuf, sizeof(mbuf)) && std::string(mbuf) == "44010");
+        assert(stealth::formatMultiSimIntoBuf("46002", "44010", mbuf, sizeof(mbuf)) && std::string(mbuf) == "44010");
+        assert(stealth::formatMultiSimIntoBuf("46002,46000", "44010", mbuf, sizeof(mbuf)) && std::string(mbuf) == "44010,44010");
+        assert(stealth::formatMultiSimIntoBuf(",46002", "44010", mbuf, sizeof(mbuf)) && std::string(mbuf) == ",44010");
+        assert(stealth::formatMultiSimIntoBuf("46002,", "44010", mbuf, sizeof(mbuf)) && std::string(mbuf) == "44010,");
+        assert(stealth::formatMultiSimIntoBuf(",", "jp", mbuf, sizeof(mbuf)) && std::string(mbuf) == ",");
     }
 
     // 4. Property lookup whitelist + passthrough
     {
         auto cfg = stealth::parseStealthConfig(
             R"({"enabled":true,"timezone":"Asia/Tokyo","locale":"ja-JP","spoof_carrier":true,"sim_operator":"44010","sim_country_iso":"jp","sim_operator_name":"NTT DOCOMO"})");
-        std::string out;
-        assert(stealth::lookupSpoofedProperty(cfg, "persist.sys.timezone", "Asia/Shanghai", out) && out == "Asia/Tokyo");
-        assert(stealth::lookupSpoofedProperty(cfg, "gsm.sim.operator.numeric", "46002,", out) && out == "44010,");
-        assert(stealth::lookupSpoofedProperty(cfg, "gsm.sim.operator.iso-country", "cn,cn", out) && out == "jp,jp");
-        assert(stealth::lookupSpoofedProperty(cfg, "gsm.sim.operator.alpha", "CarrierA", out) && out == "NTT DOCOMO");
-        assert(stealth::lookupSpoofedProperty(cfg, "gsm.operator.numeric", "46002", out) && out == "44010");
-        assert(stealth::lookupSpoofedProperty(cfg, "gsm.operator.iso-country", ",cn", out) && out == ",jp");
-        assert(stealth::lookupSpoofedProperty(cfg, "gsm.operator.alpha", "CarrierB", out) && out == "NTT DOCOMO");
-        assert(!stealth::lookupSpoofedProperty(cfg, "ro.product.model", "GenericPhone", out));
-        assert(stealth::lookupSpoofedProperty(cfg, "persist.sys.locale", "zh-CN", out) && out == "ja-JP");
-        assert(stealth::lookupSpoofedProperty(cfg, "ro.product.locale", "zh-CN", out) && out == "ja-JP");
+        char out[192];
+        assert(stealth::lookupSpoofedProperty(cfg, "persist.sys.timezone", "Asia/Shanghai", out, sizeof(out)) && std::string(out) == "Asia/Tokyo");
+        assert(stealth::lookupSpoofedProperty(cfg, "gsm.sim.operator.numeric", "46002,", out, sizeof(out)) && std::string(out) == "44010,");
+        assert(stealth::lookupSpoofedProperty(cfg, "gsm.sim.operator.iso-country", "cn,cn", out, sizeof(out)) && std::string(out) == "jp,jp");
+        assert(stealth::lookupSpoofedProperty(cfg, "gsm.sim.operator.alpha", "CarrierA", out, sizeof(out)) && std::string(out) == "NTT DOCOMO");
+        assert(stealth::lookupSpoofedProperty(cfg, "gsm.operator.numeric", "46002", out, sizeof(out)) && std::string(out) == "44010");
+        assert(stealth::lookupSpoofedProperty(cfg, "gsm.operator.iso-country", ",cn", out, sizeof(out)) && std::string(out) == ",jp");
+        assert(stealth::lookupSpoofedProperty(cfg, "gsm.operator.alpha", "CarrierB", out, sizeof(out)) && std::string(out) == "NTT DOCOMO");
+        assert(!stealth::lookupSpoofedProperty(cfg, "ro.product.model", "GenericPhone", out, sizeof(out)));
+        assert(stealth::lookupSpoofedProperty(cfg, "persist.sys.locale", "zh-CN", out, sizeof(out)) && std::string(out) == "ja-JP");
+        assert(stealth::lookupSpoofedProperty(cfg, "ro.product.locale", "zh-CN", out, sizeof(out)) && std::string(out) == "ja-JP");
 
         auto no_loc = stealth::parseStealthConfig(
             R"({"enabled":true,"locale":"ja-JP","spoof_locale":false})");
-        assert(!stealth::lookupSpoofedProperty(no_loc, "persist.sys.locale", "zh-CN", out));
-        assert(!stealth::lookupSpoofedProperty(no_loc, "ro.product.locale", "zh-CN", out));
+        assert(!stealth::lookupSpoofedProperty(no_loc, "persist.sys.locale", "zh-CN", out, sizeof(out)));
+        assert(!stealth::lookupSpoofedProperty(no_loc, "ro.product.locale", "zh-CN", out, sizeof(out)));
     }
 
     // 5. Zero-allocation pre-baked property buffer fast path
@@ -213,7 +214,7 @@ int main() {
 
     // 8. Isolated UIDs, string-embedded JSON safety, overflow fallback, and last-wins escape decoding
     {
-        const std::string sneaky_json =
+        const char* sneaky_json =
             R"({"sandbox_user_id":10,"sim_operator_name":"Carrier\",\"enabled\":false,\"locale\":\"zh-CN\"",)"
             R"("enabled":true,"locale":"ja-JP","device_region":"JP","boot_hwc":"JP","spoof_carrier":true,"sim_operator":"44010"})";
         auto cfg = stealth::parseStealthConfig(sneaky_json);
@@ -302,6 +303,20 @@ int main() {
         assert(!stealth::shouldHideProcMapsLine(safe1, std::strlen(safe1)));
         assert(!stealth::shouldHideProcMapsLine(safe2, std::strlen(safe2)));
         assert(!stealth::shouldHideProcMapsLine(safe3, std::strlen(safe3)));
+    }
+
+    // 11. parseMccMnc 5-digit & 6-digit validation
+    {
+        int mcc = 0, mnc = 0;
+        assert(stealth::parseMccMnc("44010", mcc, mnc) && mcc == 440 && mnc == 10);
+        assert(stealth::parseMccMnc("310260", mcc, mnc) && mcc == 310 && mnc == 260);
+        assert(stealth::parseMccMnc("23430", mcc, mnc) && mcc == 234 && mnc == 30);
+        assert(!stealth::parseMccMnc(nullptr, mcc, mnc));
+        assert(!stealth::parseMccMnc("", mcc, mnc));
+        assert(!stealth::parseMccMnc("4401", mcc, mnc));
+        assert(!stealth::parseMccMnc("4401000", mcc, mnc));
+        assert(!stealth::parseMccMnc("4401a", mcc, mnc));
+        assert(!stealth::parseMccMnc("00010", mcc, mnc));
     }
 
     std::cout << "ALL stealth_logic_test C++ ASSERTIONS PASSED (oem=" << stealth::kOemProfileName << ")\n";

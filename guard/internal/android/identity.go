@@ -8,7 +8,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -28,20 +27,215 @@ type ReaderRunner interface {
 	RunWithStdinReader(ctx context.Context, timeout time.Duration, stdin io.Reader, name string, args ...string) (string, error)
 }
 
-var (
-	ErrWorkVPNMissing = errors.New("no active Android VPN record for the sandbox controller package")
+var ErrWorkVPNMissing = errors.New("no active Android VPN record for the sandbox controller package")
 
-	networkRecord         = regexp.MustCompile(`^NetworkAgentInfo\{network\{([0-9]+)\}`)
-	networkInterface      = regexp.MustCompile(`\bInterfaceName:\s*([a-zA-Z0-9_.-]+)(?:\s|,|\})`)
-	networkOwner          = regexp.MustCompile(`\bOwnerUid:\s*([0-9]+)\b`)
-	networkUnderlying     = regexp.MustCompile(`\bunderlying\{\[([0-9]+)\]\}`)
-	networkUnderlyingCaps = regexp.MustCompile(`\bUnderlyingNetworks:\s*\[([0-9]+)\]`)
-	userListIDRegex       = regexp.MustCompile(`(?:^|\s)id=([0-9]+),`)
-	userInfoIDRegex       = regexp.MustCompile(`UserInfo\{([0-9]+):[^}]*\}`)
-	userSerialRegex       = regexp.MustCompile(`\bserialNo=([0-9]+)\b`)
-	userTypeRegex         = regexp.MustCompile(`\btype=([^,\s]+)`)
-	userParentRegex       = regexp.MustCompile(`\bparentId=([0-9]+)\b`)
-)
+func isIdentWordByte(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '_'
+}
+
+func isIdentDigitByte(b byte) bool {
+	return b >= '0' && b <= '9'
+}
+
+func scanDigits(s string, pos int) (string, int) {
+	end := pos
+	for end < len(s) && isIdentDigitByte(s[end]) {
+		end++
+	}
+	return s[pos:end], end
+}
+
+func findWordPrefixDigits(s, prefix string) string {
+	for idx := 0; idx < len(s); {
+		rel := strings.Index(s[idx:], prefix)
+		if rel < 0 {
+			return ""
+		}
+		pos := idx + rel
+		if pos > 0 && isIdentWordByte(s[pos-1]) {
+			idx = pos + 1
+			continue
+		}
+		d, end := scanDigits(s, pos+len(prefix))
+		if d != "" && (end == len(s) || !isIdentWordByte(s[end])) {
+			return d
+		}
+		idx = pos + 1
+	}
+	return ""
+}
+
+func findWordPrefixSpacesDigits(s, prefix string) string {
+	for idx := 0; idx < len(s); {
+		rel := strings.Index(s[idx:], prefix)
+		if rel < 0 {
+			return ""
+		}
+		pos := idx + rel
+		if pos > 0 && isIdentWordByte(s[pos-1]) {
+			idx = pos + 1
+			continue
+		}
+		i := pos + len(prefix)
+		for i < len(s) && (s[i] == ' ' || s[i] == '\t' || s[i] == '\n' || s[i] == '\r') {
+			i++
+		}
+		d, end := scanDigits(s, i)
+		if d != "" && (end == len(s) || !isIdentWordByte(s[end])) {
+			return d
+		}
+		idx = pos + 1
+	}
+	return ""
+}
+
+func parseUserListID(line string) string {
+	for idx := 0; idx < len(line); {
+		rel := strings.Index(line[idx:], "id=")
+		if rel < 0 {
+			return ""
+		}
+		pos := idx + rel
+		if pos == 0 || line[pos-1] == ' ' || line[pos-1] == '\t' || line[pos-1] == '\n' || line[pos-1] == '\r' || line[pos-1] == '\f' || line[pos-1] == '\v' {
+			d, end := scanDigits(line, pos+3)
+			if d != "" && end < len(line) && line[end] == ',' {
+				return d
+			}
+		}
+		idx = pos + 1
+	}
+	return ""
+}
+
+func parseUserInfoID(line string) string {
+	pos := strings.Index(line, "UserInfo{")
+	if pos < 0 {
+		return ""
+	}
+	start := pos + len("UserInfo{")
+	d, end := scanDigits(line, start)
+	if d == "" || end >= len(line) || line[end] != ':' {
+		return ""
+	}
+	if strings.IndexByte(line[end+1:], '}') < 0 {
+		return ""
+	}
+	return d
+}
+
+func parseUserType(line string) string {
+	for idx := 0; idx < len(line); {
+		rel := strings.Index(line[idx:], "type=")
+		if rel < 0 {
+			return ""
+		}
+		pos := idx + rel
+		if pos > 0 && isIdentWordByte(line[pos-1]) {
+			idx = pos + 1
+			continue
+		}
+		start := pos + 5
+		end := start
+		for end < len(line) && line[end] != ',' && line[end] != ' ' && line[end] != '\t' && line[end] != '\n' && line[end] != '\r' {
+			end++
+		}
+		if end > start {
+			return line[start:end]
+		}
+		idx = pos + 1
+	}
+	return ""
+}
+
+func parseNetworkRecordID(line string) string {
+	const prefix = "NetworkAgentInfo{network{"
+	if !strings.HasPrefix(line, prefix) {
+		return ""
+	}
+	d, end := scanDigits(line, len(prefix))
+	if d == "" || end >= len(line) || line[end] != '}' {
+		return ""
+	}
+	return d
+}
+
+func parseNetworkInterfaceName(link string) string {
+	const prefix = "InterfaceName:"
+	for idx := 0; idx < len(link); {
+		rel := strings.Index(link[idx:], prefix)
+		if rel < 0 {
+			return ""
+		}
+		pos := idx + rel
+		if pos > 0 && isIdentWordByte(link[pos-1]) {
+			idx = pos + 1
+			continue
+		}
+		i := pos + len(prefix)
+		for i < len(link) && (link[i] == ' ' || link[i] == '\t' || link[i] == '\n' || link[i] == '\r') {
+			i++
+		}
+		start := i
+		for i < len(link) && (isIdentWordByte(link[i]) || link[i] == '.' || link[i] == '-') {
+			i++
+		}
+		if i > start && (i == len(link) || link[i] == ' ' || link[i] == '\t' || link[i] == ',' || link[i] == '}') {
+			return link[start:i]
+		}
+		idx = pos + 1
+	}
+	return ""
+}
+
+func parseNetworkUnderlyingID(header string) string {
+	const prefix = "underlying{["
+	for idx := 0; idx < len(header); {
+		rel := strings.Index(header[idx:], prefix)
+		if rel < 0 {
+			return ""
+		}
+		pos := idx + rel
+		if pos > 0 && isIdentWordByte(header[pos-1]) {
+			idx = pos + 1
+			continue
+		}
+		d, end := scanDigits(header, pos+len(prefix))
+		if d != "" && strings.HasPrefix(header[end:], "]}") {
+			return d
+		}
+		idx = pos + 1
+	}
+	return ""
+}
+
+func parseNetworkUnderlyingCapsID(caps string) string {
+	const prefix = "UnderlyingNetworks:"
+	for idx := 0; idx < len(caps); {
+		rel := strings.Index(caps[idx:], prefix)
+		if rel < 0 {
+			return ""
+		}
+		pos := idx + rel
+		if pos > 0 && isIdentWordByte(caps[pos-1]) {
+			idx = pos + 1
+			continue
+		}
+		i := pos + len(prefix)
+		for i < len(caps) && (caps[i] == ' ' || caps[i] == '\t') {
+			i++
+		}
+		if i >= len(caps) || caps[i] != '[' {
+			idx = pos + 1
+			continue
+		}
+		d, end := scanDigits(caps, i+1)
+		if d != "" && end < len(caps) && caps[end] == ']' {
+			return d
+		}
+		idx = pos + 1
+	}
+	return ""
+}
 
 const (
 	userFlagDisabled  = 0x40
@@ -64,10 +258,10 @@ func DiscoverManagedProfile(ctx context.Context, r Runner) (DiscoveredProfile, e
 	for _, row := range strings.Split(listOut, "\n") {
 		line := strings.TrimSpace(row)
 		var idStr string
-		if m := userListIDRegex.FindStringSubmatch(line); len(m) == 2 {
-			idStr = m[1]
-		} else if m := userInfoIDRegex.FindStringSubmatch(line); len(m) == 2 {
-			idStr = m[1]
+		if id := parseUserListID(line); id != "" {
+			idStr = id
+		} else if id := parseUserInfoID(line); id != "" {
+			idStr = id
 		} else {
 			continue
 		}
@@ -75,16 +269,14 @@ func DiscoverManagedProfile(ctx context.Context, r Runner) (DiscoveredProfile, e
 		if err != nil || oem.IsForbiddenUser(uid) {
 			continue
 		}
-		typMatch := userTypeRegex.FindStringSubmatch(line)
-		if len(typMatch) != 2 {
+		typ := parseUserType(line)
+		if typ == "" {
 			continue
 		}
-		typ := typMatch[1]
 		if typ != "profile.MANAGED" && typ != "android.os.usertype.profile.MANAGED" {
 			continue
 		}
-		parentMatch := userParentRegex.FindStringSubmatch(line)
-		if len(parentMatch) == 2 && parentMatch[1] != "0" {
+		if parentID := findWordPrefixDigits(line, "parentId="); parentID != "" && parentID != "0" {
 			continue
 		}
 		candidateIDs = append(candidateIDs, uid)
@@ -115,11 +307,11 @@ func parseUserSerialFromDump(dump string, user int) (int, error) {
 		if !strings.HasPrefix(line, prefix) {
 			continue
 		}
-		m := userSerialRegex.FindStringSubmatch(line)
-		if len(m) != 2 {
+		serialStr := findWordPrefixDigits(line, "serialNo=")
+		if serialStr == "" {
 			continue
 		}
-		serial, err := strconv.Atoi(m[1])
+		serial, err := strconv.Atoi(serialStr)
 		if err != nil || serial <= 0 {
 			return 0, fmt.Errorf("invalid serialNo in %q", line)
 		}
@@ -364,8 +556,7 @@ func VerifyStaticIdentity(ctx context.Context, r Runner, policy contracts.Policy
 	}
 	managed := false
 	for _, entry := range strings.Split(usersOut, "\n") {
-		m := userListIDRegex.FindStringSubmatch(strings.TrimSpace(entry))
-		idMatch := len(m) == 2 && m[1] == u
+		idMatch := parseUserListID(strings.TrimSpace(entry)) == u
 		if idMatch &&
 			(strings.Contains(entry, "type=profile.MANAGED,") || strings.Contains(entry, "type=android.os.usertype.profile.MANAGED,")) &&
 			strings.Contains(entry, "(running)") {
@@ -425,14 +616,6 @@ func VerifyStaticIdentity(ctx context.Context, r Runner, policy contracts.Policy
 	return VerifiedIdentity{UserID: policy.UserID, Serial: policy.Serial, ClientUID: clientUID}, nil
 }
 
-func regexMatch(pattern *regexp.Regexp, line string) string {
-	groups := pattern.FindStringSubmatch(line)
-	if len(groups) != 2 {
-		return ""
-	}
-	return groups[1]
-}
-
 // ParseWorkNetworks extracts the unique Android VPN session and its dedicated physical underlay
 // from `dumpsys connectivity` output.
 func ParseWorkNetworks(dump string, uid int) (*netfilter.ActiveSession, error) {
@@ -456,7 +639,7 @@ func ParseWorkNetworks(dump string, uid int) (*netfilter.ActiveSession, error) {
 		if len(row) > 0 && row[0] != ' ' && row[0] != '\t' {
 			break
 		}
-		id, err := strconv.Atoi(regexMatch(networkRecord, line))
+		id, err := strconv.Atoi(parseNetworkRecordID(line))
 		if err != nil {
 			continue
 		}
@@ -469,19 +652,19 @@ func ParseWorkNetworks(dump string, uid int) (*netfilter.ActiveSession, error) {
 			return nil, errors.New("duplicate netId in connectivity output")
 		}
 		header, link, caps := line[:linkStart], line[linkStart:capsStart], line[capsStart:]
-		iface := regexMatch(networkInterface, link)
+		iface := parseNetworkInterfaceName(link)
 		isVPN := strings.Contains(header, " ni{VPN ") || strings.Contains(header, " ni{VPN[")
 		connected := strings.Contains(header, " CONNECTED")
 		nets[id] = observedNet{iface: iface, vpn: isVPN, connected: connected}
-		if !isVPN || !connected || regexMatch(networkOwner, caps) != strconv.Itoa(uid) {
+		if !isVPN || !connected || findWordPrefixSpacesDigits(caps, "OwnerUid:") != strconv.Itoa(uid) {
 			continue
 		}
 		if work != nil {
 			return nil, errors.New("multiple active VPN records for work package")
 		}
-		under := regexMatch(networkUnderlying, header)
+		under := parseNetworkUnderlyingID(header)
 		if under == "" {
-			under = regexMatch(networkUnderlyingCaps, caps)
+			under = parseNetworkUnderlyingCapsID(caps)
 		}
 		underID, err := strconv.Atoi(under)
 		if err != nil || !contracts.TunIfRegex.MatchString(iface) {

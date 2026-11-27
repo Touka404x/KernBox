@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -30,7 +29,50 @@ type LauncherActivity struct {
 	ActivityName string
 }
 
-var resolveComponentRegex = regexp.MustCompile(`\b([a-zA-Z][a-zA-Z0-9_]*(?:\.[a-zA-Z0-9_]+)+)/([a-zA-Z0-9_.$]+)\b`)
+func isResolveWordByte(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '_'
+}
+
+func extractResolveComponent(line string) (string, string, bool) {
+	for i := 0; i < len(line); i++ {
+		if line[i] != '/' {
+			continue
+		}
+		start := i
+		for start > 0 {
+			c := line[start-1]
+			if isResolveWordByte(c) || c == '.' {
+				start--
+				continue
+			}
+			break
+		}
+		if start == i || (start > 0 && isResolveWordByte(line[start-1])) {
+			continue
+		}
+		pkg := line[start:i]
+		if !contracts.PackageNameRegex.MatchString(pkg) {
+			continue
+		}
+		end := i + 1
+		for end < len(line) {
+			c := line[end]
+			if isResolveWordByte(c) || c == '.' || c == '$' {
+				end++
+				continue
+			}
+			break
+		}
+		for end > i+1 && !isResolveWordByte(line[end-1]) {
+			end--
+		}
+		if end <= i+1 {
+			continue
+		}
+		return pkg, line[i+1 : end], true
+	}
+	return "", "", false
+}
 
 // JavaStringHash replicates java.lang.String.hashCode() over UTF-16 code units.
 func JavaStringHash(s string) int32 {
@@ -108,8 +150,7 @@ func ParseQueryActivities(output string) []LauncherActivity {
 			}
 			continue
 		}
-		if m := resolveComponentRegex.FindStringSubmatch(line); len(m) == 3 {
-			pkg, act := m[1], m[2]
+		if pkg, act, ok := extractResolveComponent(line); ok {
 			if strings.HasPrefix(act, ".") {
 				act = pkg + act
 			}

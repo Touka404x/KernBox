@@ -486,6 +486,7 @@ func (d *Daemon) syncPolicies(ctx context.Context, policy contracts.Policy) (and
 		d.lastPolicySyncHash = res.PackagesHash
 		d.mu.Unlock()
 	}
+	debug.FreeOSMemory()
 	return res, err
 }
 
@@ -2609,6 +2610,7 @@ func (d *Daemon) pauseSandboxWorkWithExplicitMode(ctx context.Context, loaded bo
 	if loaded {
 		d.pauseSandboxLifecycleLocked(ctx, policy, modeOverride)
 	}
+	debug.FreeOSMemory()
 	return err
 }
 

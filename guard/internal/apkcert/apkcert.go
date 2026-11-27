@@ -4,7 +4,6 @@ import (
 	"archive/zip"
 	"bytes"
 	"crypto/sha256"
-	"encoding/asn1"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
@@ -22,89 +21,174 @@ const (
 	apkSigV31ID      = uint32(0x1b93ad61)
 	maxSigBlockBytes = 16 << 20
 	maxV1SigBytes    = 2 << 20
+
+	derTagBoolean     = 0x01
+	derTagInteger     = 0x02
+	derTagBitString   = 0x03
+	derTagOctetString = 0x04
+	derTagOID         = 0x06
+	derTagSequence    = 0x30
+	derTagCtx0        = 0xa0
+	derTagCtx3        = 0xa3
 )
 
 var (
-	oidPKCS7SignedData  = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 7, 2}
-	oidBasicConstraints = asn1.ObjectIdentifier{2, 5, 29, 19}
+	// 1.2.840.113549.1.7.2 (PKCS#7 SignedData)
+	oidPKCS7SignedDataDER = []byte{0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x07, 0x02}
+	// 2.5.29.19 (X.509 BasicConstraints)
+	oidBasicConstraintsDER = []byte{0x55, 0x1d, 0x13}
 )
 
-type x509CertificateASN1 struct {
-	TBSCertificate     asn1.RawValue
-	SignatureAlgorithm asn1.RawValue
-	SignatureValue     asn1.BitString
+// readDERTLV reads one canonical DER tag-length-value element without pulling
+// encoding/asn1 or math/big into sandbox_guard.
+func readDERTLV(data []byte) (tag byte, full, body, rest []byte, err error) {
+	if len(data) < 2 {
+		return 0, nil, nil, nil, errors.New("truncated DER element")
+	}
+	tag = data[0]
+	if tag&0x1f == 0x1f {
+		return 0, nil, nil, nil, errors.New("unsupported high-tag-number DER element")
+	}
+	l := data[1]
+	hdrLen := 2
+	var length int
+	if l < 0x80 {
+		length = int(l)
+	} else {
+		n := int(l & 0x7f)
+		if n == 0 || l == 0xff || n > 4 {
+			return 0, nil, nil, nil, errors.New("invalid DER length encoding")
+		}
+		if len(data) < 2+n {
+			return 0, nil, nil, nil, errors.New("truncated DER multi-byte length")
+		}
+		if data[2] == 0 {
+			return 0, nil, nil, nil, errors.New("non-canonical DER length")
+		}
+		for i := 0; i < n; i++ {
+			length = (length << 8) | int(data[2+i])
+		}
+		if length < 0x80 {
+			return 0, nil, nil, nil, errors.New("non-canonical short DER length")
+		}
+		hdrLen += n
+	}
+	if len(data)-hdrLen < length {
+		return 0, nil, nil, nil, errors.New("truncated DER value")
+	}
+	end := hdrLen + length
+	return tag, data[:end], data[hdrLen:end], data[end:], nil
 }
 
-type x509ExtensionASN1 struct {
-	ID       asn1.ObjectIdentifier
-	Critical bool `asn1:"optional"`
-	Value    []byte
-}
-
-type x509TBSCertificateASN1 struct {
-	Version            int `asn1:"optional,explicit,default:0,tag:0"`
-	SerialNumber       asn1.RawValue
-	SignatureAlgorithm asn1.RawValue
-	Issuer             asn1.RawValue
-	Validity           asn1.RawValue
-	Subject            asn1.RawValue
-	PublicKeyInfo      asn1.RawValue
-	IssuerUniqueID     asn1.BitString     `asn1:"optional,tag:1"`
-	SubjectUniqueID    asn1.BitString     `asn1:"optional,tag:2"`
-	Extensions         []x509ExtensionASN1 `asn1:"optional,explicit,tag:3"`
-}
-
-func isASN1Sequence(v asn1.RawValue) bool {
-	return v.Class == asn1.ClassUniversal && v.Tag == asn1.TagSequence && v.IsCompound
-}
-
-// validateX509CertDER verifies X.509 DER structure using encoding/asn1 without
-// pulling crypto/x509, math/big, or asymmetric signature packages into sandbox_guard.
+// validateX509CertDER verifies X.509 DER structure using strict DER TLV scanning
+// without pulling encoding/asn1, crypto/x509, or math/big into sandbox_guard.
 func validateX509CertDER(der []byte) (bool, error) {
 	if len(der) == 0 {
 		return false, errors.New("empty certificate DER")
 	}
-	var cert x509CertificateASN1
-	rest, err := asn1.Unmarshal(der, &cert)
+	outerTag, _, certBody, rest, err := readDERTLV(der)
 	if err != nil {
 		return false, err
+	}
+	if outerTag != derTagSequence {
+		return false, errors.New("malformed X.509 outer sequence")
 	}
 	if len(rest) != 0 {
 		return false, errors.New("trailing data after X.509 certificate")
 	}
-	if !isASN1Sequence(cert.TBSCertificate) || !isASN1Sequence(cert.SignatureAlgorithm) {
+
+	tbsTag, _, tbsBody, r, err := readDERTLV(certBody)
+	if err != nil || tbsTag != derTagSequence {
+		return false, errors.New("malformed X.509 outer sequence")
+	}
+	sigAlgTag, _, _, r, err := readDERTLV(r)
+	if err != nil || sigAlgTag != derTagSequence {
+		return false, errors.New("malformed X.509 outer sequence")
+	}
+	sigValTag, _, sigValBody, r, err := readDERTLV(r)
+	if err != nil || sigValTag != derTagBitString || len(sigValBody) == 0 || len(r) != 0 {
 		return false, errors.New("malformed X.509 outer sequence")
 	}
 
-	var tbs x509TBSCertificateASN1
-	tbsRest, err := asn1.Unmarshal(cert.TBSCertificate.FullBytes, &tbs)
+	cur := tbsBody
+	tag, _, body, next, err := readDERTLV(cur)
 	if err != nil {
 		return false, err
 	}
-	if len(tbsRest) != 0 {
-		return false, errors.New("trailing data after TBSCertificate")
+	if tag == derTagCtx0 {
+		vTag, _, vBody, vRest, vErr := readDERTLV(body)
+		if vErr != nil || vTag != derTagInteger || len(vBody) == 0 || len(vRest) != 0 {
+			return false, errors.New("invalid X.509 version")
+		}
+		tag, _, body, next, err = readDERTLV(next)
+		if err != nil {
+			return false, err
+		}
 	}
-	if tbs.SerialNumber.Class != asn1.ClassUniversal || tbs.SerialNumber.Tag != asn1.TagInteger {
+	if tag != derTagInteger || len(body) == 0 {
 		return false, errors.New("invalid X.509 serialNumber")
 	}
-	if !isASN1Sequence(tbs.SignatureAlgorithm) ||
-		!isASN1Sequence(tbs.Issuer) ||
-		!isASN1Sequence(tbs.Validity) ||
-		!isASN1Sequence(tbs.Subject) ||
-		!isASN1Sequence(tbs.PublicKeyInfo) {
-		return false, errors.New("malformed X.509 TBSCertificate fields")
+	cur = next
+
+	for i := 0; i < 5; i++ {
+		fTag, _, _, fNext, fErr := readDERTLV(cur)
+		if fErr != nil || fTag != derTagSequence {
+			return false, errors.New("malformed X.509 TBSCertificate fields")
+		}
+		cur = fNext
 	}
 
-	for _, ext := range tbs.Extensions {
-		if !ext.ID.Equal(oidBasicConstraints) {
+	if len(cur) > 0 && cur[0] == 0x81 {
+		if _, _, _, cur, err = readDERTLV(cur); err != nil {
+			return false, err
+		}
+	}
+	if len(cur) > 0 && cur[0] == 0x82 {
+		if _, _, _, cur, err = readDERTLV(cur); err != nil {
+			return false, err
+		}
+	}
+	if len(cur) == 0 || cur[0] != derTagCtx3 {
+		return false, nil
+	}
+	_, _, extsWrapper, _, err := readDERTLV(cur)
+	if err != nil {
+		return false, err
+	}
+	seqTag, _, extsBody, extsRest, err := readDERTLV(extsWrapper)
+	if err != nil || seqTag != derTagSequence || len(extsRest) != 0 {
+		return false, errors.New("malformed X.509 extensions")
+	}
+	for len(extsBody) > 0 {
+		extTag, _, extBody, extNext, extErr := readDERTLV(extsBody)
+		if extErr != nil || extTag != derTagSequence {
+			return false, errors.New("malformed X.509 extension")
+		}
+		extsBody = extNext
+
+		oidTag, _, oidBytes, eRest, eErr := readDERTLV(extBody)
+		if eErr != nil || oidTag != derTagOID {
+			return false, errors.New("malformed X.509 extension OID")
+		}
+		if len(eRest) > 0 && eRest[0] == derTagBoolean {
+			if _, _, critBody, nextRest, cErr := readDERTLV(eRest); cErr != nil || len(critBody) != 1 {
+				return false, errors.New("malformed X.509 extension critical flag")
+			} else {
+				eRest = nextRest
+			}
+		}
+		valTag, _, valBytes, valRest, vErr := readDERTLV(eRest)
+		if vErr != nil || valTag != derTagOctetString || len(valRest) != 0 {
+			return false, errors.New("malformed X.509 extension value")
+		}
+		if !bytes.Equal(oidBytes, oidBasicConstraintsDER) {
 			continue
 		}
-		var bc struct {
-			IsCA       bool `asn1:"optional"`
-			MaxPathLen int  `asn1:"optional,default:-1"`
-		}
-		if _, err := asn1.Unmarshal(ext.Value, &bc); err == nil && bc.IsCA {
-			return true, nil
+		bcTag, _, bcBody, _, bcErr := readDERTLV(valBytes)
+		if bcErr == nil && bcTag == derTagSequence && len(bcBody) > 0 && bcBody[0] == derTagBoolean {
+			if _, _, caBody, _, caErr := readDERTLV(bcBody); caErr == nil && len(caBody) == 1 && caBody[0] != 0 {
+				return true, nil
+			}
 		}
 	}
 	return false, nil
@@ -302,20 +386,6 @@ func parseV2V3Signers(blockVal []byte) ([]string, error) {
 	return hashes, nil
 }
 
-type pkcs7ContentInfo struct {
-	ContentType asn1.ObjectIdentifier
-	Content     asn1.RawValue `asn1:"explicit,optional,tag:0"`
-}
-
-type pkcs7SignedData struct {
-	Version          int
-	DigestAlgorithms asn1.RawValue
-	EncapContentInfo asn1.RawValue
-	Certificates     asn1.RawValue `asn1:"optional,tag:0"`
-	CRLs             asn1.RawValue `asn1:"optional,tag:1"`
-	SignerInfos      asn1.RawValue
-}
-
 func extractFromV1JAR(r io.ReaderAt, fileSize int64) ([]string, error) {
 	zr, err := zip.NewReader(r, fileSize)
 	if err != nil {
@@ -353,31 +423,59 @@ func extractFromV1JAR(r io.ReaderAt, fileSize int64) ([]string, error) {
 }
 
 func parsePKCS7Certs(der []byte) ([]string, error) {
-	var ci pkcs7ContentInfo
-	if _, err := asn1.Unmarshal(der, &ci); err != nil {
-		return nil, err
+	ciTag, _, ciBody, _, err := readDERTLV(der)
+	if err != nil || ciTag != derTagSequence {
+		if err != nil {
+			return nil, err
+		}
+		return nil, errors.New("malformed PKCS7 ContentInfo")
 	}
-	if !ci.ContentType.Equal(oidPKCS7SignedData) {
+	ctTag, _, ctOID, ciRest, err := readDERTLV(ciBody)
+	if err != nil || ctTag != derTagOID {
+		return nil, errors.New("malformed PKCS7 ContentType")
+	}
+	if !bytes.Equal(ctOID, oidPKCS7SignedDataDER) {
 		return nil, errors.New("not PKCS7 SignedData")
 	}
-	var sd pkcs7SignedData
-	if _, err := asn1.Unmarshal(ci.Content.Bytes, &sd); err != nil {
+	contentTag, _, contentBody, _, err := readDERTLV(ciRest)
+	if err != nil || contentTag != derTagCtx0 {
+		return nil, errors.New("missing PKCS7 SignedData content")
+	}
+	sdTag, _, sdBody, _, err := readDERTLV(contentBody)
+	if err != nil || sdTag != derTagSequence {
+		return nil, errors.New("malformed PKCS7 SignedData sequence")
+	}
+	verTag, _, _, r, err := readDERTLV(sdBody)
+	if err != nil || verTag != derTagInteger {
+		return nil, errors.New("malformed PKCS7 SignedData version")
+	}
+	// Skip DigestAlgorithms and EncapContentInfo.
+	if _, _, _, r, err = readDERTLV(r); err != nil {
 		return nil, err
 	}
+	if _, _, _, r, err = readDERTLV(r); err != nil {
+		return nil, err
+	}
+	var certsBytes []byte
+	if len(r) > 0 && r[0] == derTagCtx0 {
+		_, _, certsBytes, _, err = readDERTLV(r)
+		if err != nil {
+			return nil, err
+		}
+	}
 	var leafHashes, allHashes []string
-	rest := sd.Certificates.Bytes
+	rest := certsBytes
 	for len(rest) > 0 {
-		var rawCert asn1.RawValue
-		var err error
-		rest, err = asn1.Unmarshal(rest, &rawCert)
+		var certFull []byte
+		_, certFull, _, rest, err = readDERTLV(rest)
 		if err != nil {
 			return nil, err
 		}
-		isCA, err := validateX509CertDER(rawCert.FullBytes)
+		isCA, err := validateX509CertDER(certFull)
 		if err != nil {
 			return nil, err
 		}
-		sum := sha256.Sum256(rawCert.FullBytes)
+		sum := sha256.Sum256(certFull)
 		h := hex.EncodeToString(sum[:])
 		allHashes = append(allHashes, h)
 		if !isCA {

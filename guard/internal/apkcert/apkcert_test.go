@@ -46,7 +46,14 @@ func generateTestCertDER(t *testing.T, isCA bool) []byte {
 
 func buildTestV1APK(t *testing.T, certDER []byte) []byte {
 	t.Helper()
-	sd := pkcs7SignedData{
+	sd := struct {
+		Version          int
+		DigestAlgorithms asn1.RawValue
+		EncapContentInfo asn1.RawValue
+		Certificates     asn1.RawValue `asn1:"optional,tag:0"`
+		CRLs             asn1.RawValue `asn1:"optional,tag:1"`
+		SignerInfos      asn1.RawValue
+	}{
 		Version:          1,
 		DigestAlgorithms: asn1.RawValue{Class: asn1.ClassUniversal, Tag: asn1.TagSet, IsCompound: true},
 		EncapContentInfo: asn1.RawValue{Class: asn1.ClassUniversal, Tag: asn1.TagSequence, IsCompound: true},
@@ -57,8 +64,11 @@ func buildTestV1APK(t *testing.T, certDER []byte) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ci := pkcs7ContentInfo{
-		ContentType: oidPKCS7SignedData,
+	ci := struct {
+		ContentType asn1.ObjectIdentifier
+		Content     asn1.RawValue `asn1:"explicit,optional,tag:0"`
+	}{
+		ContentType: asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 7, 2},
 		Content:     asn1.RawValue{Class: asn1.ClassContextSpecific, Tag: 0, IsCompound: true, Bytes: sdBytes},
 	}
 	pkcs7DER, err := asn1.Marshal(ci)

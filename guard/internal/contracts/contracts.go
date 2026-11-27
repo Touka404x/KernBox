@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"regexp"
 	"strings"
 
 	"sandbox_guard/internal/buildinfo"
@@ -116,16 +115,193 @@ const (
 	ChainTProxyPre = "SBW_TPROXY_PRE"
 )
 
+// StringMatcher keeps the Regex.MatchString contract without importing regexp.
+type StringMatcher func(string) bool
+
+func (m StringMatcher) MatchString(s string) bool { return m(s) }
+
+func isASCIIAlpha(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
+}
+
+func isASCIIDigit(b byte) bool {
+	return b >= '0' && b <= '9'
+}
+
+func isASCIIAlnum(b byte) bool {
+	return isASCIIAlpha(b) || isASCIIDigit(b)
+}
+
+func isValidPackageNameStr(s string) bool {
+	if len(s) == 0 || !isASCIIAlpha(s[0]) {
+		return false
+	}
+	dots := 0
+	segLen := 1
+	for i := 1; i < len(s); i++ {
+		b := s[i]
+		if b == '.' {
+			if segLen == 0 {
+				return false
+			}
+			dots++
+			segLen = 0
+			continue
+		}
+		if !isASCIIAlnum(b) && b != '_' {
+			return false
+		}
+		segLen++
+	}
+	return dots > 0 && segLen > 0
+}
+
+func isValidLocaleTagStr(s string) bool {
+	if len(s) < 2 {
+		return false
+	}
+	i := 0
+	for i < len(s) && isASCIIAlpha(s[i]) {
+		i++
+	}
+	if i < 2 || i > 3 {
+		return false
+	}
+	for i < len(s) {
+		if s[i] != '-' {
+			return false
+		}
+		i++
+		start := i
+		for i < len(s) && isASCIIAlnum(s[i]) {
+			i++
+		}
+		subLen := i - start
+		if subLen < 2 || subLen > 8 {
+			return false
+		}
+	}
+	return true
+}
+
+func isValidSHA256HexStr(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		b := s[i]
+		if !((b >= '0' && b <= '9') || (b >= 'a' && b <= 'f')) {
+			return false
+		}
+	}
+	return true
+}
+
+func isAllDigitsRange(s string, minLen, maxLen int) bool {
+	if len(s) < minLen || (maxLen >= 0 && len(s) > maxLen) {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if !isASCIIDigit(s[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func isValidTunIfStr(s string) bool {
+	return strings.HasPrefix(s, "tun") && isAllDigitsRange(s[3:], 1, 10)
+}
+
+func isValidUplinkIfStr(s string) bool {
+	if s == "umts_router" {
+		return true
+	}
+	for _, p := range []string{"wlan", "v4-wlan", "rmnet_data", "ccmni", "v4-ccmni", "seth_lte", "v4-seth_lte", "wwan", "ncm", "usb", "eth", "rndis"} {
+		if strings.HasPrefix(s, p) {
+			return isAllDigitsRange(s[len(p):], 1, -1)
+		}
+	}
+	for _, p := range []string{"rmnet_mhi", "rmnet_usb", "rmnet_ipa", "rmnet"} {
+		if strings.HasPrefix(s, p) {
+			return isAllDigitsRange(s[len(p):], 0, -1)
+		}
+	}
+	if strings.HasPrefix(s, "v4-rmnet") {
+		rest := s[len("v4-rmnet"):]
+		for i := 0; i < len(rest); i++ {
+			b := rest[i]
+			if !((b >= 'a' && b <= 'z') || isASCIIDigit(b) || b == '_') {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+func isValidBootIDStr(s string) bool {
+	if len(s) < 8 || len(s) > 64 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		b := s[i]
+		if !(isASCIIDigit(b) || (b >= 'a' && b <= 'f') || (b >= 'A' && b <= 'F') || b == '-') {
+			return false
+		}
+	}
+	return true
+}
+
+func isValidComponentClassStr(s string) bool {
+	if len(s) < 1 || len(s) > 255 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		b := s[i]
+		if !(isASCIIAlnum(b) || b == '_' || b == '.' || b == '$') {
+			return false
+		}
+	}
+	return true
+}
+
+func isValidChainPrefixStr(s string) bool {
+	if len(s) < 2 || len(s) > 21 || s[0] < 'A' || s[0] > 'Z' {
+		return false
+	}
+	for i := 1; i < len(s); i++ {
+		b := s[i]
+		if !((b >= 'A' && b <= 'Z') || isASCIIDigit(b) || b == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+func isValidInboundTokenStr(s string) bool {
+	if len(s) < 1 || len(s) > 64 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		b := s[i]
+		if !(isASCIIAlnum(b) || b == '.' || b == '_' || b == '-') {
+			return false
+		}
+	}
+	return true
+}
+
 var (
-	PackageNameRegex    = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z0-9_]+)+$`)
-	LocaleTagRegex      = regexp.MustCompile(`^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})*$`)
-	SHA256HexRegex      = regexp.MustCompile(`^[0-9a-f]{64}$`)
-	TunIfRegex          = regexp.MustCompile(`^tun[0-9]{1,10}$`)
-	UplinkIfRegex       = regexp.MustCompile(`^(wlan[0-9]+|v4-wlan[0-9]+|rmnet_data[0-9]+|rmnet_mhi[0-9]*|rmnet_usb[0-9]*|rmnet[0-9]*|rmnet_ipa[0-9]*|v4-rmnet[a-z0-9_]*|ccmni[0-9]+|v4-ccmni[0-9]+|seth_lte[0-9]+|v4-seth_lte[0-9]+|wwan[0-9]+|ncm[0-9]+|usb[0-9]+|umts_router|eth[0-9]+|rndis[0-9]+)$`)
-	BootIDRegex         = regexp.MustCompile(`^[0-9a-fA-F-]{8,64}$`)
-	ComponentClassRegex = regexp.MustCompile(`^[a-zA-Z0-9_.$]{1,255}$`)
-	ChainPrefixRegex    = regexp.MustCompile(`^[A-Z][A-Z0-9_]{1,20}$`)
-	InboundTokenRegex   = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,64}$`)
+	PackageNameRegex    = StringMatcher(isValidPackageNameStr)
+	LocaleTagRegex      = StringMatcher(isValidLocaleTagStr)
+	SHA256HexRegex      = StringMatcher(isValidSHA256HexStr)
+	TunIfRegex          = StringMatcher(isValidTunIfStr)
+	UplinkIfRegex       = StringMatcher(isValidUplinkIfStr)
+	BootIDRegex         = StringMatcher(isValidBootIDStr)
+	ComponentClassRegex = StringMatcher(isValidComponentClassStr)
+	ChainPrefixRegex    = StringMatcher(isValidChainPrefixStr)
+	InboundTokenRegex   = StringMatcher(isValidInboundTokenStr)
 )
 
 // Policy is the root-pinned configuration in /data/adb/sandbox_guard/policy.json.

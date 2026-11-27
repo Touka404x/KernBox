@@ -18,7 +18,7 @@ func usage() int {
 func main() {
 	runtime.GOMAXPROCS(1)
 	debug.SetGCPercent(10)
-	debug.SetMemoryLimit(3 << 20)
+	debug.SetMemoryLimit(2 << 20)
 	os.Exit(run(os.Args[1:]))
 }
 
