@@ -57,6 +57,8 @@ bool g_is_phone_proc = false;
 bool g_is_sandbox_app = false;
 bool g_plt_hooked = false;
 bool g_jni_hooked = false;
+bool g_locale_jni_hooked = false;
+volatile pid_t g_locale_hook_tid = 0;
 int g_spoof_mcc = 0;
 int g_spoof_mnc = 0;
 uint32_t g_sandbox_ipv4_nbo = 0;
@@ -1215,8 +1217,142 @@ using FnNativeSetConfigV34 = void (*)(
     JNIEnv*, jclass, jlong, jint, jint, jstring, jobjectArray,
     jint, jint, jint, jint, jint, jint, jint, jint, jint, jint, jint, jint, jint, jint, jint, jint);
 
+using FnLocaleNativeSetDefault = void (*)(JNIEnv*, jclass, jstring);
+
 FnNativeSetConfigV33 g_orig_nativeSetConfig_v33 = nullptr;
 FnNativeSetConfigV34 g_orig_nativeSetConfig_v34 = nullptr;
+FnLocaleNativeSetDefault g_orig_locale_set_default = nullptr;
+
+bool localeTagsEquivalent(const char* a, const char* b) {
+    if (!a || !b) return false;
+    while (*a != '\0' && *b != '\0') {
+        char ca = (*a >= 'A' && *a <= 'Z') ? static_cast<char>(*a + ('a' - 'A')) : *a;
+        char cb = (*b >= 'A' && *b <= 'Z') ? static_cast<char>(*b + ('a' - 'A')) : *b;
+        if (ca == '_') ca = '-';
+        if (cb == '_') cb = '-';
+        if (ca != cb) return false;
+        a++;
+        b++;
+    }
+    return *a == '\0' && *b == '\0';
+}
+
+void applyJavaCoreLocaleOnly(JNIEnv* env, const stealth::StealthConfig& cfg) {
+    if (!env || !cfg.spoof_locale || cfg.locale.empty()) return;
+    if (env->PushLocalFrame(8) != 0) {
+        clearJniException(env);
+        return;
+    }
+    jclass loc_cls = env->FindClass("java/util/Locale");
+    if (loc_cls && !env->ExceptionCheck()) {
+        jmethodID for_tag = env->GetStaticMethodID(loc_cls, "forLanguageTag", "(Ljava/lang/String;)Ljava/util/Locale;");
+        jmethodID set_def = env->GetStaticMethodID(loc_cls, "setDefault", "(Ljava/util/Locale;)V");
+        if (for_tag && set_def && !env->ExceptionCheck()) {
+            jstring tag = newJniStringSafe(env, cfg.locale.c_str(), cfg.locale.size());
+            if (tag) {
+                jobject loc_obj = env->CallStaticObjectMethod(loc_cls, for_tag, tag);
+                if (!env->ExceptionCheck() && loc_obj) {
+                    env->CallStaticVoidMethod(loc_cls, set_def, loc_obj);
+                }
+            }
+        }
+    }
+    clearJniException(env);
+    env->PopLocalFrame(nullptr);
+}
+
+void hook_LocaleNative_setDefaultNative(JNIEnv* env, jclass clazz, jstring languageTag) {
+    if (!g_cfg.spoof_locale || g_cfg.locale.empty()) {
+        if (g_orig_locale_set_default) {
+            g_orig_locale_set_default(env, clazz, languageTag);
+        }
+        return;
+    }
+    const pid_t self = gettid();
+    if (__atomic_load_n(&g_locale_hook_tid, __ATOMIC_ACQUIRE) == self) {
+        if (g_orig_locale_set_default) {
+            g_orig_locale_set_default(env, clazz, languageTag);
+        }
+        return;
+    }
+    if (languageTag != nullptr && env) {
+        const char* tag_utf = env->GetStringUTFChars(languageTag, nullptr);
+        if (env->ExceptionCheck()) {
+            clearJniException(env);
+        }
+        bool equiv = false;
+        if (tag_utf != nullptr) {
+            equiv = localeTagsEquivalent(tag_utf, g_cfg.locale.c_str());
+            env->ReleaseStringUTFChars(languageTag, tag_utf);
+        }
+        if (equiv) {
+            if (g_orig_locale_set_default) {
+                g_orig_locale_set_default(env, clazz, languageTag);
+            }
+            return;
+        }
+    }
+    pid_t expected = 0;
+    if (__atomic_compare_exchange_n(&g_locale_hook_tid, &expected, self, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+        applyJavaCoreLocaleOnly(env, g_cfg);
+        __atomic_store_n(&g_locale_hook_tid, 0, __ATOMIC_RELEASE);
+        return;
+    }
+    jstring spoofed = env ? newJniStringSafe(env, g_cfg.locale.c_str(), g_cfg.locale.size()) : nullptr;
+    if (g_orig_locale_set_default) {
+        g_orig_locale_set_default(env, clazz, spoofed ? spoofed : languageTag);
+    }
+    if (spoofed && env) {
+        env->DeleteLocalRef(spoofed);
+    }
+}
+
+void installLocaleNativeHook(zygisk::Api* api, JNIEnv* env) {
+    if (!api || !env || !g_cfg.spoof_locale || g_cfg.locale.empty()) {
+        return;
+    }
+    static constexpr const char* kLocaleSig = "(Ljava/lang/String;)V";
+    const char* cls_name = "com/android/icu/util/LocaleNative";
+    const char* method_name = "setDefaultNative";
+
+    jclass cls = env->FindClass(cls_name);
+    jmethodID mid = nullptr;
+    if (cls && !env->ExceptionCheck()) {
+        mid = env->GetStaticMethodID(cls, method_name, kLocaleSig);
+    }
+    if (!mid || env->ExceptionCheck()) {
+        clearJniException(env);
+        if (cls) {
+            env->DeleteLocalRef(cls);
+            cls = nullptr;
+        }
+        cls_name = "libcore/icu/ICU";
+        method_name = "setDefaultLocale";
+        cls = env->FindClass(cls_name);
+        if (cls && !env->ExceptionCheck()) {
+            mid = env->GetStaticMethodID(cls, method_name, kLocaleSig);
+        }
+    }
+    if (mid && !env->ExceptionCheck()) {
+        if (cls) {
+            env->DeleteLocalRef(cls);
+            cls = nullptr;
+        }
+        JNINativeMethod method = {
+            method_name,
+            kLocaleSig,
+            reinterpret_cast<void*>(hook_LocaleNative_setDefaultNative),
+        };
+        api->hookJniNativeMethods(env, cls_name, &method, 1);
+        g_orig_locale_set_default = reinterpret_cast<FnLocaleNativeSetDefault>(method.fnPtr);
+        g_locale_jni_hooked = (g_orig_locale_set_default != nullptr);
+    } else {
+        clearJniException(env);
+        if (cls) {
+            env->DeleteLocalRef(cls);
+        }
+    }
+}
 
 void hook_nativeSetConfiguration_v33(
     JNIEnv* env, jclass clazz, jlong ptr, jint mcc, jint mnc, jstring locale,
@@ -1518,9 +1654,10 @@ public:
                 }
                 g_plt_hooked = committed || any_orig;
                 installAssetManagerConfigHook(api_, env_);
-                if (g_plt_hooked || g_jni_hooked) {
-                    LOGI("pltHookCommit active for %s (%d) oem=%s committed=%d prop_libs=%zu net_libs=%zu proc_libs=%zu jni_cfg=%d",
-                         proc_name.c_str(), uid, stealth::kOemProfileName, committed ? 1 : 0, prop_libs_registered, net_libs_registered, proc_libs_registered, g_jni_hooked ? 1 : 0);
+                installLocaleNativeHook(api_, env_);
+                if (g_plt_hooked || g_jni_hooked || g_locale_jni_hooked) {
+                    LOGI("pltHookCommit active for %s (%d) oem=%s committed=%d prop_libs=%zu net_libs=%zu proc_libs=%zu jni_cfg=%d jni_loc=%d",
+                         proc_name.c_str(), uid, stealth::kOemProfileName, committed ? 1 : 0, prop_libs_registered, net_libs_registered, proc_libs_registered, g_jni_hooked ? 1 : 0, g_locale_jni_hooked ? 1 : 0);
                 } else {
                     LOGW("pltHookCommit failed in %s (%d)", proc_name.c_str(), uid);
                 }
@@ -1539,7 +1676,7 @@ public:
             applyJavaTimezoneAndLocale(env_, g_cfg);
         }
 
-        if (!g_plt_hooked && !g_jni_hooked) {
+        if (!g_plt_hooked && !g_jni_hooked && !g_locale_jni_hooked) {
             api_->setOption(zygisk::DLCLOSE_MODULE_LIBRARY);
         }
     }
