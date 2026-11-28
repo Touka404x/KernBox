@@ -1267,12 +1267,35 @@ func HotFreezeSandboxUserWithOpts(ctx context.Context, r Runner, userID int, sta
 		for _, uid := range freezableUIDs {
 			freezableSet[uid] = true
 		}
+		var reclaimPIDs []int
 		for _, pe := range scanUserProcEntriesWithRoot(cgroupRoot, userID) {
 			if frozenSet[pe.uid] {
-				_ = ReclaimProcessMemoryForUser(pe.pid, userID)
+				reclaimPIDs = append(reclaimPIDs, pe.pid)
 			} else if freezableSet[pe.uid] && contracts.ValidPackageName(pe.pkg) && !protected[pe.pkg] {
 				unfrozenPkgs[pe.pkg] = true
 			}
+		}
+		if len(reclaimPIDs) > 0 {
+			workers := sandboxWorkerPoolSize
+			if len(reclaimPIDs) < workers {
+				workers = len(reclaimPIDs)
+			}
+			pidJobs := make(chan int, len(reclaimPIDs))
+			for _, pid := range reclaimPIDs {
+				pidJobs <- pid
+			}
+			close(pidJobs)
+			var reclaimWg sync.WaitGroup
+			reclaimWg.Add(workers)
+			for w := 0; w < workers; w++ {
+				go func() {
+					defer reclaimWg.Done()
+					for pid := range pidJobs {
+						_ = ReclaimProcessMemoryForUser(pid, userID)
+					}
+				}()
+			}
+			reclaimWg.Wait()
 		}
 		if len(unfrozenPkgs) > 0 {
 			fallbackPkgs := make([]string, 0, len(unfrozenPkgs))

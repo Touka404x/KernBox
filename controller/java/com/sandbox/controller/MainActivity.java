@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.LauncherActivityInfo;
 import android.content.pm.LauncherApps;
@@ -51,13 +52,18 @@ import java.util.concurrent.Executors;
  */
 public final class MainActivity extends Activity {
 
+    private static final String PREF_UI_CACHE = "kernbox_ui_cache";
+    private static final String KEY_UI_SNAPSHOT = "snapshot_json";
+    private static final String PREF_LABEL_CACHE = "kernbox_label_cache";
+
     private final Strings strings = new Strings();
     private final BrokerClient broker = new BrokerClient();
     private final ExecutorService rpcExecutor = Executors.newFixedThreadPool(2);
-    private final ExecutorService iconExecutor = Executors.newFixedThreadPool(2);
+    private final ExecutorService iconExecutor = Executors.newFixedThreadPool(3);
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final Map<String, AppTileInfo> tileCache = new ConcurrentHashMap<String, AppTileInfo>();
 
+    private FrameLayout rootContainer;
     private LinearLayout alertBannerCard;
     private TextView alertBannerTitle;
     private TextView alertBannerBody;
@@ -86,6 +92,11 @@ public final class MainActivity extends Activity {
     private AppActionSheet appActionSheet;
     private DiagnosticsSheet diagnosticsSheet;
     private Object backCallbackToken;
+    private int lastBottomInset = 0;
+    private int lastImeBottomInset = 0;
+    private int iconLoadSeq = 0;
+    private String lastToggleVisualKey = "";
+    private String lastModePillVisualKey = "";
 
     private BrokerProtocol.StatusSnapshot currentSnapshot = BrokerProtocol.StatusSnapshot.empty();
     private BrokerProtocol.OfflineReason lastOfflineReason = BrokerProtocol.OfflineReason.DAEMON_DOWN;
@@ -117,12 +128,77 @@ public final class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        this.certSha256 = CertUtil.getSigningCertSha256(this);
+        restoreLabelAndSnapshotCache();
         setContentView(buildRootLayout());
         configureSystemBars();
         registerPredictiveBack();
+        loadSigningCertAsync();
         renderSnapshot();
-        refreshStatus(false);
+        refreshStatus(false, connected);
+    }
+
+    private void restoreLabelAndSnapshotCache() {
+        try {
+            SharedPreferences lblPrefs = getSharedPreferences(PREF_LABEL_CACHE, MODE_PRIVATE);
+            for (Map.Entry<String, ?> entry : lblPrefs.getAll().entrySet()) {
+                if (entry.getKey() != null && entry.getValue() instanceof String) {
+                    String lbl = ((String) entry.getValue()).trim();
+                    if (!lbl.isEmpty()) {
+                        tileCache.put(entry.getKey(), new AppTileInfo(entry.getKey(), lbl, null));
+                    }
+                }
+            }
+            SharedPreferences uiPrefs = getSharedPreferences(PREF_UI_CACHE, MODE_PRIVATE);
+            BrokerProtocol.StatusSnapshot cached = BrokerProtocol.StatusSnapshot.fromSafeCacheJson(
+                    uiPrefs.getString(KEY_UI_SNAPSHOT, ""));
+            if (cached != null && cached.policyLoaded) {
+                this.currentSnapshot = cached;
+                this.connected = true;
+                this.lastOfflineReason = BrokerProtocol.OfflineReason.NONE;
+            }
+        } catch (RuntimeException ignored) {
+        }
+    }
+
+    private void persistSafeSnapshot(BrokerProtocol.StatusSnapshot snap) {
+        if (snap == null || !snap.policyLoaded) {
+            return;
+        }
+        try {
+            getSharedPreferences(PREF_UI_CACHE, MODE_PRIVATE)
+                    .edit()
+                    .putString(KEY_UI_SNAPSHOT, snap.toSafeCacheJson())
+                    .apply();
+        } catch (RuntimeException ignored) {
+        }
+    }
+
+    private void loadSigningCertAsync() {
+        final Context appCtx = getApplicationContext();
+        iconExecutor.execute(new Runnable() {
+            @Override
+            public void run() {
+                final String sha = CertUtil.getSigningCertSha256(appCtx);
+                if (sha == null || sha.isEmpty()) {
+                    return;
+                }
+                mainHandler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (isFinishing() || isDestroyed()) {
+                            return;
+                        }
+                        certSha256 = sha;
+                        if (offlineCertDigestView != null) {
+                            offlineCertDigestView.setText(CertUtil.shortDigest(sha));
+                        }
+                        if (!connected && offlineCertBox != null) {
+                            offlineCertBox.setVisibility(View.VISIBLE);
+                        }
+                    }
+                });
+            }
+        });
     }
 
     @Override
@@ -295,6 +371,7 @@ public final class MainActivity extends Activity {
         root.addView(mainScroll, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
+        rootContainer = root;
         fabButton = new FrameLayout(this);
         fabButton.setBackground(ThemePalette.circleRippleDrawable(
                 this, ThemePalette.accentCopper(this), ThemePalette.accentCopperPressed(this), Color.TRANSPARENT));
@@ -307,6 +384,7 @@ public final class MainActivity extends Activity {
         fabButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                Motion.hapticTap(v);
                 toggleAddSheet();
             }
         });
@@ -315,90 +393,6 @@ public final class MainActivity extends Activity {
         fabLp.setMarginEnd(ThemePalette.dp(this, 22f));
         fabLp.bottomMargin = ThemePalette.dp(this, 24f);
         root.addView(fabButton, fabLp);
-
-        addAppSheet = new AddAppSheet(this, strings, broker, rpcExecutor, mainHandler, new AddAppSheet.HostCallback() {
-            @Override
-            public void onAppImported(String pkg, String label) {
-                showToast(strings.importedFmt(label), false);
-                refreshStatus(false);
-            }
-
-            @Override
-            public void onApkInstalled(String path) {
-                showToast(strings.installedApkOk(), false);
-                refreshStatus(false);
-            }
-
-            @Override
-            public void onToast(String message, boolean error) {
-                showToast(message, error);
-            }
-
-            @Override
-            public void onDismissed() {
-                Motion.animateFabToggle(fabButton, false);
-                updateMainAccessibility();
-            }
-        });
-        root.addView(addAppSheet, new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
-
-        appActionSheet = new AppActionSheet(this, strings, broker, rpcExecutor, mainHandler, new AppActionSheet.Callback() {
-            @Override
-            public void onActionSuccess(BrokerProtocol.StatusSnapshot snapshot, String toastMessage) {
-                lastActionError = "";
-                rpcSeq++;
-                if (snapshot != null && snapshot.policyLoaded) {
-                    connected = true;
-                    currentSnapshot = snapshot.withPreservedProbeFrom(currentSnapshot);
-                    renderSnapshot();
-                } else {
-                    refreshStatus(false);
-                }
-                showToast(toastMessage, false);
-            }
-
-            @Override
-            public void onActionError(String errorMessage) {
-                showToast(errorMessage, true);
-            }
-
-            @Override
-            public void onCopyToast(String message) {
-                showToast(message, false);
-            }
-
-            @Override
-            public void onSheetDismissed() {
-                updateMainAccessibility();
-            }
-        });
-        root.addView(appActionSheet, new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
-
-        diagnosticsSheet = new DiagnosticsSheet(this, strings, broker, rpcExecutor, mainHandler, new DiagnosticsSheet.Callback() {
-            @Override
-            public void onSnapshotRefreshed(BrokerProtocol.StatusSnapshot snapshot) {
-                lastActionError = "";
-                if (snapshot != null && snapshot.policyLoaded) {
-                    connected = true;
-                    currentSnapshot = snapshot.withPreservedProbeFrom(currentSnapshot);
-                    renderSnapshot();
-                }
-            }
-
-            @Override
-            public void onToast(String message, boolean error) {
-                showToast(message, error);
-            }
-
-            @Override
-            public void onSheetDismissed() {
-                updateMainAccessibility();
-            }
-        });
-        root.addView(diagnosticsSheet, new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
         toastCapsule = new TextView(this);
         toastCapsule.setVisibility(View.GONE);
@@ -470,9 +464,17 @@ public final class MainActivity extends Activity {
                 tLp.bottomMargin = ThemePalette.dp(MainActivity.this, 96f) + bottom;
                 toastCapsule.setLayoutParams(tLp);
 
-                addAppSheet.setBottomInset(Math.max(bottom, imeBottom));
-                appActionSheet.setBottomInset(bottom);
-                diagnosticsSheet.setBottomInset(bottom);
+                lastBottomInset = bottom;
+                lastImeBottomInset = imeBottom;
+                if (addAppSheet != null) {
+                    addAppSheet.setBottomInset(Math.max(bottom, imeBottom));
+                }
+                if (appActionSheet != null) {
+                    appActionSheet.setBottomInset(bottom);
+                }
+                if (diagnosticsSheet != null) {
+                    diagnosticsSheet.setBottomInset(bottom);
+                }
                 return insets;
             }
         });
@@ -531,7 +533,8 @@ public final class MainActivity extends Activity {
         diagIconBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                diagnosticsSheet.show(currentSnapshot, connected);
+                Motion.hapticTap(v);
+                ensureDiagnosticsSheet().show(currentSnapshot, connected);
                 updateMainAccessibility();
             }
         });
@@ -553,6 +556,7 @@ public final class MainActivity extends Activity {
         refreshIconBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                Motion.hapticTap(v);
                 Motion.spinOnce(refreshIconBtn);
                 refreshStatus(true);
             }
@@ -605,8 +609,9 @@ public final class MainActivity extends Activity {
         alertBannerCard.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                Motion.hapticTap(v);
                 if (connected) {
-                    diagnosticsSheet.show(currentSnapshot, connected);
+                    ensureDiagnosticsSheet().show(currentSnapshot, connected);
                     updateMainAccessibility();
                 } else {
                     refreshStatus(true);
@@ -696,6 +701,7 @@ public final class MainActivity extends Activity {
         copyCertBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                Motion.hapticTap(v);
                 if (!certSha256.isEmpty()) {
                     ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
                     if (cm != null) {
@@ -723,6 +729,7 @@ public final class MainActivity extends Activity {
         copyPolicyBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                Motion.hapticTap(v);
                 if (!certSha256.isEmpty()) {
                     String snippet = "{\n"
                             + "  \"caller_package\": \"com.sandbox.controller\",\n"
@@ -747,6 +754,7 @@ public final class MainActivity extends Activity {
         primaryToggleBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                Motion.hapticTap(v);
                 onPrimaryToggleClicked();
             }
         });
@@ -862,6 +870,7 @@ public final class MainActivity extends Activity {
         emptyStateCard.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                Motion.hapticTap(v);
                 toggleAddSheet();
             }
         });
@@ -870,13 +879,135 @@ public final class MainActivity extends Activity {
         return wrapper;
     }
 
+    private void addOverlayBeforeToast(View overlay) {
+        int idx = rootContainer.indexOfChild(toastCapsule);
+        if (idx < 0) {
+            idx = rootContainer.getChildCount();
+        }
+        rootContainer.addView(overlay, idx, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+    }
+
+    private AddAppSheet ensureAddAppSheet() {
+        if (addAppSheet == null) {
+            addAppSheet = new AddAppSheet(this, strings, broker, rpcExecutor, mainHandler, new AddAppSheet.HostCallback() {
+                @Override
+                public void onAppImported(String pkg, String label) {
+                    Motion.hapticConfirm(rootContainer);
+                    showToast(strings.importedFmt(label), false);
+                    refreshStatus(false);
+                }
+
+                @Override
+                public void onApkInstalled(String path) {
+                    Motion.hapticConfirm(rootContainer);
+                    showToast(strings.installedApkOk(), false);
+                    refreshStatus(false);
+                }
+
+                @Override
+                public void onToast(String message, boolean error) {
+                    if (error) {
+                        Motion.hapticReject(rootContainer);
+                    }
+                    showToast(message, error);
+                }
+
+                @Override
+                public void onDismissed() {
+                    Motion.animateFabToggle(fabButton, false);
+                    updateMainAccessibility();
+                }
+            });
+            addOverlayBeforeToast(addAppSheet);
+            addAppSheet.setBottomInset(Math.max(lastBottomInset, lastImeBottomInset));
+        }
+        return addAppSheet;
+    }
+
+    private AppActionSheet ensureAppActionSheet() {
+        if (appActionSheet == null) {
+            appActionSheet = new AppActionSheet(this, strings, broker, rpcExecutor, mainHandler, new AppActionSheet.Callback() {
+                @Override
+                public void onActionSuccess(BrokerProtocol.StatusSnapshot snapshot, String toastMessage) {
+                    lastActionError = "";
+                    rpcSeq++;
+                    Motion.hapticConfirm(rootContainer);
+                    if (snapshot != null && snapshot.policyLoaded) {
+                        connected = true;
+                        currentSnapshot = snapshot.withPreservedProbeFrom(currentSnapshot);
+                        persistSafeSnapshot(currentSnapshot);
+                        renderSnapshot();
+                    } else {
+                        refreshStatus(false);
+                    }
+                    showToast(toastMessage, false);
+                }
+
+                @Override
+                public void onActionError(String errorMessage) {
+                    Motion.hapticReject(rootContainer);
+                    showToast(errorMessage, true);
+                }
+
+                @Override
+                public void onCopyToast(String message) {
+                    Motion.hapticTap(rootContainer);
+                    showToast(message, false);
+                }
+
+                @Override
+                public void onSheetDismissed() {
+                    updateMainAccessibility();
+                }
+            });
+            addOverlayBeforeToast(appActionSheet);
+            appActionSheet.setBottomInset(lastBottomInset);
+        }
+        return appActionSheet;
+    }
+
+    private DiagnosticsSheet ensureDiagnosticsSheet() {
+        if (diagnosticsSheet == null) {
+            diagnosticsSheet = new DiagnosticsSheet(this, strings, broker, rpcExecutor, mainHandler, new DiagnosticsSheet.Callback() {
+                @Override
+                public void onSnapshotRefreshed(BrokerProtocol.StatusSnapshot snapshot) {
+                    lastActionError = "";
+                    if (snapshot != null && snapshot.policyLoaded) {
+                        connected = true;
+                        currentSnapshot = snapshot.withPreservedProbeFrom(currentSnapshot);
+                        persistSafeSnapshot(currentSnapshot);
+                        renderSnapshot();
+                    }
+                }
+
+                @Override
+                public void onToast(String message, boolean error) {
+                    if (error) {
+                        Motion.hapticReject(rootContainer);
+                    }
+                    showToast(message, error);
+                }
+
+                @Override
+                public void onSheetDismissed() {
+                    updateMainAccessibility();
+                }
+            });
+            addOverlayBeforeToast(diagnosticsSheet);
+            diagnosticsSheet.setBottomInset(lastBottomInset);
+        }
+        return diagnosticsSheet;
+    }
+
     private void toggleAddSheet() {
-        if (addAppSheet.isOpen()) {
-            addAppSheet.dismiss();
+        AddAppSheet sheet = ensureAddAppSheet();
+        if (sheet.isOpen()) {
+            sheet.dismiss();
             Motion.animateFabToggle(fabButton, false);
         } else {
             Motion.animateFabToggle(fabButton, true);
-            addAppSheet.show(currentSnapshot.sandboxApps);
+            sheet.show(currentSnapshot.sandboxApps);
         }
         updateMainAccessibility();
     }
@@ -911,7 +1042,7 @@ public final class MainActivity extends Activity {
                         }
                         busy = false;
                         if (seq == rpcSeq) {
-                            applyRpcResponse(resp, true);
+                            applyRpcResponse(resp, true, true);
                         } else {
                             renderSnapshot();
                         }
@@ -1004,9 +1135,16 @@ public final class MainActivity extends Activity {
     }
 
     private void applyRpcResponse(BrokerProtocol.RpcResponse resp, boolean notifyError) {
+        applyRpcResponse(resp, notifyError, false);
+    }
+
+    private void applyRpcResponse(BrokerProtocol.RpcResponse resp, boolean notifyError, boolean hapticFeedback) {
         if (resp.offlineReason == BrokerProtocol.OfflineReason.RPC_TIMEOUT) {
             lastOfflineReason = BrokerProtocol.OfflineReason.RPC_TIMEOUT;
             lastActionError = strings.alertRpcTimeout();
+            if (hapticFeedback) {
+                Motion.hapticReject(primaryToggleBtn);
+            }
             if (notifyError) {
                 showToast(strings.alertRpcTimeout(), true);
             }
@@ -1015,6 +1153,9 @@ public final class MainActivity extends Activity {
             lastOfflineReason = resp.offlineReason;
             currentSnapshot = BrokerProtocol.StatusSnapshot.empty();
             lastActionError = !resp.error.isEmpty() ? resp.error : "";
+            if (hapticFeedback) {
+                Motion.hapticReject(primaryToggleBtn);
+            }
             if (notifyError && !resp.error.isEmpty()) {
                 showToast(resp.error, true);
             }
@@ -1023,8 +1164,12 @@ public final class MainActivity extends Activity {
             lastOfflineReason = BrokerProtocol.OfflineReason.NONE;
             if (resp.snapshot != null && resp.snapshot.policyLoaded) {
                 currentSnapshot = resp.snapshot.withPreservedProbeFrom(currentSnapshot);
+                persistSafeSnapshot(currentSnapshot);
             }
             lastActionError = !resp.error.isEmpty() ? resp.error : strings.statusErrorTitle();
+            if (hapticFeedback) {
+                Motion.hapticReject(primaryToggleBtn);
+            }
             if (notifyError && !resp.error.isEmpty()) {
                 showToast(strings.failPrefix() + resp.error, true);
             }
@@ -1032,7 +1177,11 @@ public final class MainActivity extends Activity {
             connected = true;
             lastOfflineReason = BrokerProtocol.OfflineReason.NONE;
             currentSnapshot = resp.snapshot.withPreservedProbeFrom(currentSnapshot);
+            persistSafeSnapshot(currentSnapshot);
             lastActionError = "";
+            if (hapticFeedback) {
+                Motion.hapticConfirm(primaryToggleBtn);
+            }
         }
         renderSnapshot();
     }
@@ -1071,9 +1220,12 @@ public final class MainActivity extends Activity {
             statusTitleView.setText(busyStatusText.isEmpty() ? strings.statusBusyTitle() : busyStatusText);
             primaryToggleBtn.setText(strings.btnSyncing());
             primaryToggleBtn.setEnabled(false);
-            primaryToggleBtn.setBackground(ThemePalette.pillRippleDrawable(
-                    this, ThemePalette.accentCopper(this), ThemePalette.accentCopperPressed(this), Color.TRANSPARENT, 16f));
-            primaryToggleBtn.setTextColor(Color.WHITE);
+            if (!"busy".equals(lastToggleVisualKey)) {
+                lastToggleVisualKey = "busy";
+                primaryToggleBtn.setBackground(ThemePalette.pillRippleDrawable(
+                        this, ThemePalette.accentCopper(this), ThemePalette.accentCopperPressed(this), Color.TRANSPARENT, 16f));
+                primaryToggleBtn.setTextColor(Color.WHITE);
+            }
             return;
         }
 
@@ -1082,9 +1234,12 @@ public final class MainActivity extends Activity {
             haloView.setMode(BreathingHaloView.Mode.OFFLINE);
             modePill.setText(lastOfflineReason == BrokerProtocol.OfflineReason.RPC_TIMEOUT
                     ? strings.qsTimeout() : strings.modeOffline());
-            modePill.setTextColor(ThemePalette.inkSecondary(this));
-            modePill.setBackground(ThemePalette.cardDrawable(
-                    this, ThemePalette.surfaceSubtle(this), ThemePalette.borderHairline(this), 16f));
+            if (!"offline".equals(lastModePillVisualKey)) {
+                lastModePillVisualKey = "offline";
+                modePill.setTextColor(ThemePalette.inkSecondary(this));
+                modePill.setBackground(ThemePalette.cardDrawable(
+                        this, ThemePalette.surfaceSubtle(this), ThemePalette.borderHairline(this), 16f));
+            }
             statusTitleView.setText(strings.statusOfflineTitle());
             if (lastOfflineReason == BrokerProtocol.OfflineReason.CERT_UNPINNED) {
                 statusSubtitleView.setText(strings.offlineCertUnpinnedHint());
@@ -1097,9 +1252,12 @@ public final class MainActivity extends Activity {
             }
             offlineCertBox.setVisibility(certSha256.isEmpty() ? View.GONE : View.VISIBLE);
             primaryToggleBtn.setText(strings.btnRetry());
-            primaryToggleBtn.setTextColor(ThemePalette.inkPrimary(this));
-            primaryToggleBtn.setBackground(ThemePalette.pillRippleDrawable(
-                    this, ThemePalette.surfaceSubtle(this), ThemePalette.surfacePressed(this), ThemePalette.borderHairline(this), 16f));
+            if (!"offline".equals(lastToggleVisualKey)) {
+                lastToggleVisualKey = "offline";
+                primaryToggleBtn.setTextColor(ThemePalette.inkPrimary(this));
+                primaryToggleBtn.setBackground(ThemePalette.pillRippleDrawable(
+                        this, ThemePalette.surfaceSubtle(this), ThemePalette.surfacePressed(this), ThemePalette.borderHairline(this), 16f));
+            }
             metricAppsVal.setText("—");
             metricGateVal.setText("—");
             metricFreezeVal.setText("—");
@@ -1115,9 +1273,12 @@ public final class MainActivity extends Activity {
         if (abnormalActive) {
             haloView.setMode(BreathingHaloView.Mode.ERROR);
             modePill.setText(strings.qsError());
-            modePill.setTextColor(ThemePalette.accentError(this));
-            modePill.setBackground(ThemePalette.cardDrawable(
-                    this, ThemePalette.accentErrorSoft(this), ThemePalette.accentError(this), 16f));
+            if (!"error".equals(lastModePillVisualKey)) {
+                lastModePillVisualKey = "error";
+                modePill.setTextColor(ThemePalette.accentError(this));
+                modePill.setBackground(ThemePalette.cardDrawable(
+                        this, ThemePalette.accentErrorSoft(this), ThemePalette.accentError(this), 16f));
+            }
             if ("AckWait".equalsIgnoreCase(currentSnapshot.state)) {
                 statusTitleView.setText(strings.statusWaitingAckTitle());
             } else if ("UpgradingFence".equalsIgnoreCase(currentSnapshot.state)) {
@@ -1132,12 +1293,16 @@ public final class MainActivity extends Activity {
             } else {
                 modePill.setText(active ? strings.modeIsolated() : strings.modeStandby());
             }
-            modePill.setTextColor(active ? ThemePalette.accentSage(this) : ThemePalette.inkSecondary(this));
-            modePill.setBackground(ThemePalette.cardDrawable(
-                    this,
-                    active ? ThemePalette.accentSageSoft(this) : ThemePalette.surfaceSubtle(this),
-                    ThemePalette.borderHairline(this),
-                    16f));
+            String modeKey = active ? "active" : "paused";
+            if (!modeKey.equals(lastModePillVisualKey)) {
+                lastModePillVisualKey = modeKey;
+                modePill.setTextColor(active ? ThemePalette.accentSage(this) : ThemePalette.inkSecondary(this));
+                modePill.setBackground(ThemePalette.cardDrawable(
+                        this,
+                        active ? ThemePalette.accentSageSoft(this) : ThemePalette.surfaceSubtle(this),
+                        ThemePalette.borderHairline(this),
+                        16f));
+            }
             statusTitleView.setText(active ? strings.statusActiveTitle() : strings.statusPausedTitle());
         }
 
@@ -1146,14 +1311,20 @@ public final class MainActivity extends Activity {
 
         if (notPaused) {
             primaryToggleBtn.setText(strings.btnPause());
-            primaryToggleBtn.setTextColor(ThemePalette.inkPrimary(this));
-            primaryToggleBtn.setBackground(ThemePalette.pillRippleDrawable(
-                    this, ThemePalette.surfaceSubtle(this), ThemePalette.surfacePressed(this), ThemePalette.borderHairline(this), 16f));
+            if (!"pause".equals(lastToggleVisualKey)) {
+                lastToggleVisualKey = "pause";
+                primaryToggleBtn.setTextColor(ThemePalette.inkPrimary(this));
+                primaryToggleBtn.setBackground(ThemePalette.pillRippleDrawable(
+                        this, ThemePalette.surfaceSubtle(this), ThemePalette.surfacePressed(this), ThemePalette.borderHairline(this), 16f));
+            }
         } else {
             primaryToggleBtn.setText(strings.btnStart());
-            primaryToggleBtn.setTextColor(Color.WHITE);
-            primaryToggleBtn.setBackground(ThemePalette.pillRippleDrawable(
-                    this, ThemePalette.accentCopper(this), ThemePalette.accentCopperPressed(this), Color.TRANSPARENT, 16f));
+            if (!"start".equals(lastToggleVisualKey)) {
+                lastToggleVisualKey = "start";
+                primaryToggleBtn.setTextColor(Color.WHITE);
+                primaryToggleBtn.setBackground(ThemePalette.pillRippleDrawable(
+                        this, ThemePalette.accentCopper(this), ThemePalette.accentCopperPressed(this), Color.TRANSPARENT, 16f));
+            }
         }
 
         metricAppsVal.setText(String.valueOf(currentSnapshot.sandboxApps.size()));
@@ -1211,43 +1382,49 @@ public final class MainActivity extends Activity {
 
     private void loadTileInfoAsync(final List<String> pkgs) {
         final Context appCtx = getApplicationContext();
-        iconExecutor.execute(new Runnable() {
-            @Override
-            public void run() {
-                PackageManager pm = appCtx.getPackageManager();
-                LauncherApps la = (LauncherApps) appCtx.getSystemService(Context.LAUNCHER_APPS_SERVICE);
-                UserManager um = (UserManager) appCtx.getSystemService(Context.USER_SERVICE);
-                List<UserHandle> profiles = um != null ? um.getUserProfiles() : Collections.<UserHandle>emptyList();
-                final List<AppTileInfo> resolved = new ArrayList<AppTileInfo>(pkgs.size());
-                for (String pkg : pkgs) {
-                    resolved.add(resolveTileInfoWorker(pm, la, profiles, pkg));
-                }
-                mainHandler.post(new Runnable() {
-                    @Override
-                    public void run() {
-                        if (isFinishing() || isDestroyed()) {
-                            return;
+        final int seq = ++iconLoadSeq;
+        for (final String pkg : pkgs) {
+            iconExecutor.execute(new Runnable() {
+                @Override
+                public void run() {
+                    PackageManager pm = appCtx.getPackageManager();
+                    LauncherApps la = (LauncherApps) appCtx.getSystemService(Context.LAUNCHER_APPS_SERVICE);
+                    UserManager um = (UserManager) appCtx.getSystemService(Context.USER_SERVICE);
+                    List<UserHandle> profiles = um != null ? um.getUserProfiles() : Collections.<UserHandle>emptyList();
+                    final AppTileInfo item = resolveTileInfoWorker(pm, la, profiles, pkg);
+                    if (item.label != null && !item.label.isEmpty()) {
+                        try {
+                            appCtx.getSharedPreferences(PREF_LABEL_CACHE, MODE_PRIVATE)
+                                    .edit()
+                                    .putString(pkg, item.label)
+                                    .apply();
+                        } catch (RuntimeException ignored) {
                         }
-                        for (AppTileInfo item : resolved) {
+                    }
+                    mainHandler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (seq != iconLoadSeq || isFinishing() || isDestroyed()) {
+                                return;
+                            }
                             tileCache.put(item.pkg, item);
-                        }
-                        if (renderedApps.isEmpty()) {
-                            return;
-                        }
-                        for (int i = 0; i < appsGrid.getChildCount(); i++) {
-                            View child = appsGrid.getChildAt(i);
-                            if (child.getTag() instanceof AppTileHolder) {
-                                AppTileHolder h = (AppTileHolder) child.getTag();
-                                AppTileInfo updated = tileCache.get(h.pkg);
-                                if (updated != null) {
-                                    h.bind(updated);
+                            if (renderedApps.isEmpty()) {
+                                return;
+                            }
+                            for (int i = 0; i < appsGrid.getChildCount(); i++) {
+                                View child = appsGrid.getChildAt(i);
+                                if (child.getTag() instanceof AppTileHolder) {
+                                    AppTileHolder h = (AppTileHolder) child.getTag();
+                                    if (item.pkg.equals(h.pkg)) {
+                                        h.bind(item);
+                                    }
                                 }
                             }
                         }
-                    }
-                });
-            }
-        });
+                    });
+                }
+            });
+        }
     }
 
     private AppTileInfo resolveTileInfoWorker(
@@ -1371,14 +1548,16 @@ public final class MainActivity extends Activity {
         tile.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                Motion.hapticTap(v);
                 launchSandboxApp(holder.boundInfo);
             }
         });
         tile.setOnLongClickListener(new View.OnLongClickListener() {
             @Override
             public boolean onLongClick(View v) {
+                Motion.hapticLongPress(v);
                 AppTileInfo cur = holder.boundInfo;
-                appActionSheet.show(cur.pkg, cur.label, cur.icon);
+                ensureAppActionSheet().show(cur.pkg, cur.label, cur.icon);
                 updateMainAccessibility();
                 return true;
             }
@@ -1403,7 +1582,7 @@ public final class MainActivity extends Activity {
                     public void run() {
                         busy = false;
                         busyStatusText = "";
-                        applyRpcResponse(resp, true);
+                        applyRpcResponse(resp, true, true);
                     }
                 });
             }

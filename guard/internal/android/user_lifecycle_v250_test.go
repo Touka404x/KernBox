@@ -410,8 +410,8 @@ func TestReadMemoryPSIAvg10AndBoostUIDLaunch(t *testing.T) {
 		t.Fatal("expected sandbox UID 1010395 boost to succeed")
 	}
 	uclampPath := filepath.Join(cgRoot, "uid_1010395", "cpu.uclamp.min")
-	if b, _ := os.ReadFile(uclampPath); strings.TrimSpace(string(b)) != "50" {
-		t.Fatalf("expected immediate boost cpu.uclamp.min=50, got %q", string(b))
+	if b, _ := os.ReadFile(uclampPath); strings.TrimSpace(string(b)) != "80" {
+		t.Fatalf("expected immediate boost cpu.uclamp.min=80, got %q", string(b))
 	}
 	time.Sleep(120 * time.Millisecond)
 	if b, _ := os.ReadFile(uclampPath); strings.TrimSpace(string(b)) != "0" {

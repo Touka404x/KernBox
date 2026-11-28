@@ -4,6 +4,8 @@ import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.animation.AnimatorSet;
 import android.animation.ObjectAnimator;
+import android.os.Build;
+import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.animation.DecelerateInterpolator;
@@ -11,7 +13,7 @@ import android.view.animation.LinearInterpolator;
 import android.view.animation.OvershootInterpolator;
 
 /**
- * Restraint-first motion helpers with subtle spring-feel feedback.
+ * Restraint-first motion & haptic helpers with crisp 120Hz spring-feel feedback.
  */
 public final class Motion {
 
@@ -19,6 +21,36 @@ public final class Motion {
     private static final OvershootInterpolator OVERSHOOT = new OvershootInterpolator(1.6f);
 
     private Motion() {}
+
+    public static void hapticTap(View v) {
+        if (v != null) {
+            v.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
+        }
+    }
+
+    public static void hapticLongPress(View v) {
+        if (v != null) {
+            v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+        }
+    }
+
+    public static void hapticConfirm(View v) {
+        if (v != null) {
+            int code = Build.VERSION.SDK_INT >= 30
+                    ? HapticFeedbackConstants.CONFIRM
+                    : HapticFeedbackConstants.VIRTUAL_KEY;
+            v.performHapticFeedback(code);
+        }
+    }
+
+    public static void hapticReject(View v) {
+        if (v != null) {
+            int code = Build.VERSION.SDK_INT >= 30
+                    ? HapticFeedbackConstants.REJECT
+                    : HapticFeedbackConstants.LONG_PRESS;
+            v.performHapticFeedback(code);
+        }
+    }
 
     public static void attachPressScale(final View target) {
         target.setOnTouchListener(new View.OnTouchListener() {
@@ -28,9 +60,9 @@ public final class Motion {
                 if (action == MotionEvent.ACTION_DOWN) {
                     v.animate().cancel();
                     v.animate()
-                            .scaleX(0.94f)
-                            .scaleY(0.94f)
-                            .setDuration(90L)
+                            .scaleX(0.95f)
+                            .scaleY(0.95f)
+                            .setDuration(65L)
                             .setInterpolator(DECEL)
                             .start();
                 } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
@@ -38,7 +70,7 @@ public final class Motion {
                     v.animate()
                             .scaleX(1.0f)
                             .scaleY(1.0f)
-                            .setDuration(190L)
+                            .setDuration(160L)
                             .setInterpolator(OVERSHOOT)
                             .start();
                 }

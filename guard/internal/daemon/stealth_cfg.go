@@ -300,6 +300,7 @@ func (d *Daemon) SyncStealthConfig(policy contracts.Policy, clientUID int) (Stea
 	if err := writeStealthFiles(cfgPath, runtimePath, cfg); err != nil {
 		return cfg, err
 	}
+	d.invalidateStatusCaches()
 	return cfg, nil
 }
 
@@ -389,6 +390,7 @@ func (d *Daemon) ToggleStealth(enable bool) (StealthConfig, error) {
 	if err := writeStealthFiles(cfgPath, runtimePath, cfg); err != nil {
 		return cfg, err
 	}
+	d.invalidateStatusCaches()
 	return cfg, nil
 }
 

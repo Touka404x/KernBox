@@ -20,6 +20,7 @@ public final class SandboxTileService extends TileService {
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final AtomicBoolean busy = new AtomicBoolean(false);
+    private volatile Boolean lastKnownPaused = null;
 
     @Override
     public void onStartListening() {
@@ -68,10 +69,15 @@ public final class SandboxTileService extends TileService {
         if (!busy.compareAndSet(false, true)) {
             return;
         }
+        final Boolean cachedPaused = lastKnownPaused;
         Tile cur = getQsTile();
         if (cur != null) {
             Strings s = new Strings();
             cur.setLabel(s.brandTitle());
+            if (cachedPaused != null) {
+                boolean nextActive = cachedPaused.booleanValue();
+                cur.setState(nextActive ? Tile.STATE_ACTIVE : Tile.STATE_INACTIVE);
+            }
             if (Build.VERSION.SDK_INT >= 29) {
                 cur.setSubtitle(s.btnSyncing());
             }
@@ -82,13 +88,19 @@ public final class SandboxTileService extends TileService {
             public void run() {
                 BrokerProtocol.RpcResponse finalResp;
                 try {
-                    BrokerProtocol.RpcResponse status = broker.getStatus();
-                    if (!status.ok) {
-                        finalResp = status;
-                    } else if (status.snapshot.paused) {
-                        finalResp = broker.startSandbox();
+                    if (cachedPaused != null) {
+                        finalResp = cachedPaused.booleanValue()
+                                ? broker.startSandbox()
+                                : broker.pauseSandbox();
                     } else {
-                        finalResp = broker.pauseSandbox();
+                        BrokerProtocol.RpcResponse status = broker.getStatus();
+                        if (!status.ok) {
+                            finalResp = status;
+                        } else if (status.snapshot.paused) {
+                            finalResp = broker.startSandbox();
+                        } else {
+                            finalResp = broker.pauseSandbox();
+                        }
                     }
                 } finally {
                     busy.set(false);
@@ -169,6 +181,7 @@ public final class SandboxTileService extends TileService {
             return;
         }
         BrokerProtocol.StatusSnapshot snap = resp.snapshot;
+        lastKnownPaused = Boolean.valueOf(snap.paused);
         boolean active = snap.isGateHealthyOpen();
         boolean abnormal = (!snap.paused && !snap.sbwOpen) || snap.hasStartupOrHealthAlert();
         tile.setState(active ? Tile.STATE_ACTIVE : Tile.STATE_INACTIVE);

@@ -28,10 +28,13 @@ import android.widget.TextView;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 
 /**
@@ -50,7 +53,7 @@ public final class AddAppSheet extends FrameLayout {
     private static final class AppItem {
         final String pkg;
         final String label;
-        final Drawable icon;
+        Drawable icon;
         boolean imported;
 
         AppItem(String pkg, String label, Drawable icon) {
@@ -82,6 +85,9 @@ public final class AddAppSheet extends FrameLayout {
     private final TextView installApkBtn;
 
     private final List<AppItem> allDeviceApps = new ArrayList<AppItem>();
+    private final Map<String, Drawable> iconCache = new ConcurrentHashMap<String, Drawable>();
+    private final Map<String, ResolveInfo> resolveInfoByPkg = new ConcurrentHashMap<String, ResolveInfo>();
+    private final Map<String, ImageView> visibleIconViews = new HashMap<String, ImageView>();
     private final Set<String> importedPackages = new HashSet<String>();
     private final Set<String> importingPkgs = new HashSet<String>();
     private int loadSeq = 0;
@@ -478,6 +484,7 @@ public final class AddAppSheet extends FrameLayout {
             @Override
             public void run() {
                 final List<AppItem> loaded = new ArrayList<AppItem>();
+                final List<String> missingIconPkgs = new ArrayList<String>();
                 try {
                     PackageManager pm = appCtx.getPackageManager();
                     Intent mainIntent = new Intent(Intent.ACTION_MAIN, null);
@@ -498,18 +505,18 @@ public final class AddAppSheet extends FrameLayout {
                                 || !seen.add(pkg)) {
                             continue;
                         }
+                        resolveInfoByPkg.put(pkg, ri);
                         String label = pkg;
-                        Drawable icon = null;
                         try {
                             CharSequence labelCs = ri.loadLabel(pm);
                             String s = labelCs != null ? labelCs.toString().trim() : pkg;
                             if (!s.isEmpty()) {
                                 label = s;
                             }
-                            icon = ri.loadIcon(pm);
                         } catch (RuntimeException ignored) {
                         }
-                        AppItem item = new AppItem(pkg, label, icon);
+                        Drawable cachedIcon = iconCache.get(pkg);
+                        AppItem item = new AppItem(pkg, label, cachedIcon);
                         item.imported = importedSnapshot.contains(pkg);
                         loaded.add(item);
                     }
@@ -519,6 +526,11 @@ public final class AddAppSheet extends FrameLayout {
                             return a.label.compareToIgnoreCase(b.label);
                         }
                     });
+                    for (AppItem item : loaded) {
+                        if (item.icon == null) {
+                            missingIconPkgs.add(item.pkg);
+                        }
+                    }
                 } finally {
                     mainHandler.post(new Runnable() {
                         @Override
@@ -530,6 +542,9 @@ public final class AddAppSheet extends FrameLayout {
                             allDeviceApps.clear();
                             allDeviceApps.addAll(loaded);
                             renderFilteredApps();
+                            if (!missingIconPkgs.isEmpty()) {
+                                decodeIconsBatchedAsync(appCtx, seq, missingIconPkgs);
+                            }
                         }
                     });
                 }
@@ -537,8 +552,66 @@ public final class AddAppSheet extends FrameLayout {
         });
     }
 
+    private void decodeIconsBatchedAsync(final Context appCtx, final int seq, final List<String> pkgs) {
+        executor.execute(new Runnable() {
+            @Override
+            public void run() {
+                PackageManager pm = appCtx.getPackageManager();
+                final List<AppItem> batch = new ArrayList<AppItem>(8);
+                for (int i = 0; i < pkgs.size(); i++) {
+                    if (seq != loadSeq) {
+                        return;
+                    }
+                    String pkg = pkgs.get(i);
+                    ResolveInfo ri = resolveInfoByPkg.get(pkg);
+                    if (ri == null) {
+                        continue;
+                    }
+                    Drawable d = null;
+                    try {
+                        d = ri.loadIcon(pm);
+                    } catch (RuntimeException ignored) {
+                    }
+                    if (d != null) {
+                        iconCache.put(pkg, d);
+                        batch.add(new AppItem(pkg, "", d));
+                    }
+                    if (batch.size() >= 8 || i == pkgs.size() - 1) {
+                        if (!batch.isEmpty()) {
+                            final List<AppItem> commit = new ArrayList<AppItem>(batch);
+                            batch.clear();
+                            mainHandler.post(new Runnable() {
+                                @Override
+                                public void run() {
+                                    if (seq != loadSeq) {
+                                        return;
+                                    }
+                                    Map<String, Drawable> decodedMap = new HashMap<String, Drawable>(commit.size());
+                                    for (AppItem c : commit) {
+                                        decodedMap.put(c.pkg, c.icon);
+                                        ImageView iv = visibleIconViews.get(c.pkg);
+                                        if (iv != null) {
+                                            iv.setImageDrawable(c.icon);
+                                        }
+                                    }
+                                    for (AppItem item : allDeviceApps) {
+                                        Drawable ic = decodedMap.get(item.pkg);
+                                        if (ic != null) {
+                                            item.icon = ic;
+                                        }
+                                    }
+                                }
+                            });
+                        }
+                    }
+                }
+            }
+        });
+    }
+
     private void renderFilteredApps() {
         appsListContainer.removeAllViews();
+        visibleIconViews.clear();
         if (loadingApps) {
             emptyMsgView.setText(strings.scanningApps());
             emptyMsgView.setVisibility(View.VISIBLE);
@@ -584,6 +657,7 @@ public final class AddAppSheet extends FrameLayout {
 
         ImageView iconView = new ImageView(ctx);
         iconView.setImageDrawable(item.icon);
+        visibleIconViews.put(item.pkg, iconView);
         LinearLayout.LayoutParams iconLp = new LinearLayout.LayoutParams(
                 ThemePalette.dp(ctx, 38f), ThemePalette.dp(ctx, 38f));
         iconLp.setMarginEnd(ThemePalette.dp(ctx, 12f));

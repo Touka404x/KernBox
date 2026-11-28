@@ -155,7 +155,7 @@ func BoostUIDLaunch(cgroupRoot string, uid int, duration time.Duration) bool {
 			origVal = s
 		}
 	}
-	if err := os.WriteFile(uclampFile, []byte("50"), 0644); err != nil {
+	if err := os.WriteFile(uclampFile, []byte("80"), 0644); err != nil {
 		if hadPrev {
 			delete(uidBoosts, uid)
 			_ = os.WriteFile(uclampFile, []byte(origVal), 0644)

@@ -172,6 +172,17 @@ public final class BrokerProtocolHostTest {
         assertTrue(!redacted.contains("198.51.100.2"), "redacted report omits exit_ip");
         assertTrue(!redacted.contains("com.android.chrome"), "redacted report omits app package names");
         assertTrue(redacted.contains("\"sandbox_apps_count\": 1"), "redacted report keeps app count");
+
+        String safeCache = resp.snapshot.toSafeCacheJson();
+        assertTrue(!safeCache.contains("198.51.100.2"), "safe cache must omit exit_ip");
+        BrokerProtocol.StatusSnapshot restored = BrokerProtocol.StatusSnapshot.fromSafeCacheJson(safeCache);
+        assertTrue(restored != null, "safe cache restores valid snapshot");
+        assertEquals("OPEN", restored.state, "restored state");
+        assertEquals(resp.snapshot.variant, restored.variant, "restored variant");
+        assertEquals("", restored.exitIp, "restored snapshot omits exitIp");
+        assertEquals(Arrays.asList("com.android.chrome", "com.example.app"),
+                restored.sandboxApps, "restored sandbox_apps");
+        assertTrue(BrokerProtocol.StatusSnapshot.fromSafeCacheJson("{bad") == null, "malformed cache rejected safely");
     }
 
     private static void testParseErrorOfflineAndJsonHardening() {

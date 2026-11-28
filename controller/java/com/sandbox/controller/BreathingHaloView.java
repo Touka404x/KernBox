@@ -6,6 +6,7 @@ import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.RectF;
+import android.os.SystemClock;
 import android.view.View;
 import android.view.animation.LinearInterpolator;
 
@@ -34,6 +35,7 @@ public final class BreathingHaloView extends View {
     private int currentColor;
     private float breathPhase = 0f;
     private float spinAngle = 0f;
+    private long lastBreathInvalidateMs = 0L;
     private boolean hostResumed = true;
 
     private final ValueAnimator breathAnim;
@@ -63,6 +65,11 @@ public final class BreathingHaloView extends View {
         breathAnim.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
             @Override
             public void onAnimationUpdate(ValueAnimator animation) {
+                long now = SystemClock.uptimeMillis();
+                if (now - lastBreathInvalidateMs < 32L) {
+                    return;
+                }
+                lastBreathInvalidateMs = now;
                 breathPhase = ((Float) animation.getAnimatedValue()).floatValue();
                 invalidate();
             }

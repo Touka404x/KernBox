@@ -689,6 +689,50 @@ public final class BrokerProtocol {
                     + "}";
         }
 
+        public String toSafeCacheJson() {
+            StringBuilder appsJson = new StringBuilder("[");
+            for (int i = 0; i < sandboxApps.size(); i++) {
+                if (i > 0) {
+                    appsJson.append(',');
+                }
+                appsJson.append(quote(sandboxApps.get(i)));
+            }
+            appsJson.append(']');
+            return "{"
+                    + "\"version\":" + quote(nonNull(version)) + ","
+                    + "\"variant\":" + quote(nonNull(variant)) + ","
+                    + "\"state\":" + quote(nonNull(state)) + ","
+                    + "\"mode\":" + quote(nonNull(mode)) + ","
+                    + "\"active_preset\":" + quote(nonNull(activePreset)) + ","
+                    + "\"paused\":" + paused + ","
+                    + "\"policy_loaded\":" + policyLoaded + ","
+                    + "\"sbw_open\":" + sbwOpen + ","
+                    + "\"frozen\":" + frozen + ","
+                    + "\"hot_frozen\":" + hotFrozen + ","
+                    + "\"user_id\":" + userId + ","
+                    + "\"u10_running_procs\":" + runningProcs + ","
+                    + "\"hibernated_count\":" + hibernatedCount + ","
+                    + "\"sandbox_apps\":" + appsJson.toString()
+                    + "}";
+        }
+
+        @SuppressWarnings("unchecked")
+        public static StatusSnapshot fromSafeCacheJson(String rawJson) {
+            if (rawJson == null || rawJson.trim().isEmpty()) {
+                return null;
+            }
+            try {
+                Object parsed = new JsonParser(rawJson).parseRoot();
+                if (!(parsed instanceof Map)) {
+                    return null;
+                }
+                StatusSnapshot snap = parseSnapshot((Map<String, Object>) parsed);
+                return snap.policyLoaded ? snap : null;
+            } catch (IllegalArgumentException ex) {
+                return null;
+            }
+        }
+
         public static StatusSnapshot empty() {
             return new StatusSnapshot(
                     "", "", "OFFLINE", "", "neutral",

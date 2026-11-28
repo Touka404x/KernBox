@@ -189,6 +189,8 @@ type Daemon struct {
 	cachedSandboxApps      []string
 	cachedSandboxAppsAt    time.Time
 	cachedSandboxAppsUID   int
+	cachedStatusData       map[string]any
+	cachedStatusAt         time.Time
 
 	reconcileCh    chan reconcileReq
 	timerRefreshCh chan struct{}
@@ -367,6 +369,8 @@ func (d *Daemon) invalidateLaunchCaches() {
 	d.cachedSandboxApps = nil
 	d.cachedSandboxAppsAt = time.Time{}
 	d.cachedSandboxAppsUID = 0
+	d.cachedStatusData = nil
+	d.cachedStatusAt = time.Time{}
 	d.mu.Unlock()
 }
 
@@ -377,6 +381,8 @@ func (d *Daemon) invalidateStatusCaches() {
 	d.cachedSandboxApps = nil
 	d.cachedSandboxAppsAt = time.Time{}
 	d.cachedSandboxAppsUID = 0
+	d.cachedStatusData = nil
+	d.cachedStatusAt = time.Time{}
 	d.mu.Unlock()
 }
 
@@ -389,6 +395,8 @@ func (d *Daemon) recordLaunchTrace(tr LaunchTrace) {
 	} else {
 		d.launchTraces = append(d.launchTraces, tr)
 	}
+	d.cachedStatusData = nil
+	d.cachedStatusAt = time.Time{}
 	d.mu.Unlock()
 }
 
@@ -486,6 +494,7 @@ func (d *Daemon) syncPolicies(ctx context.Context, policy contracts.Policy) (and
 		d.lastPolicySyncHash = res.PackagesHash
 		d.mu.Unlock()
 	}
+	d.invalidateStatusCaches()
 	debug.FreeOSMemory()
 	return res, err
 }
@@ -566,6 +575,8 @@ func (d *Daemon) setDesiredPaused(paused bool, bumpWakeSeq bool, ignoreDiskErr b
 	}
 	d.kickAttempts = 0
 	d.kickNextAt = time.Time{}
+	d.cachedStatusData = nil
+	d.cachedStatusAt = time.Time{}
 	loaded, policy := d.policyLoaded, d.policy
 	d.mu.Unlock()
 	return loaded, policy, nil
@@ -585,6 +596,8 @@ func (d *Daemon) tryAutoPauseDesiredState(startWakeSeq uint64) bool {
 	d.hotEscalating = false
 	d.kickAttempts = 0
 	d.kickNextAt = time.Time{}
+	d.cachedStatusData = nil
+	d.cachedStatusAt = time.Time{}
 	d.mu.Unlock()
 
 	_ = saveDesiredStateTo(d.resolvedDesiredStatePath(), true)
@@ -1439,6 +1452,8 @@ func (d *Daemon) reconcileOnce(ctx context.Context, req reconcileReq) error {
 
 	// Update daemon runtime fields and bounded recovery schedule.
 	d.mu.Lock()
+	d.cachedStatusData = nil
+	d.cachedStatusAt = time.Time{}
 	d.state = dec.NextState
 	d.lastRawArmed = dec.ArmRawDrop
 	d.lastOpen = dec.OpenGate
@@ -2425,6 +2440,7 @@ func (d *Daemon) startTProxySandboxWithPriorityTraced(ctx context.Context, polic
 		return thawUs, restoreUs, reconcileUs, ferr
 	}
 
+	needTrailingTProxyCheck := !alreadyReady
 	stAfterRec, lastErr := waitAck()
 	if stAfterRec != StateOpen {
 		if stAfterRec == StateBlockedLocked {
@@ -2432,6 +2448,7 @@ func (d *Daemon) startTProxySandboxWithPriorityTraced(ctx context.Context, polic
 			needUserRetry := d.cachedID == nil && !d.ackWaitBlocked
 			d.mu.Unlock()
 			if needUserRetry && d.tproxyReady(policy) {
+				needTrailingTProxyCheck = true
 				d.mu.Lock()
 				d.userUnlockedBoot = false
 				d.mu.Unlock()
@@ -2453,7 +2470,7 @@ func (d *Daemon) startTProxySandboxWithPriorityTraced(ctx context.Context, polic
 		}
 	}
 
-	if !d.tproxyReady(policy) {
+	if needTrailingTProxyCheck && !d.tproxyReady(policy) {
 		return failErr(errors.New("sandbox TProxy port not ready"))
 	}
 
@@ -2794,6 +2811,7 @@ func (d *Daemon) HandleRPC(ctx context.Context, req contracts.RPCRequest) contra
 					"-n", policy.EffectiveServiceComponent())
 			}
 		}
+		d.invalidateStatusCaches()
 		return contracts.RPCResponse{ID: req.ID, OK: true, Error: "", Data: map[string]any{
 			"config_path":      cfgPath,
 			"generation":       pending.Generation,
@@ -2911,7 +2929,7 @@ func (d *Daemon) HandleRPC(ctx context.Context, req contracts.RPCRequest) contra
 				_ = android.BoostUIDLaunch(d.cgroupRoot, targetUID, time.Duration(perf.LaunchBoostMs)*time.Millisecond)
 			}
 		}
-		if !fastPath && req.Pkg != "" && d.runner != nil {
+		if req.Pkg != "" && (d.runner != nil || fastPath) {
 			d.mu.Lock()
 			shuttingDown := d.shuttingDown
 			parentCtx := d.superviseCtx
@@ -2920,15 +2938,22 @@ func (d *Daemon) HandleRPC(ctx context.Context, req contracts.RPCRequest) contra
 			}
 			d.mu.Unlock()
 			if !shuttingDown {
-				if parentCtx == nil {
-					parentCtx = context.Background()
+				if fastPath {
+					go func(pkgListPath, targetPkg string) {
+						defer d.maintWg.Done()
+						android.PrewarmSandboxAppFiles(pkgListPath, targetPkg)
+					}(pkgList, req.Pkg)
+				} else {
+					if parentCtx == nil {
+						parentCtx = context.Background()
+					}
+					go func(targetPkg string, userID int) {
+						defer d.maintWg.Done()
+						pctx, pcancel := context.WithTimeout(parentCtx, 8*time.Second)
+						defer pcancel()
+						android.PrewarmSandboxAppCodePath(pctx, d.runner, userID, targetPkg)
+					}(req.Pkg, policy.UserID)
 				}
-				go func(targetPkg string, userID int) {
-					defer d.maintWg.Done()
-					pctx, pcancel := context.WithTimeout(parentCtx, 8*time.Second)
-					defer pcancel()
-					android.PrewarmSandboxAppCodePath(pctx, d.runner, userID, targetPkg)
-				}(req.Pkg, policy.UserID)
 			}
 		}
 
@@ -3012,8 +3037,10 @@ func (d *Daemon) HandleRPC(ctx context.Context, req contracts.RPCRequest) contra
 			return contracts.RPCResponse{ID: req.ID, OK: false, Error: fmt.Sprintf("refusing to force-stop profile owner package %s", req.Pkg), Data: d.buildStatusData(ctx)}
 		}
 		if err := android.StopSandboxApp(ctx, d.runner, policy.UserID, req.Pkg, policy.EffectiveCallerPackage()); err != nil {
+			d.invalidateStatusCaches()
 			return contracts.RPCResponse{ID: req.ID, OK: false, Error: err.Error(), Data: d.buildStatusData(ctx)}
 		}
+		d.invalidateStatusCaches()
 		return contracts.RPCResponse{ID: req.ID, OK: true, Error: "", Data: d.buildStatusData(ctx)}
 
 	case contracts.OpRemoveApp:
@@ -3375,7 +3402,26 @@ func (d *Daemon) buildStatusData(ctx context.Context) map[string]any {
 	return d.buildStatusDataEx(ctx, false)
 }
 
+const statusCacheTTL = 600 * time.Millisecond
+
+func shallowCopyStatusMap(src map[string]any) map[string]any {
+	out := make(map[string]any, len(src))
+	for k, v := range src {
+		out[k] = v
+	}
+	return out
+}
+
 func (d *Daemon) buildStatusDataEx(ctx context.Context, forceFresh bool) map[string]any {
+	if !forceFresh {
+		d.mu.Lock()
+		if d.cachedStatusData != nil && !d.cachedStatusAt.IsZero() && time.Since(d.cachedStatusAt) < statusCacheTTL {
+			cp := shallowCopyStatusMap(d.cachedStatusData)
+			d.mu.Unlock()
+			return cp
+		}
+		d.mu.Unlock()
+	}
 	d.mu.Lock()
 	state := d.state
 	paused := d.paused
@@ -3520,6 +3566,10 @@ func (d *Daemon) buildStatusDataEx(ctx context.Context, forceFresh bool) map[str
 	if traces := d.getLaunchTraces(); len(traces) > 0 {
 		data["last_launch_trace"] = traces[len(traces)-1]
 	}
+	d.mu.Lock()
+	d.cachedStatusData = shallowCopyStatusMap(data)
+	d.cachedStatusAt = time.Now()
+	d.mu.Unlock()
 	return data
 }
 
